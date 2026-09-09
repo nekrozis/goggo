@@ -13,8 +13,10 @@ import (
 // Filepath mirrors the C++ private member with its setFilepath/getFilepath
 // accessors collapsed into one exported field (see setFilepath in
 // src/gamefile.cpp:23-31).
+//
+// Fields are ordered to minimise padding: the string block (16B each) first,
+// then 8B ints, then 4B flags.
 type GameFile struct {
-	Updated               int
 	GameName              string
 	ID                    string
 	Name                  string
@@ -22,17 +24,18 @@ type GameFile struct {
 	Size                  string
 	Version               string
 	Title                 string
-	Platform              uint32
-	Language              uint32
-	Type                  uint32
-	Score                 int
-	Silent                int
+	GameNameBasegame      string
+	TitleBasegame         string
 	GalaxyDownlinkJSONURL string
 	Filepath              string
 
-	// Base-game provenance for DLC items (gamefile.h:30-31).
-	GameNameBasegame string
-	TitleBasegame    string
+	Updated int
+	Score   int
+	Silent  int
+
+	Platform uint32
+	Language uint32
+	Type     uint32
 }
 
 // NewGameFile mirrors the default constructor (src/gamefile.cpp:9-16):

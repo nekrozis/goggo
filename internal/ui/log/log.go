@@ -48,12 +48,16 @@ const (
 // Message is a single reportable event. Getter/setter pairs of the C++ class
 // are omitted in favour of plain exported fields; the value is used
 // read-only once queued.
+//
+// Fields are ordered by allocation size (largest first, smallest last) to
+// minimise struct padding: Time time.Time = 24B, strings = 16B, MsgLevel
+// (int) = 8B, MsgType = 4B.
 type Message struct {
-	Text   string
-	Type   MsgType
 	Time   time.Time
+	Text   string
 	Prefix string
 	Level  MsgLevel
+	Type   MsgType
 }
 
 // NewMessage builds a Message with the Info type and the default level

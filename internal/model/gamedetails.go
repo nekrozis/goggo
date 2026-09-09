@@ -8,6 +8,9 @@ package model
 // filterWithType, makeCustomFilepath; gamedetails.h:40-57) are implemented in
 // src/gamedetails.cpp and are ported with their consumers during the core
 // work (list assembly and path/filter features), see package doc.go.
+//
+// Fields are ordered to minimise padding: the slice block (24B each) first,
+// then the string block (16B each).
 type GameDetails struct {
 	Extras        []GameFile
 	Installers    []GameFile

@@ -31,11 +31,14 @@ type ProgressInfo struct {
 // pointer returned by NewDownloadInfo; the C++ lock-protected value
 // copy/assignment is replaced by explicit sharing, which is the idiomatic Go
 // approach for a lock-protected state holder.
+//
+// Fields are ordered to minimise padding: progress (32B) first, then filename
+// (16B), the mutex (8B) and finally the 4B status.
 type DownloadInfo struct {
-	mu       sync.Mutex
-	filename string
-	status   DLStatus
 	progress ProgressInfo
+	filename string
+	mu       sync.Mutex
+	status   DLStatus
 }
 
 // NewDownloadInfo returns a DownloadInfo in the NotStarted state.

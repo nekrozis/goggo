@@ -1,10 +1,14 @@
 package config
 
 // Configuration structs ported from include/config.h.
+//
+// Field order follows the memory-minimisation rule (largest allocations
+// first, smallest last, applied inside each logical group and between
+// groups; no anonymous structs used for grouping). Reference sizes on
+// amd64: slice = 24B, string = 16B, int/uint64 = 8B, uint32 = 4B, bool = 1B.
 
 // DirectoryConfig mirrors struct DirectoryConfig (config.h:18-30).
 type DirectoryConfig struct {
-	SubDirectories      bool
 	Directory           string
 	WinePrefix          string
 	GameSubdir          string
@@ -14,19 +18,21 @@ type DirectoryConfig struct {
 	LanguagePackSubdir  string
 	DLCSubdir           string
 	GalaxyInstallSubdir string
+	SubDirectories      bool
 }
 
 // DownloadConfig mirrors struct DownloadConfig (config.h:32-61). Installer
 // platform/language fields and the priority lists use the bit flags and
 // Option tables from options.go.
 type DownloadConfig struct {
-	InstallerPlatform uint32
-	InstallerLanguage uint32
-	GalaxyCDN         uint32
 	PlatformPriority  []uint32
 	LanguagePriority  []uint32
 	GalaxyCDNPriority []string
 	Tags              []string
+
+	InstallerPlatform uint32
+	InstallerLanguage uint32
+	GalaxyCDN         uint32
 	Include           uint32
 	GalaxyPlatform    uint32
 	GalaxyLanguage    uint32
@@ -41,33 +47,34 @@ type DownloadConfig struct {
 	SaveIcon             bool
 	AutomaticXMLCreation bool
 	FreeSpaceCheck       bool
-
-	IgnoreDLCCount      bool
-	DuplicateHandler    bool
-	GalaxyDependencies  bool
-	DeleteOrphans       bool
-	GalaxyLowercasePath bool
+	IgnoreDLCCount       bool
+	DuplicateHandler     bool
+	GalaxyDependencies   bool
+	DeleteOrphans        bool
+	GalaxyLowercasePath  bool
 }
 
 // GameSpecificConfig mirrors struct gameSpecificConfig (config.h:63-67).
+// The larger embedded group (DirectoryConfig) precedes the smaller one
+// (DownloadConfig) to minimise padding.
 type GameSpecificConfig struct {
-	Download  DownloadConfig
 	Directory DirectoryConfig
+	Download  DownloadConfig
 }
 
 // CurlConfig mirrors struct CurlConfig (config.h:215-227). Timeouts are in
 // seconds; DownloadRate is in bytes per second.
 type CurlConfig struct {
-	VerifyPeer          bool
-	Verbose             bool
 	CACertPath          string
 	CookiePath          string
 	UserAgent           string
+	Interface           string
 	Timeout             int64
 	DownloadRate        int64
 	LowSpeedTimeout     int64
 	LowSpeedTimeoutRate int64
-	Interface           string
+	VerifyPeer          bool
+	Verbose             bool
 }
 
 // Config mirrors struct Config (config.h:229-328).
@@ -78,6 +85,49 @@ type CurlConfig struct {
 //   - transformationsJSON (config.h:327): parsing lands with the
 //     transformations feature.
 type Config struct {
+	Directories    DirectoryConfig
+	DownloadConfig DownloadConfig
+	Curl           CurlConfig
+
+	CloudWhiteList []string
+	CloudBlackList []string
+
+	FileID                  string
+	OutputFilename          string
+	CacheDirectory          string
+	XMLDirectory            string
+	ConfigDirectory         string
+	ConfigFilePath          string
+	BlacklistFilePath       string
+	IgnorelistFilePath      string
+	GameHasDLCListFilePath  string
+	ReportFilePath          string
+	TransformConfigFilePath string
+	GameListFilePath        string
+	XMLFile                 string
+	GameRegex               string
+	OrphanRegex             string
+	IgnoreDLCCountRegex     string
+	PlatformPriority        string
+	LanguagePriority        string
+	VersionString           string
+	VersionNumber           string
+	Email                   string
+	Password                string
+	GalaxyBuildSortingOrder string
+
+	ChunkSize        uint64
+	Retries          int
+	CacheValid       int
+	Wait             int
+	ProgressInterval int
+	MsgLevel         int
+
+	Threads     uint32
+	InfoThreads uint32
+	ListFormat  uint32
+	UnitFormat  uint32
+
 	Login                 bool
 	ForceBrowserLogin     bool
 	SaveConfig            bool
@@ -98,58 +148,7 @@ type Config struct {
 	UseFastCheck          bool
 	TrustAPIForExtras     bool
 	GalaxyListCDNs        bool
-
-	UseCache    bool
-	UpdateCache bool
-	CacheValid  int
-
-	FileID         string
-	OutputFilename string
-
-	Curl CurlConfig
-
-	DownloadConfig DownloadConfig
-
-	Directories DirectoryConfig
-
-	CacheDirectory  string
-	XMLDirectory    string
-	ConfigDirectory string
-
-	ConfigFilePath          string
-	BlacklistFilePath       string
-	IgnorelistFilePath      string
-	GameHasDLCListFilePath  string
-	ReportFilePath          string
-	TransformConfigFilePath string
-	GameListFilePath        string
-
-	XMLFile string
-
-	GameRegex           string
-	OrphanRegex         string
-	IgnoreDLCCountRegex string
-
-	PlatformPriority string
-	LanguagePriority string
-
-	VersionString           string
-	VersionNumber           string
-	Email                   string
-	Password                string
-	GalaxyBuildSortingOrder string
-
-	CloudWhiteList []string
-	CloudBlackList []string
-	CloudForce     bool
-
-	Retries          int
-	Threads          uint32
-	InfoThreads      uint32
-	Wait             int
-	ChunkSize        uint64
-	ProgressInterval int
-	MsgLevel         int
-	ListFormat       uint32
-	UnitFormat       uint32
+	UseCache              bool
+	UpdateCache           bool
+	CloudForce            bool
 }

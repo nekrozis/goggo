@@ -27,11 +27,14 @@ const defaultExpiresIn int64 = 3600
 // pointer and created with NewGalaxyConfig; the C++ value-copy/assignment
 // semantics are replaced by explicit sharing, which is the idiomatic Go
 // approach for a lock-protected credential store.
+//
+// Fields are ordered to minimise padding: the string block (16B each) first,
+// then the map and mutex (8B each).
 type GalaxyConfig struct {
-	mu          sync.Mutex
-	token       map[string]any
 	filepath    string
 	redirectURI string
+	token       map[string]any
+	mu          sync.Mutex
 }
 
 // NewGalaxyConfig returns a GalaxyConfig with the default redirect URI and an

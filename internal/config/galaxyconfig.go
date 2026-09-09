@@ -28,6 +28,13 @@ const defaultExpiresIn int64 = 3600
 // semantics are replaced by explicit sharing, which is the idiomatic Go
 // approach for a lock-protected credential store.
 //
+// Copy-safety guard (review note): never copy a GalaxyConfig by value and
+// never write a function that accepts it as a value. In C++ a copy produced
+// an independent configuration; here sharing the pointer IS the design, and a
+// silent value copy would duplicate the lock and state. The API surface is
+// *GalaxyConfig everywhere. Additionally, do not add a String()/formatting
+// method that can dump the raw token: the struct holds sensitive credentials.
+//
 // Fields are ordered to minimise padding: the string block (16B each) first,
 // then the map and mutex (8B each).
 type GalaxyConfig struct {

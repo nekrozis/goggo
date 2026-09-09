@@ -1,0 +1,28 @@
+# Read-only upstream reference (fixed commit), never committed
+/reference/
+
+# Development-only documents (audit docs, porting log; Chinese allowed), never committed
+/dev/
+
+# Build artifacts
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Coverage output
+coverage.out
+cover.html
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Secrets and raw credentials — never commit
+*.secret
+.env

@@ -64,9 +64,9 @@ func TestOptionValueIntegerConversion(t *testing.T) {
 	// int32 boundary extremes (std::stoi range semantics).
 	wrap := func(w int64) uint32 { return uint32(int32(w)) }
 	extremes := []struct {
-		in     string
+		in      string
 		inRange bool
-		want   uint32
+		want    uint32
 	}{
 		{"-1", true, wrap(-1)},
 		{"-2147483648", true, wrap(-2147483648)},

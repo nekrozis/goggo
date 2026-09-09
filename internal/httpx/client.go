@@ -121,6 +121,25 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 	return c.hc.Do(req)
 }
 
+// DoNoRedirect performs a single request (no retry) and returns the response
+// WITHOUT following redirects: a 3xx response is returned as-is so the caller
+// can inspect the Location header and drive the redirect chain itself (the
+// C++ source sets CURLOPT_FOLLOWLOCATION=0 for exactly this reason during
+// login).
+//
+// This is a per-call behaviour, not a client-wide mode switch: other requests
+// through the same Client keep the default redirect-following behaviour. The
+// underlying transport and cookie jar are shared with the Client.
+func (c *Client) DoNoRedirect(ctx context.Context, req *http.Request) (*http.Response, error) {
+	req = req.WithContext(ctx)
+	if c.ua != "" && req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", c.ua)
+	}
+	oneShot := *c.hc
+	oneShot.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return oneShot.Do(req)
+}
+
 // Get performs a single GET request (no retry) and returns the raw response.
 func (c *Client) Get(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

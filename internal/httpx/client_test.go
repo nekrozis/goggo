@@ -89,6 +89,52 @@ func TestGetBytesFollowsRedirect(t *testing.T) {
 	}
 }
 
+// TestDoNoRedirectReturns3xx locks the per-call no-follow behaviour: a 302 is
+// returned as-is with its Location header, while a follow-up Do on the same
+// Client still follows redirects (no client-wide mode switch).
+func TestDoNoRedirectReturns3xx(t *testing.T) {
+	var redirects int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			redirects++
+			http.Redirect(w, r, "/final", http.StatusFound)
+			return
+		}
+		fmt.Fprint(w, "final-body")
+	}))
+	defer srv.Close()
+
+	c, _ := New(testConfig())
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/start", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := c.DoNoRedirect(context.Background(), req)
+	if err != nil {
+		t.Fatalf("DoNoRedirect: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d, want 302 (redirect must not be followed)", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("Location"); loc != "/final" {
+		t.Errorf("Location = %q, want /final", loc)
+	}
+
+	// Same client, normal path: default redirect following is untouched.
+	body, err := c.GetBytes(context.Background(), srv.URL+"/start")
+	if err != nil {
+		t.Fatalf("GetBytes after DoNoRedirect: %v", err)
+	}
+	if string(body) != "final-body" {
+		t.Errorf("body = %q", body)
+	}
+	if redirects != 2 {
+		t.Errorf("redirect hits = %d, want 2 (one per request)", redirects)
+	}
+}
+
 func TestGetBytesStatusError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

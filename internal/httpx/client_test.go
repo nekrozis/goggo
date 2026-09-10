@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -348,5 +349,72 @@ func TestNewCookieFileWiring(t *testing.T) {
 				t.Error("store is not installed as the transport jar")
 			}
 		})
+	}
+}
+
+// rewriteTransport is the shape a caller uses to point the production hosts at a
+// local server, and it records the hosts it saw.
+type rewriteTransport struct {
+	target *url.URL
+	hosts  []string
+}
+
+func (t *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.hosts = append(t.hosts, req.URL.Host)
+	clone := req.Clone(req.Context())
+	u := *req.URL
+	u.Scheme, u.Host = t.target.Scheme, t.target.Host
+	clone.URL = &u
+	return http.DefaultTransport.RoundTrip(clone)
+}
+
+// TestTransportOverrideKeepsTheCookieJar locks review ruling D28-3: replacing
+// the network exit must leave the client, its jar and the cookie file exactly
+// what this package builds. A caller-provided HTTPClient cannot do that — it
+// decides the jar, which is why it is refused together with a CookieFile.
+func TestTransportOverrideKeepsTheCookieJar(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/set":
+			http.SetCookie(w, &http.Cookie{Name: "SID", Value: "abc", Path: "/"})
+		default:
+			fmt.Fprint(w, "ok")
+		}
+	}))
+	defer srv.Close()
+
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+	exit := &rewriteTransport{target: target}
+	cookieFile := filepath.Join(t.TempDir(), "cookies.txt")
+
+	c, err := New(Config{CookieFile: cookieFile, UserAgent: "goggo-test/1.0", Transport: exit})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := c.Get(context.Background(), "https://www.gog.com/set"); err != nil {
+		t.Fatalf("Get through the replacement: %v", err)
+	}
+	if len(exit.hosts) != 1 || exit.hosts[0] != "www.gog.com" {
+		t.Errorf("the replacement saw hosts %v, want the production host", exit.hosts)
+	}
+
+	// The jar is still this package's, so persistence is untouched: the same
+	// client saves, and a fresh one loads.
+	saved, err := c.SaveCookies()
+	if err != nil {
+		t.Fatalf("SaveCookies with a replaced transport: %v", err)
+	}
+	if saved.Written == 0 {
+		t.Error("SaveCookies wrote no rows, want the cookie the jar received")
+	}
+	fresh, err := New(Config{CookieFile: cookieFile, Transport: exit})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := fresh.LoadCookies(); err != nil {
+		t.Fatalf("LoadCookies with a replaced transport: %v", err)
 	}
 }

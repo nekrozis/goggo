@@ -19,8 +19,9 @@ import (
 // (and available generically through DoWithRetry); policies are not baked
 // into Do/Get.
 //
-// Fields are ordered to minimise padding: RetryPolicy (24B), strings (16B
-// each), pointers and time.Duration (8B each), then the trailing bool (1B).
+// Fields are ordered to minimise padding: RetryPolicy (24B), strings and
+// interfaces (16B each), the pointer, time.Duration and int64 (8B each), then
+// the trailing bools (1B).
 type Config struct {
 	// RetryPolicy is the default retry behaviour for GetBytesWithRetry.
 	// A zero MaxAttempts yields a single attempt (no retry). Business layers
@@ -47,9 +48,25 @@ type Config struct {
 	// (ErrCookieFileUnsupported): the caller's jar cannot be replaced.
 	CookieFile string
 
+	// Transport optionally replaces the network exit of the client this
+	// package builds. Everything else about that client stays what this
+	// package decides — the cookie jar and CookieFile persistence, the retry
+	// policy and the low-speed guard — so a caller that swaps it (a test
+	// pointing the production hosts at a local server) exercises the same
+	// configuration production runs.
+	//
+	// It is ignored when HTTPClient is set: that client already carries its
+	// own transport. TLS settings and the connect timeout describe the
+	// default transport and are therefore not applied to a replacement.
+	Transport http.RoundTripper
+
 	// HTTPClient optionally overrides the underlying client (useful for
 	// tests and callers that bring their own transport). When nil a client
 	// is built from the other settings.
+	//
+	// Prefer Transport when only the network exit has to change: a
+	// caller-provided client also decides the jar, so it cannot be combined
+	// with CookieFile (see above).
 	HTTPClient *http.Client
 
 	// Timeout bounds the TCP connect (mirrors CURLOPT_CONNECTTIMEOUT); the
@@ -150,8 +167,16 @@ func New(cfg Config) (*Client, error) {
 			transport.DialContext = (&net.Dialer{Timeout: cfg.Timeout}).DialContext
 		}
 
+		// The replacement only takes the network exit: the client, its jar and
+		// the redirect policy stay this package's, which is what lets a caller
+		// keep cookie persistence while pointing the production hosts elsewhere.
+		var exit http.RoundTripper = transport
+		if cfg.Transport != nil {
+			exit = cfg.Transport
+		}
+
 		// http.Client follows redirects by default (CURLOPT_FOLLOWLOCATION).
-		hc = &http.Client{Transport: transport}
+		hc = &http.Client{Transport: exit}
 		if cfg.CookieFile != "" {
 			store = newCookieStore()
 			hc.Jar = store

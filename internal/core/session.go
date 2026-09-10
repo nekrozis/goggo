@@ -15,15 +15,24 @@ import (
 	"github.com/nekrozis/goggo/internal/webapi"
 )
 
-// Open prepares the run: it creates the directories, the transport, the cookie
-// jar, the two protocol clients and the Galaxy credential store, loads the
-// persisted cookies and token, refreshes the token when it has expired and,
-// unless allowLogin is false, runs the login flow when the account is not
-// usable.
+// Open prepares the run with production dependencies: it creates the
+// directories, the transport, the cookie jar, the two protocol clients and the
+// Galaxy credential store, loads the persisted cookies and token, refreshes the
+// token when it has expired and, unless allowLogin is false, runs the login flow
+// when the account is not usable.
 //
 // allowLogin exists because the C++ front end answers --check-login-status
 // before it ever considers logging in (main.cpp:685-698).
 func Open(ctx context.Context, cfg config.Config, ui Console, allowLogin bool) (*Downloader, error) {
+	return OpenWith(ctx, cfg, ui, allowLogin, Dependencies{})
+}
+
+// OpenWith is Open with the outside pieces supplied (see Dependencies). The
+// sequence and every decision below are the ones the C++ front end makes; only
+// the network exit of the transport can differ, which is what makes this seam
+// worth having.
+func OpenWith(ctx context.Context, cfg config.Config, ui Console, allowLogin bool,
+	deps Dependencies) (*Downloader, error) {
 	// Directories first: every persistence path below writes into them.
 	if err := ensureDirectories(cfg); err != nil {
 		return nil, err
@@ -31,7 +40,7 @@ func Open(ctx context.Context, cfg config.Config, ui Console, allowLogin bool) (
 	galaxyStore := config.NewGalaxyConfig()
 	// The session owns the transport: the login flow's cookies live in this
 	// client's jar, and the same handle persists them.
-	hx, err := httpx.New(httpxCfg(cfg))
+	hx, err := httpx.New(httpxCfg(cfg, deps))
 	if err != nil {
 		return nil, err
 	}
@@ -75,11 +84,17 @@ func Open(ctx context.Context, cfg config.Config, ui Console, allowLogin bool) (
 }
 
 // httpxCfg maps the CLI configuration onto the transport configuration.
-func httpxCfg(cfg config.Config) httpx.Config {
+//
+// Only the network exit can be replaced (deps.HTTPTransport): everything else —
+// the cookie file, the retry policy, the low-speed guard — is the production
+// configuration, so a run driven through the seam persists its session exactly
+// like a normal one.
+func httpxCfg(cfg config.Config, deps Dependencies) httpx.Config {
 	return httpx.Config{
 		UserAgent:          cfg.Curl.UserAgent,
 		CACertPath:         cfg.Curl.CACertPath,
 		CookieFile:         cfg.Curl.CookiePath,
+		Transport:          deps.HTTPTransport,
 		InsecureSkipVerify: !cfg.Curl.VerifyPeer,
 		Timeout:            time.Duration(cfg.Curl.Timeout) * time.Second,
 		// The website retry rule (min(3, retries) additional attempts) stays a

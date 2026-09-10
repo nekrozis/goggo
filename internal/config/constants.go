@@ -37,9 +37,22 @@ const (
 	UnitStringMSI  = "MB"
 )
 
-// Version identifiers. The C++ build derives them from CMake's
-// PROJECT_VERSION (CMakeLists.txt:74-76); they are kept in sync by hand.
+// Identity and version. This port keeps three concepts apart:
+//
+//   - ProgramName is the identity of this implementation (binary, CLI name and
+//     the product token of the User-Agent).
+//   - Version is this implementation's own version; it advances independently
+//     of the upstream release the port follows.
+//   - UpstreamCompatibilityVersion is the LGOGDownloader release whose
+//     behaviour is being ported (CMakeLists.txt:74 PROJECT_VERSION). It is a
+//     compatibility baseline, not this program's identity, so the CLI never
+//     presents it as our version.
 const (
-	VersionNumber = "3.18"
-	VersionString = "LGOGDownloader " + VersionNumber
+	ProgramName                  = "goggo"
+	Version                      = "0.1.0"
+	UpstreamName                 = "LGOGDownloader"
+	UpstreamCompatibilityVersion = "3.18"
+
+	// VersionString is what the CLI prints as this program's own version.
+	VersionString = ProgramName + " " + Version
 )

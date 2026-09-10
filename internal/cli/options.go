@@ -275,8 +275,8 @@ func optionMask(list string, options []config.Option) uint32 {
 
 // usage writes the option help for the implemented subset.
 func usage(w io.Writer) {
-	fmt.Fprint(w, `Usage: goggo [options]
-
+	fmt.Fprintf(w, "Usage: %s [options]\n", config.ProgramName)
+	fmt.Fprint(w, `
 Options:
   --login                     Login
   --browser-login             Login (force browser login)

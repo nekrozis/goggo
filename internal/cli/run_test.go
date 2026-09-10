@@ -32,9 +32,17 @@ func TestRunHelpAndVersion(t *testing.T) {
 		t.Errorf("stderr = %q", errOut)
 	}
 
+	// --version carries the full identity: our version plus the upstream
+	// release this port tracks.
 	code, out, _ = run(t, "", "--version")
-	if code != 0 || strings.TrimSpace(out) != config.VersionString {
-		t.Errorf("--version = %d %q", code, out)
+	if code != 0 {
+		t.Errorf("--version exit = %d, want 0", code)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	wantVersion := config.VersionString
+	wantCompat := config.UpstreamName + " compatibility: " + config.UpstreamCompatibilityVersion
+	if len(lines) != 2 || lines[0] != wantVersion || lines[1] != wantCompat {
+		t.Errorf("--version output = %q, want %q + %q", out, wantVersion, wantCompat)
 	}
 }
 

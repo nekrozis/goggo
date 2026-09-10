@@ -47,7 +47,10 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		usage(stdout)
 		return 0
 	case inv.Version:
+		// Identity first, then the upstream release this port tracks: the
+		// compatibility baseline is metadata, never presented as our version.
 		fmt.Fprintln(stdout, config.VersionString)
+		fmt.Fprintf(stdout, "%s compatibility: %s\n", config.UpstreamName, config.UpstreamCompatibilityVersion)
 		return 0
 	case inv.Unsupported != "":
 		// Recognised option, but this build does not implement it: fail loudly

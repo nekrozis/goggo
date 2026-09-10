@@ -17,15 +17,15 @@ func NewConfig(configHome, cacheHome string) Config {
 	var cfg Config
 
 	cfg.VersionString = VersionString
-	cfg.VersionNumber = VersionNumber
+	cfg.VersionNumber = Version
 	cfg.Curl.UserAgent = DefaultUserAgent()
 
 	// Directories (main.cpp:71-84). The paths follow the C++ concatenation
 	// exactly, so an XDG variable that is set but empty yields the same
 	// root-relative path as the original.
-	cfg.CacheDirectory = cacheHome + "/lgogdownloader"
+	cfg.CacheDirectory = cacheHome + "/" + ProgramName
 	cfg.XMLDirectory = cfg.CacheDirectory + "/xml"
-	cfg.ConfigDirectory = configHome + "/lgogdownloader"
+	cfg.ConfigDirectory = configHome + "/" + ProgramName
 	cfg.Curl.CookiePath = cfg.ConfigDirectory + "/cookies.txt"
 	cfg.ConfigFilePath = cfg.ConfigDirectory + "/config.cfg"
 	cfg.BlacklistFilePath = cfg.ConfigDirectory + "/blacklist.txt"
@@ -67,10 +67,14 @@ func IncludeAllMask() uint32 {
 	return mask
 }
 
-// DefaultUserAgent builds the User-Agent string. The C++ value is composed at
-// build time from CMAKE_SYSTEM_NAME/CMAKE_SYSTEM_PROCESSOR (CMakeLists.txt:76);
-// the Go port uses the runtime equivalents, which is an intentional
-// difference recorded in the audit.
+// DefaultUserAgent builds the User-Agent string from this program's own
+// identity and version.
+//
+// Intentional difference (recorded in the audit): the upstream value is
+// composed at build time as "LGOGDownloader/<ver> (<CMAKE_SYSTEM_NAME>
+// <CMAKE_SYSTEM_PROCESSOR>)" (CMakeLists.txt:76). This port identifies itself
+// as goggo and uses Go's own GOOS/GOARCH spellings rather than mapping them to
+// the upstream wording. The User-Agent plays no part in authentication.
 func DefaultUserAgent() string {
-	return "LGOGDownloader/" + VersionNumber + " (" + runtime.GOOS + " " + runtime.GOARCH + ")"
+	return ProgramName + "/" + Version + " (" + runtime.GOOS + " " + runtime.GOARCH + ")"
 }

@@ -37,10 +37,10 @@ func TestParseDefaultsComeFromConfig(t *testing.T) {
 	if inv.Config.DownloadConfig.Include != config.IncludeAllMask() {
 		t.Errorf("include default = %d, want the all mask", inv.Config.DownloadConfig.Include)
 	}
-	if inv.Config.Curl.CookiePath != "/cfg/lgogdownloader/cookies.txt" {
+	if inv.Config.Curl.CookiePath != "/cfg/goggo/cookies.txt" {
 		t.Errorf("cookie path = %q", inv.Config.Curl.CookiePath)
 	}
-	if !strings.HasPrefix(inv.Config.Curl.UserAgent, "LGOGDownloader/") {
+	if !strings.HasPrefix(inv.Config.Curl.UserAgent, config.ProgramName+"/"+config.Version) {
 		t.Errorf("user agent = %q", inv.Config.Curl.UserAgent)
 	}
 }
@@ -218,13 +218,36 @@ func TestParseHelpVersionCheck(t *testing.T) {
 
 func TestNewConfigPaths(t *testing.T) {
 	cfg := config.NewConfig("/cfg", "/cache")
-	if cfg.CacheDirectory != "/cache/lgogdownloader" || cfg.XMLDirectory != "/cache/lgogdownloader/xml" {
+	if cfg.CacheDirectory != "/cache/goggo" || cfg.XMLDirectory != "/cache/goggo/xml" {
 		t.Errorf("cache paths = %q / %q", cfg.CacheDirectory, cfg.XMLDirectory)
 	}
-	if cfg.ConfigFilePath != "/cfg/lgogdownloader/config.cfg" {
+	if cfg.ConfigFilePath != "/cfg/goggo/config.cfg" {
 		t.Errorf("config path = %q", cfg.ConfigFilePath)
 	}
-	if cfg.VersionString != config.VersionString || cfg.VersionNumber != config.VersionNumber {
+	if cfg.VersionString != config.VersionString || cfg.VersionNumber != config.Version {
 		t.Errorf("version = %q / %q", cfg.VersionString, cfg.VersionNumber)
+	}
+}
+
+// TestIdentityIsSeparateFromCompatibility locks the three-layer identity: the
+// program presents itself, and names the upstream release it tracks only as a
+// compatibility baseline.
+func TestIdentityIsSeparateFromCompatibility(t *testing.T) {
+	if config.Version == config.UpstreamCompatibilityVersion {
+		t.Fatalf("own version %q must not equal the compatibility baseline", config.Version)
+	}
+	if !strings.HasPrefix(config.VersionString, config.ProgramName+" ") {
+		t.Errorf("VersionString = %q, want it to start with the program name", config.VersionString)
+	}
+	if strings.Contains(config.VersionString, config.UpstreamName) {
+		t.Errorf("VersionString = %q must not present the upstream project as our identity", config.VersionString)
+	}
+
+	ua := config.DefaultUserAgent()
+	if !strings.HasPrefix(ua, config.ProgramName+"/"+config.Version) {
+		t.Errorf("UserAgent = %q, want it to start with %q", ua, config.ProgramName+"/"+config.Version)
+	}
+	if strings.Contains(ua, config.UpstreamName) {
+		t.Errorf("UserAgent = %q must not carry the upstream product name", ua)
 	}
 }

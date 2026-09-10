@@ -69,7 +69,9 @@ func (c *Client) refreshSession(ctx context.Context, g *config.GalaxyConfig, new
 	}
 	body, err := c.hx.GetBytesWithRetry(ctx, c.tokenURL+"?"+q.Encode())
 	if err != nil {
-		return fmt.Errorf("auth: refresh token: %w", err)
+		// This URL carries client_secret and refresh_token, so it is rendered
+		// without it (see httpx.SafeError).
+		return fmt.Errorf("auth: refresh token: %s", httpx.SafeError(err))
 	}
 	obj, err := decodeObject(string(body))
 	if err != nil {

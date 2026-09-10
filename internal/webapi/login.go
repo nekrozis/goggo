@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+
+	"github.com/nekrozis/goggo/internal/httpx"
 )
 
 // codeKind distinguishes the two one-time-code flavours. It is an internal
@@ -410,7 +412,9 @@ func (c *Client) exchangeCode(ctx context.Context, code string) error {
 	q.Set("redirect_uri", c.galaxy.GetRedirectURI())
 	tokenBody, err := c.getResponse(ctx, c.ep.auth+"/token?"+q.Encode())
 	if err != nil {
-		return fmt.Errorf("webapi: token exchange: %w", err)
+		// This URL carries client_secret and the one-time code, so it is
+		// rendered without it (see httpx.SafeError).
+		return fmt.Errorf("webapi: token exchange: %s", httpx.SafeError(err))
 	}
 	token, err := decodeJSONObject(tokenBody)
 	if err != nil {

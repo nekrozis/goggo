@@ -3,12 +3,10 @@ package webapi
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"regexp"
-	"time"
 
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/httpx"
@@ -35,26 +33,6 @@ func defaultEndpoints() endpoints {
 	return endpoints{auth: DefaultAuthHost, login: DefaultLoginHost, www: DefaultWWWHost, embed: DefaultEmbedHost}
 }
 
-// Options carries the login behaviour knobs that came from the C++ global
-// config. Force-browser choice is deliberately NOT here: it is a per-login
-// policy passed through LoginOptions by the CLI layer.
-//
-// Retries and Wait are both word-sized; their order does not change the
-// struct size.
-type Options struct {
-	// Retries is the C++ iRetries value. A per-response retry policy of
-	// min(3, Retries) additional attempts is derived from it, matching
-	// getResponse (website.cpp:33).
-	Retries int
-
-	// Wait is inserted before every retry, mirroring the C++ global iWait
-	// (util.cpp runs "if (iWait > 0) usleep(iWait)" before each retry, and
-	// the login path does not bypass it). The C++ value is microseconds;
-	// callers convert it to a Duration so the unit never enters this
-	// package (S05 convention).
-	Wait time.Duration
-}
-
 // Client drives the GOG website login flow over an httpx transport.
 //
 // Fields are ordered to minimise padding: the endpoint block (4 strings,
@@ -65,30 +43,21 @@ type Client struct {
 	hx     *httpx.Client
 }
 
-// New builds a Client. galaxy is required (nil panics). The httpx config is
-// used to construct the transport; only MaxAttempts and Wait of its
-// RetryPolicy are overridden with the derived login policy (min(3, Retries)
-// additional attempts plus the configured wait). A caller-supplied
-// ShouldRetry predicate is preserved; when it is nil, httpx.New applies
-// DefaultShouldRetry.
-func New(hxCfg httpx.Config, galaxy *config.GalaxyConfig, opts Options) (*Client, error) {
+// New builds a Client on a caller-provided transport.
+//
+// The transport is owned by the caller: webapi never creates one, so the same
+// *httpx.Client (and therefore the same cookie jar) is used for the login flow
+// and for persisting that session through LoadCookies/SaveCookies. Retry
+// behaviour is configured by the caller too — see RetryPolicyFor for the policy
+// the website endpoints need.
+//
+// galaxy is required; a nil galaxy or a nil client is an error.
+func New(hx *httpx.Client, galaxy *config.GalaxyConfig) (*Client, error) {
 	if galaxy == nil {
 		return nil, errors.New("webapi: nil galaxy config")
 	}
-	extra := opts.Retries
-	if extra < 0 {
-		extra = 0
-	}
-	if extra > 3 {
-		extra = 3
-	}
-	policy := hxCfg.RetryPolicy
-	policy.MaxAttempts = extra + 1
-	policy.Wait = opts.Wait
-	hxCfg.RetryPolicy = policy
-	hx, err := httpx.New(hxCfg)
-	if err != nil {
-		return nil, fmt.Errorf("webapi: %w", err)
+	if hx == nil {
+		return nil, errors.New("webapi: nil http client")
 	}
 	return &Client{
 		ep:     defaultEndpoints(),

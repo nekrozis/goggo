@@ -3,6 +3,7 @@ package webapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -95,12 +96,9 @@ func TestLoginSuccess(t *testing.T) {
 	defer srv.Close()
 	cl, galaxy := newTestClient(t, srv, 2)
 
-	result, challenge, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
+	challenge, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
 	if err != nil {
 		t.Fatalf("Login: %v", err)
-	}
-	if result == nil {
-		t.Fatal("Login: nil result on success")
 	}
 	if challenge != nil {
 		t.Fatalf("Login: unexpected challenge %+v", challenge)
@@ -142,7 +140,7 @@ func TestLoginRedirectHop(t *testing.T) {
 	defer srv.Close()
 	cl, _ := newTestClient(t, srv, 2)
 
-	if _, _, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{}); err != nil {
+	if _, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{}); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 	if gotCode != "HOP" {
@@ -210,12 +208,9 @@ func TestLoginTwoStepChallengeAndContinue(t *testing.T) {
 	defer srv.Close()
 	cl, _ := newTestClient(t, srv, 2)
 
-	result, challenge, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
+	challenge, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
 	if err != nil {
 		t.Fatalf("Login: %v", err)
-	}
-	if result != nil {
-		t.Fatal("Login: expected a challenge, got success")
 	}
 	if challenge == nil {
 		t.Fatal("Login: expected two-factor challenge")
@@ -231,7 +226,7 @@ func TestLoginTwoStepChallengeAndContinue(t *testing.T) {
 	}
 
 	// Wrong length: reported as an error, not os.Exit, and nothing is POSTed.
-	if _, err := cl.ContinueLogin(context.Background(), challenge, "12"); err == nil {
+	if err := cl.ContinueLogin(context.Background(), challenge, "12"); err == nil {
 		t.Fatal("ContinueLogin: want error for short code")
 	} else if !strings.Contains(err.Error(), "must be 4 characters") {
 		t.Errorf("error = %v", err)
@@ -240,7 +235,7 @@ func TestLoginTwoStepChallengeAndContinue(t *testing.T) {
 		t.Fatalf("two-step submitted on invalid length: %q", *submitted)
 	}
 
-	if _, err := cl.ContinueLogin(context.Background(), challenge, "1234"); err != nil {
+	if err := cl.ContinueLogin(context.Background(), challenge, "1234"); err != nil {
 		t.Fatalf("ContinueLogin: %v", err)
 	}
 	if *submitted != "letter_1,letter_2,letter_3,letter_4" {
@@ -256,14 +251,14 @@ func TestLoginTOTPChallengeAndContinue(t *testing.T) {
 	defer srv.Close()
 	cl, _ := newTestClient(t, srv, 2)
 
-	_, challenge, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
+	challenge, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 	if challenge == nil || challenge.Kind != ChallengeTwoFactor || challenge.CodeLength != 6 {
 		t.Fatalf("unexpected challenge: %+v", challenge)
 	}
-	if _, err := cl.ContinueLogin(context.Background(), challenge, "123456"); err != nil {
+	if err := cl.ContinueLogin(context.Background(), challenge, "123456"); err != nil {
 		t.Fatalf("ContinueLogin: %v", err)
 	}
 	if *submitted != "letter_1,letter_2,letter_3,letter_4,letter_5,letter_6" {
@@ -304,7 +299,7 @@ func TestLoginRecaptchaFallsBackToBrowser(t *testing.T) {
 	defer srv.Close()
 	cl, _ := newTestClient(t, srv, 2)
 
-	_, challenge, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
+	challenge, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
@@ -316,7 +311,7 @@ func TestLoginRecaptchaFallsBackToBrowser(t *testing.T) {
 	}
 
 	callback := srv.URL + "/paste?code=BR1"
-	if _, err := cl.ContinueLogin(context.Background(), challenge, callback); err != nil {
+	if err := cl.ContinueLogin(context.Background(), challenge, callback); err != nil {
 		t.Fatalf("ContinueLogin: %v", err)
 	}
 	if *gotCode != "BR1" {
@@ -329,7 +324,7 @@ func TestLoginForceBrowser(t *testing.T) {
 	defer srv.Close()
 	cl, _ := newTestClient(t, srv, 2)
 
-	_, challenge, err := cl.Login(context.Background(), "user@example.com", "secret",
+	challenge, err := cl.Login(context.Background(), "user@example.com", "secret",
 		LoginOptions{ForceBrowser: true})
 	if err != nil {
 		t.Fatalf("Login: %v", err)
@@ -350,15 +345,15 @@ func TestLoginMissingToken(t *testing.T) {
 	defer srv.Close()
 	cl, _ := newTestClient(t, srv, 2)
 
-	result, challenge, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
+	challenge, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
 	if err == nil {
 		t.Fatal("Login: want error for missing login token")
 	}
 	if !strings.Contains(err.Error(), "login token") {
 		t.Errorf("error = %v", err)
 	}
-	if result != nil || challenge != nil {
-		t.Errorf("expected no result/challenge on error, got %v %v", result, challenge)
+	if challenge != nil {
+		t.Errorf("expected no challenge on error, got %v", challenge)
 	}
 }
 
@@ -386,7 +381,7 @@ func TestTokenExchangeRetries(t *testing.T) {
 	defer srv.Close()
 	cl, _ := newTestClient(t, srv, 2) // min(3,2)+1 = 3 attempts
 
-	if _, _, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{}); err != nil {
+	if _, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{}); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 	if hits != 3 {
@@ -445,7 +440,7 @@ func TestTokenRetryBoundaries(t *testing.T) {
 		}))
 		cl, _ := newTestClient(t, srv, tc.retries)
 
-		_, _, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
+		_, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
 		if (err != nil) != tc.wantErr {
 			t.Errorf("retries=%d: err = %v, wantErr %v", tc.retries, err, tc.wantErr)
 		}
@@ -525,5 +520,81 @@ func TestIsLoggedInRedirectElsewhereIsFalse(t *testing.T) {
 func TestLoginNilGalaxyRejected(t *testing.T) {
 	if _, err := New(httpx.Config{}, nil, Options{}); err == nil {
 		t.Fatal("New: want error for nil galaxy")
+	}
+}
+
+// TestContinueLoginConsumedOnSecondCall locks the one-shot contract: after a
+// successful continuation the same challenge cannot be used again.
+func TestContinueLoginConsumedOnSecondCall(t *testing.T) {
+	srv, _, _ := twoStepServer(t, CodeTwoStep)
+	defer srv.Close()
+	cl, _ := newTestClient(t, srv, 2)
+
+	challenge, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
+	if err != nil || challenge == nil {
+		t.Fatalf("Login: %v / %+v", err, challenge)
+	}
+	if err := cl.ContinueLogin(context.Background(), challenge, "1234"); err != nil {
+		t.Fatalf("ContinueLogin: %v", err)
+	}
+	if err := cl.ContinueLogin(context.Background(), challenge, "1234"); !errors.Is(err, ErrChallengeConsumed) {
+		t.Errorf("second ContinueLogin err = %v, want ErrChallengeConsumed", err)
+	}
+}
+
+// TestContinueLoginConsumedBeforeSideEffect locks the v4 review point: the
+// challenge is consumed BEFORE the network submission, so a failed submission
+// still cannot be retried with the same challenge.
+func TestContinueLoginConsumedBeforeSideEffect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth":
+			fmt.Fprint(w, loginFormPage(false))
+		case "/login_check":
+			http.Redirect(w, r, "/two_step", http.StatusFound)
+		case "/two_step":
+			fmt.Fprint(w, `<html><body><form><input type="hidden" name="second_step_authentication[_token]" value="ch-tok"></form></body></html>`)
+		case "/login/two_step":
+			// Submission always fails at the protocol level.
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	cl, _ := newTestClient(t, srv, 2)
+
+	challenge, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
+	if err != nil || challenge == nil {
+		t.Fatalf("Login: %v / %+v", err, challenge)
+	}
+	if err := cl.ContinueLogin(context.Background(), challenge, "1234"); err == nil {
+		t.Fatal("ContinueLogin: want error for failed submission")
+	}
+	// Consumed before the side effect: the retry must be refused.
+	if err := cl.ContinueLogin(context.Background(), challenge, "1234"); !errors.Is(err, ErrChallengeConsumed) {
+		t.Errorf("retry after failure err = %v, want ErrChallengeConsumed", err)
+	}
+}
+
+// TestContinueLoginRejectsForeignClient locks the Client binding: a challenge
+// may only be continued by the Client that created it, and a mismatch does
+// not consume the challenge (the owning client can still finish it).
+func TestContinueLoginRejectsForeignClient(t *testing.T) {
+	srv, _, _ := twoStepServer(t, CodeTwoStep)
+	defer srv.Close()
+	owner, _ := newTestClient(t, srv, 2)
+	foreign, _ := newTestClient(t, srv, 2)
+
+	challenge, err := owner.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
+	if err != nil || challenge == nil {
+		t.Fatalf("Login: %v / %+v", err, challenge)
+	}
+	if err := foreign.ContinueLogin(context.Background(), challenge, "1234"); !errors.Is(err, ErrChallengeClientMismatch) {
+		t.Errorf("foreign ContinueLogin err = %v, want ErrChallengeClientMismatch", err)
+	}
+	// Not consumed: the owning client can still complete the login.
+	if err := owner.ContinueLogin(context.Background(), challenge, "1234"); err != nil {
+		t.Errorf("owner ContinueLogin after mismatch: %v", err)
 	}
 }

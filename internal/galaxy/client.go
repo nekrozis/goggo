@@ -15,25 +15,29 @@ import (
 	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
-// DefaultContentSystemHost is the content-system host that serves build,
-// manifest and link data (galaxyapi.cpp:192,199,231,238). The CDN host used by
-// the manifest and link resolution steps is added when those steps are ported
-// (S14/S15), not before.
+// DefaultContentSystemHost serves build data and, later, the secure links
+// (galaxyapi.cpp:192,231).
 const DefaultContentSystemHost = "https://content-system.gog.com"
 
+// DefaultCDNHost serves the manifests themselves (galaxyapi.cpp:199,216,218).
+const DefaultCDNHost = "https://cdn.gog.com"
+
 // endpoints groups the per-host URL prefixes of one Client.
+//
+// Fields are ordered to minimise padding: the two strings (16B each).
 type endpoints struct {
 	contentSystem string
+	cdn           string
 }
 
 func defaultEndpoints() endpoints {
-	return endpoints{contentSystem: DefaultContentSystemHost}
+	return endpoints{contentSystem: DefaultContentSystemHost, cdn: DefaultCDNHost}
 }
 
 // Client drives the Galaxy content API over an httpx transport.
 //
-// Fields are ordered to minimise padding: the endpoint block (one string, 16B)
-// first, then the pointers (8B each).
+// Fields are ordered to minimise padding: the endpoint block (two strings,
+// 32B) first, then the pointers (8B each).
 type Client struct {
 	ep     endpoints
 	galaxy *config.GalaxyConfig

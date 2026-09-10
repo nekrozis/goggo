@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -12,25 +11,24 @@ import (
 	"sync/atomic"
 )
 
-// CodeKind distinguishes the two one-time-code flavours internally.
-type CodeKind int
+// codeKind distinguishes the two one-time-code flavours. It is an internal
+// protocol detail: the public API only exposes ChallengeKind, and error
+// messages use codeLabel rather than depending on this type's formatting.
+type codeKind uint8
 
 const (
-	// CodeTwoStep is the GOG second-step e-mail code (4 characters).
-	CodeTwoStep CodeKind = iota
-	// CodeTOTP is the authenticator TOTP code (6 characters).
-	CodeTOTP
+	// codeTwoStep is the GOG second-step e-mail code (4 characters).
+	codeTwoStep codeKind = iota
+	// codeTOTP is the authenticator TOTP code (6 characters).
+	codeTOTP
 )
 
-func (k CodeKind) String() string {
-	switch k {
-	case CodeTwoStep:
-		return "two-step"
-	case CodeTOTP:
+// codeLabel names a code flavour for error messages and diagnostics.
+func codeLabel(k codeKind) string {
+	if k == codeTOTP {
 		return "totp"
-	default:
-		return "code-kind(" + strconv.Itoa(int(k)) + ")"
 	}
+	return "two-step"
 }
 
 // ChallengeKind tells the caller which interaction Login needs.
@@ -120,7 +118,7 @@ type LoginChallenge struct {
 // submission: the challenge CSRF token and the submit endpoint, plus which
 // code flavour it is.
 type challengeState struct {
-	kind   CodeKind
+	kind   codeKind
 	token  string
 	submit string
 }
@@ -138,6 +136,15 @@ const (
 	twoStepCodeLength = 4
 	totpCodeLength    = 6
 )
+
+// loginStep is the outcome of the non-interactive login attempt: either an
+// auth code that can be exchanged, or a challenge the caller must answer.
+// Invariant: code != "" implies challenge == nil, and challenge != nil
+// implies code == "".
+type loginStep struct {
+	code      string
+	challenge *LoginChallenge
+}
 
 // Login performs the website OAuth login (website.cpp:306-380) up to the
 // first interaction it needs. It resets the client credentials, fetches the
@@ -162,12 +169,12 @@ func (c *Client) Login(ctx context.Context, email, password string, opts LoginOp
 	bRecaptcha := strings.Contains(formHTML, recaptchaMarker)
 
 	if !opts.ForceBrowser {
-		code, challenge, formErr := c.formLogin(ctx, formHTML, email, password)
-		if challenge != nil {
-			return challenge, nil
+		step, formErr := c.formLogin(ctx, formHTML, email, password)
+		if step.challenge != nil {
+			return step.challenge, nil
 		}
-		if code != "" {
-			if err := c.exchangeCode(ctx, code); err != nil {
+		if step.code != "" {
+			if err := c.exchangeCode(ctx, step.code); err != nil {
 				return nil, err
 			}
 			return nil, nil
@@ -254,17 +261,17 @@ func (c *Client) newBrowserChallenge(authURL string) *LoginChallenge {
 }
 
 // formLogin runs the non-interactive part of the curl-based login
-// (website.cpp:382-607). It returns an auth code when the flow completed
-// without a challenge, or a LoginChallenge when two-step/TOTP verification is
-// required (the challenge page token is fetched here so ContinueLogin only
-// submits).
-func (c *Client) formLogin(ctx context.Context, formHTML, email, password string) (string, *LoginChallenge, error) {
+// (website.cpp:382-607). It returns a loginStep carrying either an auth code
+// (flow completed without a challenge) or a LoginChallenge when two-step/TOTP
+// verification is required (the challenge page token is fetched here so
+// ContinueLogin only submits).
+func (c *Client) formLogin(ctx context.Context, formHTML, email, password string) (loginStep, error) {
 	token, err := extractInputValue([]byte(formHTML), loginFormToken)
 	if err != nil {
-		return "", nil, err
+		return loginStep{}, err
 	}
 	if token == "" {
-		return "", nil, errors.New("webapi: failed to get login token")
+		return loginStep{}, errors.New("webapi: failed to get login token")
 	}
 
 	// POST order is irrelevant to the server (fields are matched by name);
@@ -276,60 +283,60 @@ func (c *Client) formLogin(ctx context.Context, formHTML, email, password string
 	post.Set("login[login]", "")
 	post.Set("login[_token]", token)
 
-	resp, err := c.postForm(ctx, c.ep.login+"/login_check", post.Encode())
+	meta, err := c.postForm(ctx, c.ep.login+"/login_check", post.Encode())
 	if err != nil {
-		return "", nil, fmt.Errorf("webapi: login_check: %w", err)
+		return loginStep{}, fmt.Errorf("webapi: login_check: %w", err)
 	}
-	redirectURL := c.resolveLocation(resp)
+	redirectURL := c.resolveLocation(meta.URL, meta.Location)
 
 	// Two step authorization (website.cpp:446-569): fetch the challenge page
 	// and surface a ChallengeTwoFactor carrying its token.
 	challenge, err := c.maybeChallenge(ctx, redirectURL)
 	if err != nil {
-		return "", nil, err
+		return loginStep{}, err
 	}
 	if challenge != nil {
-		return "", challenge, nil
+		return loginStep{challenge: challenge}, nil
 	}
 
-	code, finalURL, err := c.walkRedirectChain(ctx, redirectURL)
+	code, consumeURL, err := c.walkRedirectChain(ctx, redirectURL)
 	if err != nil {
-		return "", nil, err
+		return loginStep{}, err
 	}
-	if finalURL != "" {
-		_ = c.followGet(ctx, finalURL)
+	if consumeURL != "" {
+		_ = c.followGet(ctx, consumeURL)
 	}
-	return code, nil, nil
+	return loginStep{code: code}, nil
 }
 
 // maybeChallenge detects a two-step or TOTP redirect and prepares a
 // ChallengeTwoFactor by fetching the challenge page and extracting its CSRF
 // token. It returns nil when the redirect does not indicate a challenge.
 func (c *Client) maybeChallenge(ctx context.Context, redirectURL string) (*LoginChallenge, error) {
-	var kind CodeKind
+	var kind codeKind
 	var tokenName string
 	var length int
 	var submit string
 	switch {
 	case strings.Contains(redirectURL, "two_step"):
-		kind, tokenName, length = CodeTwoStep, twoStepToken, twoStepCodeLength
+		kind, tokenName, length = codeTwoStep, twoStepToken, twoStepCodeLength
 		submit = c.ep.login + "/login/two_step"
 	case strings.Contains(redirectURL, "totp"):
-		kind, tokenName, length = CodeTOTP, totpToken, totpCodeLength
+		kind, tokenName, length = codeTOTP, totpToken, totpCodeLength
 		submit = c.ep.login + "/login/two_factor/totp"
 	default:
 		return nil, nil
 	}
 	page, err := c.getResponse(ctx, redirectURL)
 	if err != nil {
-		return nil, fmt.Errorf("webapi: fetch %s page: %w", kind, err)
+		return nil, fmt.Errorf("webapi: fetch %s page: %w", codeLabel(kind), err)
 	}
 	token, err := extractInputValue([]byte(page), tokenName)
 	if err != nil {
 		return nil, err
 	}
 	if token == "" {
-		return nil, fmt.Errorf("webapi: no %s token in challenge page", kind)
+		return nil, fmt.Errorf("webapi: no %s token in challenge page", codeLabel(kind))
 	}
 	return &LoginChallenge{
 		client:     c,
@@ -345,35 +352,35 @@ func (c *Client) maybeChallenge(ctx context.Context, redirectURL string) (*Login
 func (c *Client) submitSecurityCode(ctx context.Context, state challengeState, code string) (string, error) {
 	post := url.Values{}
 	switch state.kind {
-	case CodeTwoStep:
+	case codeTwoStep:
 		post.Set("second_step_authentication[send]", "")
 		for i, l := range []string{"letter_1", "letter_2", "letter_3", "letter_4"} {
 			post.Set("second_step_authentication[token]["+l+"]", string(code[i]))
 		}
-	case CodeTOTP:
+	case codeTOTP:
 		post.Set("two_factor_totp_authentication[send]", "")
 		for i, l := range []string{"letter_1", "letter_2", "letter_3", "letter_4", "letter_5", "letter_6"} {
 			post.Set("two_factor_totp_authentication[token]["+l+"]", string(code[i]))
 		}
 	}
 	tokenName := twoStepToken
-	if state.kind == CodeTOTP {
+	if state.kind == codeTOTP {
 		tokenName = totpToken
 	}
 	post.Set(tokenName, state.token)
 
-	resp, err := c.postForm(ctx, state.submit, post.Encode())
+	meta, err := c.postForm(ctx, state.submit, post.Encode())
 	if err != nil {
-		return "", fmt.Errorf("webapi: submit %s code: %w", state.kind, err)
+		return "", fmt.Errorf("webapi: submit %s code: %w", codeLabel(state.kind), err)
 	}
-	redirectURL := c.resolveLocation(resp)
+	redirectURL := c.resolveLocation(meta.URL, meta.Location)
 
-	authCode, finalURL, err := c.walkRedirectChain(ctx, redirectURL)
+	authCode, consumeURL, err := c.walkRedirectChain(ctx, redirectURL)
 	if err != nil {
 		return "", err
 	}
-	if finalURL != "" {
-		_ = c.followGet(ctx, finalURL)
+	if consumeURL != "" {
+		_ = c.followGet(ctx, consumeURL)
 	}
 	if authCode == "" {
 		return "", errors.New("webapi: failed to get auth code")
@@ -388,6 +395,12 @@ func (c *Client) finishWithCode(ctx context.Context, code string) error {
 }
 
 // exchangeCode performs the token exchange (website.cpp:318-337).
+//
+// Deliberately separate from auth.Client.Refresh: this is the
+// authorization_code grant, while Refresh performs the refresh_token grant.
+// They are different protocols that may diverge further (error handling,
+// endpoints, client credentials), so they are not merged behind a shared
+// helper.
 func (c *Client) exchangeCode(ctx context.Context, code string) error {
 	q := url.Values{}
 	q.Set("client_id", c.galaxy.GetClientID())
@@ -411,18 +424,20 @@ func (c *Client) exchangeCode(ctx context.Context, code string) error {
 // from the callback URL (website.cpp:571-593). Each step performs a GET
 // without auto-redirect. When the response is 3xx the chain continues with
 // the new Location; the code is checked on the current URL after each step.
-// The final URL is returned for the trailing consume-GET the C++ source
-// performs.
-func (c *Client) walkRedirectChain(ctx context.Context, redirectURL string) (code, finalURL string, err error) {
+// consumeURL is the final URL for the trailing consume-GET the C++ source
+// performs. A 3xx without a Location, a non-3xx without a code, and a
+// self-referential redirect all end the walk (the last is the only cycle
+// guard; the C++ source has no hop limit and none is added here).
+func (c *Client) walkRedirectChain(ctx context.Context, redirectURL string) (code, consumeURL string, err error) {
 	cur := redirectURL
 	for cur != "" {
-		resp, err := c.noRedirectGet(ctx, cur)
+		meta, err := c.noRedirectGet(ctx, cur)
 		if err != nil {
 			return "", "", err
 		}
-		is3xx := resp.StatusCode/100 == 3
+		is3xx := meta.StatusCode/100 == 3
 		if is3xx {
-			next := c.resolveLocation(resp)
+			next := c.resolveLocation(meta.URL, meta.Location)
 			if next == "" || next == cur {
 				return "", cur, nil
 			}
@@ -439,18 +454,16 @@ func (c *Client) walkRedirectChain(ctx context.Context, redirectURL string) (cod
 }
 
 // postForm sends an application/x-www-form-urlencoded POST without following
-// redirects and drains the response body.
-func (c *Client) postForm(ctx context.Context, url, body string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(body))
+// redirects and summarises the response.
+func (c *Client) postForm(ctx context.Context, target, body string) (responseMeta, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(body))
 	if err != nil {
-		return nil, err
+		return responseMeta{}, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := c.hx.DoNoRedirect(ctx, req)
 	if err != nil {
-		return nil, err
+		return responseMeta{}, err
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
-	return resp, nil
+	return drainResponse(req.URL, resp), nil
 }

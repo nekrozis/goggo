@@ -1,0 +1,200 @@
+package httpx
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"sync"
+	"time"
+)
+
+// ErrLowSpeed reports that a transfer was aborted because it stayed below the
+// configured rate. It is the Go counterpart of curl aborting a transfer with
+// CURLE_OPERATION_TIMEDOUT through CURLOPT_LOW_SPEED_TIME /
+// CURLOPT_LOW_SPEED_LIMIT (util.cpp:717-718).
+//
+// The sentinel carries the identity, the wrap carries the numbers:
+//
+//	errors.Is(err, httpx.ErrLowSpeed)                        // true
+//	err.Error() == "httpx: transfer stalled: below 200 B/s for 30s"
+//
+// The message never contains the request URL (see SafeError).
+var ErrLowSpeed = errors.New("httpx: transfer stalled")
+
+// Low-speed guard defaults. They mirror the upstream CLI defaults
+// (--lowspeed-timeout 30 s, --lowspeed-rate 200 B/s, main.cpp:314-315) and are
+// owned by the transport layer: a caller that configures nothing still gets the
+// upstream behaviour, and Config.DisableLowSpeedGuard is the explicit off
+// switch, so a zero value is never load-bearing for the semantics.
+const (
+	// DefaultLowSpeedLimit is the abort threshold in bytes per second.
+	DefaultLowSpeedLimit = 200
+	// DefaultLowSpeedTime is how long the average rate may stay below the
+	// limit before the transfer is aborted.
+	DefaultLowSpeedTime = 30 * time.Second
+)
+
+// belowLimit reports whether a window that moved bytes over elapsed is slower
+// than limit. The comparison is strict: exactly limit is NOT slow, matching
+// upstream, which aborts below the configured rate rather than at it.
+func belowLimit(bytes int64, elapsed time.Duration, limit int64) bool {
+	if elapsed <= 0 {
+		return false
+	}
+	return float64(bytes)/elapsed.Seconds() < float64(limit)
+}
+
+// lowSpeedBody is a response body with a low-speed watchdog.
+//
+// The semantics reproduce the OBSERVABLE upstream behaviour, not curl's
+// internal algorithm:
+//
+//   - the clock starts on the FIRST Read, so a response whose headers arrived
+//     but whose body is never read is never judged slow;
+//   - the average rate over the current window is evaluated once the window has
+//     elapsed: on a Read that carried data, and — for the case no Read can ever
+//     observe, a body that stops producing bytes — on the watchdog timer, which
+//     closes the body to unblock the pending Read;
+//   - a window that meets the limit restarts, so an early burst cannot mask a
+//     later stall the way a whole-transfer average would;
+//   - EOF and other underlying errors pass through untouched: a short tail
+//     window is not a stall, and (0, nil) keeps its usual meaning.
+//
+// Race outcome (whoever commits first wins, and the loser cannot overwrite it):
+//
+//   - a Read that ends the transfer (EOF or any underlying error) marks the body
+//     finished and retires the watchdog, so a late timer can never turn a
+//     completed transfer into a stall on a later Read;
+//   - an abort records ErrLowSpeed BEFORE closing the body, so the Read it
+//     unblocks — and every Read after it — reports ErrLowSpeed even though the
+//     underlying reader may now fail with a close-induced error.
+//
+// Reads run on the caller's goroutine while the timer fires on the runtime
+// timer goroutine, so the state is mutex-guarded. Close is idempotent and safe
+// while a Read is in flight.
+type lowSpeedBody struct {
+	winStart time.Time
+	body     io.ReadCloser
+	aborted  error
+	timer    *time.Timer
+	now      func() time.Time
+	window   time.Duration
+	limit    int64
+	total    int64
+	winBase  int64
+	mu       sync.Mutex
+	done     bool
+	finished bool
+}
+
+// newLowSpeedBody wraps body. limit and window must be positive: the caller
+// resolves the defaults (Client.guardBody).
+func newLowSpeedBody(body io.ReadCloser, limit int64, window time.Duration) *lowSpeedBody {
+	return &lowSpeedBody{body: body, limit: limit, window: window, now: time.Now}
+}
+
+// Read implements io.Reader.
+func (b *lowSpeedBody) Read(p []byte) (int, error) {
+	n, err := b.body.Read(p)
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.aborted != nil {
+		// The watchdog already gave up: report its error (the caller gets the
+		// n bytes that did arrive, then stops). The abort owns the outcome, so
+		// a close-induced error from the underlying reader never replaces it.
+		b.finished = true
+		return n, b.aborted
+	}
+	if n > 0 {
+		b.total += int64(n)
+		switch {
+		case b.winStart.IsZero():
+			b.winStart = b.now()
+			b.armLocked()
+		case b.now().Sub(b.winStart) >= b.window:
+			elapsed := b.now().Sub(b.winStart)
+			if belowLimit(b.total-b.winBase, elapsed, b.limit) {
+				b.aborted = b.stallErrorLocked()
+				b.finished = true
+				return n, b.aborted
+			}
+			b.winStart, b.winBase = b.now(), b.total
+			b.armLocked()
+		}
+	}
+	if err != nil {
+		// The transfer is over, whatever the outcome: mark it finished so a
+		// timer that already fired cannot abort after the fact, and retire the
+		// watchdog.
+		b.finished = true
+		b.stopTimerLocked()
+	}
+	return n, err
+}
+
+// check runs on the timer goroutine. It evaluates a window that no Read could
+// observe (the body stopped producing bytes, so Read is blocked) and, when the
+// window is too slow, closes the underlying body to unblock that Read.
+func (b *lowSpeedBody) check() {
+	b.mu.Lock()
+	if b.aborted != nil || b.done || b.finished || b.winStart.IsZero() {
+		b.mu.Unlock()
+		return
+	}
+	elapsed := b.now().Sub(b.winStart)
+	if elapsed < b.window {
+		b.armLocked()
+		b.mu.Unlock()
+		return
+	}
+	if !belowLimit(b.total-b.winBase, elapsed, b.limit) {
+		b.winStart, b.winBase = b.now(), b.total
+		b.armLocked()
+		b.mu.Unlock()
+		return
+	}
+	b.stopTimerLocked()
+	b.aborted = b.stallErrorLocked()
+	b.mu.Unlock()
+
+	// Closing outside the lock: it is what unblocks the pending Read, and the
+	// reader needs the lock as soon as it returns.
+	_ = b.body.Close()
+}
+
+// Close stops the watchdog and closes the underlying body. It is idempotent.
+func (b *lowSpeedBody) Close() error {
+	b.mu.Lock()
+	if b.done {
+		b.mu.Unlock()
+		return nil
+	}
+	b.done = true
+	b.stopTimerLocked()
+	b.mu.Unlock()
+	return b.body.Close()
+}
+
+// stallErrorLocked builds the aborted-transfer error. The message carries the
+// numbers but never the URL.
+func (b *lowSpeedBody) stallErrorLocked() error {
+	return fmt.Errorf("%w: below %d B/s for %s", ErrLowSpeed, b.limit, b.window)
+}
+
+// armLocked (re)arms the watchdog; the first call creates the timer.
+func (b *lowSpeedBody) armLocked() {
+	if b.timer == nil {
+		b.timer = time.AfterFunc(b.window, b.check)
+		return
+	}
+	b.timer.Reset(b.window)
+}
+
+// stopTimerLocked retires the watchdog. It is safe to call repeatedly.
+func (b *lowSpeedBody) stopTimerLocked() {
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"math"
 	"sync"
 	"time"
 )
@@ -19,29 +20,31 @@ const (
 // carries no usable expires_in (config.h:122).
 const defaultExpiresIn int64 = 3600
 
-// GalaxyConfig mirrors class GalaxyConfig (config.h:69-213). It guards the
-// token JSON with a mutex because token refreshes can run concurrently with
-// downloads.
+// GalaxyConfig mirrors class GalaxyConfig (config.h:69-213): a thread-safe
+// store for the Galaxy token JSON plus the semantic accessors around it.
 //
-// Difference from the C++ class (intentional): GalaxyConfig is used through a
-// pointer and created with NewGalaxyConfig; the C++ value-copy/assignment
-// semantics are replaced by explicit sharing, which is the idiomatic Go
-// approach for a lock-protected credential store.
+// Differences from the C++ class (intentional):
+//   - Used through *GalaxyConfig and created with NewGalaxyConfig; the C++
+//     value-copy semantics are replaced by explicit sharing. Never copy a
+//     GalaxyConfig by value and never accept one as a value parameter: sharing
+//     the pointer IS the design, and a silent copy would duplicate the lock and
+//     the state. Additionally, do not add a String()/formatting method that can
+//     dump the raw token — the store holds credentials.
+//   - Reads take an RWMutex (C++ uses std::mutex). Not observable.
+//   - GetJSON/SetJSON copy deeply and SetJSON never modifies its argument, so a
+//     caller cannot alias the store. C++ gets this for free from Json::Value's
+//     value semantics.
 //
-// Copy-safety guard (review note): never copy a GalaxyConfig by value and
-// never write a function that accepts it as a value. In C++ a copy produced
-// an independent configuration; here sharing the pointer IS the design, and a
-// silent value copy would duplicate the lock and state. The API surface is
-// *GalaxyConfig everywhere. Additionally, do not add a String()/formatting
-// method that can dump the raw token: the struct holds sensitive credentials.
+// Unknown JSON fields are preserved verbatim: the store is a JSON tree, not a
+// fixed record, so a field the server sends is written back unchanged.
 //
-// Fields are ordered to minimise padding: the string block (16B each) first,
-// then the map and mutex (8B each).
+// Fields are ordered to minimise padding: RWMutex (24B), then the strings
+// (16B each), then the map (8B).
 type GalaxyConfig struct {
+	mu          sync.RWMutex
 	filepath    string
 	redirectURI string
 	token       map[string]any
-	mu          sync.Mutex
 }
 
 // NewGalaxyConfig returns a GalaxyConfig with the default redirect URI and an
@@ -53,16 +56,16 @@ func NewGalaxyConfig() *GalaxyConfig {
 	}
 }
 
-// IsExpired reports whether the access token has passed its expires_at.
-// A token without expires_at is treated as expired (config.h:75-79).
+// IsExpired reports whether the access token has passed its expires_at; a
+// token without a usable expires_at counts as expired (config.h:75-79).
 func (g *GalaxyConfig) IsExpired() bool {
 	return g.expiredAt(time.Now().Unix())
 }
 
-// expiredAt is the deterministic core of IsExpired.
+// expiredAt is IsExpired with an injected clock (test seam).
 func (g *GalaxyConfig) expiredAt(now int64) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	exp, ok := jsonInt64(g.token, "expires_at")
 	if !ok {
 		return true
@@ -70,63 +73,63 @@ func (g *GalaxyConfig) expiredAt(now int64) bool {
 	return now > exp
 }
 
-// GetAccessToken returns the stored access token, or "" when absent
-// (config.h:82-89).
+// GetAccessToken returns the stored access token, or "" (config.h:82-89).
 func (g *GalaxyConfig) GetAccessToken() string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	v, _ := jsonString(g.token, "access_token")
 	return v
 }
 
-// GetRefreshToken returns the stored refresh token, or "" when absent
-// (config.h:91-98).
+// GetRefreshToken returns the stored refresh token, or "" (config.h:91-98).
 func (g *GalaxyConfig) GetRefreshToken() string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	v, _ := jsonString(g.token, "refresh_token")
 	return v
 }
 
-// GetUserID returns the stored user id, or "" when absent (config.h:106-114).
+// GetUserID returns the stored user id, or "" (config.h:106-114).
 func (g *GalaxyConfig) GetUserID() string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	v, _ := jsonString(g.token, "user_id")
 	return v
 }
 
-// GetJSON returns a deep copy of the token store (config.h:100-104). Callers
-// may mutate the result without affecting the store.
+// GetJSON returns an independent deep copy of the token store
+// (config.h:100-104); callers may mutate the result freely.
 func (g *GalaxyConfig) GetJSON() map[string]any {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return cloneMap(g.token)
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return cloneJSONMap(g.token)
 }
 
-// SetJSON stores a token response. When the payload lacks expires_at an
-// expires_at is derived from expires_in (default 3600 seconds) so expiry can
+// SetJSON stores a token response without modifying token. When the payload
+// lacks expires_at it is derived from expires_in (default 3600) so expiry can
 // be evaluated later without a clock dependency (config.h:116-131).
 func (g *GalaxyConfig) SetJSON(token map[string]any) {
 	g.setJSONAt(token, time.Now().Unix())
 }
 
-// setJSONAt is the deterministic core of SetJSON.
+// setJSONAt is SetJSON with an injected clock (test seam).
 func (g *GalaxyConfig) setJSONAt(token map[string]any, now int64) {
-	if _, ok := token["expires_at"]; !ok {
+	// Clone before deriving expires_at: C++ takes the Json::Value by value, so
+	// the caller's object is never touched and the derived field stays private.
+	stored := cloneJSONMap(token)
+	if _, ok := stored["expires_at"]; !ok {
 		expiresIn := defaultExpiresIn
-		if v, ok := jsonInt64(token, "expires_in"); ok {
+		if v, ok := jsonInt64(stored, "expires_in"); ok {
 			expiresIn = v
 		}
-		token["expires_at"] = now + expiresIn
+		stored["expires_at"] = now + expiresIn
 	}
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.token = cloneMap(token)
+	g.token = stored
+	g.mu.Unlock()
 }
 
-// SetFilepath and GetFilepath manage the on-disk location of the token store
-// (config.h:133-143).
+// SetFilepath sets the on-disk location of the token store (config.h:133-143).
 func (g *GalaxyConfig) SetFilepath(path string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -135,45 +138,43 @@ func (g *GalaxyConfig) SetFilepath(path string) {
 
 // GetFilepath returns the configured token store path.
 func (g *GalaxyConfig) GetFilepath() string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	return g.filepath
 }
 
 // GetRedirectURI returns the OAuth redirect URI (config.h:175-179).
 func (g *GalaxyConfig) GetRedirectURI() string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	return g.redirectURI
 }
 
-// GetClientID returns a stored client_id override, falling back to the
-// Galaxy default (config.h:155-163). An override present in the store is
-// returned verbatim, mirroring the C++ asString() behaviour.
+// GetClientID returns a stored client_id override verbatim, falling back to
+// the Galaxy default (config.h:155-163).
 func (g *GalaxyConfig) GetClientID() string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	if v, ok := jsonString(g.token, "client_id"); ok {
 		return v
 	}
 	return DefaultClientID
 }
 
-// GetClientSecret returns a stored client_secret override, falling back to
-// the Galaxy default (config.h:165-173). An override present in the store is
-// returned verbatim.
+// GetClientSecret returns a stored client_secret override verbatim, falling
+// back to the Galaxy default (config.h:165-173).
 func (g *GalaxyConfig) GetClientSecret() string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	if v, ok := jsonString(g.token, "client_secret"); ok {
 		return v
 	}
 	return DefaultClientSecret
 }
 
-// ResetClient restores default client_id/client_secret inside the token store
-// when the store carries overrides (config.h:145-153). Values missing from
-// the store stay absent; the getters already fall back to the defaults.
+// ResetClient restores default client_id/client_secret when the store carries
+// overrides; absent keys stay absent, since the getters already fall back
+// (config.h:145-153).
 func (g *GalaxyConfig) ResetClient() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -196,8 +197,11 @@ func jsonString(m map[string]any, key string) (string, bool) {
 	return s, ok
 }
 
-// jsonInt64 reads an integer field tolerant of the numeric types produced by
-// encoding/json (float64, json.Number) and native integers.
+// jsonInt64 reads an integer field, tolerating the numeric types
+// encoding/json produces (float64, json.Number) plus native integers. Numbers
+// that cannot be represented as int64 are reported as absent rather than
+// converted: Go's float→int conversion is implementation-defined for them, and
+// a malformed expires_in/expires_at must not fabricate a value.
 func jsonInt64(m map[string]any, key string) (int64, bool) {
 	v, ok := m[key]
 	if !ok || v == nil {
@@ -205,7 +209,7 @@ func jsonInt64(m map[string]any, key string) (int64, bool) {
 	}
 	switch n := v.(type) {
 	case float64:
-		return int64(n), true
+		return floatToInt64(n)
 	case json.Number:
 		i, err := n.Int64()
 		return i, err == nil
@@ -214,19 +218,52 @@ func jsonInt64(m map[string]any, key string) (int64, bool) {
 	case int64:
 		return n, true
 	case uint64:
+		if n > math.MaxInt64 {
+			return 0, false
+		}
 		return int64(n), true
 	default:
 		return 0, false
 	}
 }
 
-// cloneMap returns a shallow copy of m. Token values are primitives (strings,
-// numbers, arrays of strings), so a shallow copy is sufficient for the
-// concurrency contract of GetJSON/SetJSON.
-func cloneMap(m map[string]any) map[string]any {
+// floatToInt64 converts a JSON number, rejecting NaN, infinities and values
+// outside [MinInt64, MaxInt64). The bounds are compared as floats because
+// float64(2^63) rounds to exactly 2^63, which is already out of range.
+func floatToInt64(f float64) (int64, bool) {
+	const maxInt64Exclusive = float64(1 << 63)
+	if math.IsNaN(f) || math.IsInf(f, 0) || f >= maxInt64Exclusive || f < -maxInt64Exclusive {
+		return 0, false
+	}
+	return int64(f), true
+}
+
+// cloneJSONMap deep-copies a token map. Only the shapes encoding/json produces
+// are copied (map[string]any, []any); scalars are returned unchanged, so
+// numeric types survive exactly (an int64 expires_at stays int64) and unknown
+// fields are preserved.
+func cloneJSONMap(m map[string]any) map[string]any {
 	out := make(map[string]any, len(m))
 	for k, v := range m {
-		out[k] = v
+		out[k] = cloneJSONValue(v)
 	}
 	return out
+}
+
+// cloneJSONValue is the recursive core of cloneJSONMap. Non-JSON containers are
+// shared by reference, which is safe because the store only ever holds JSON
+// shapes.
+func cloneJSONValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		return cloneJSONMap(t)
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = cloneJSONValue(e)
+		}
+		return out
+	default:
+		return v
+	}
 }

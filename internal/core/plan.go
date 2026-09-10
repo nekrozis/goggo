@@ -27,9 +27,15 @@ const msgLevelVerbose = 1
 // PlanResult is one plan-building run's outcome: the plan plus every display
 // message the C++ source printed along the way. core does not print; the front
 // end renders the messages.
+//
+// InstallPath is the installation root the plan was built against (review
+// D81): the small-files containers and the orphan check need the same
+// directory the plan's destinations were derived from, and an empty or fully
+// filtered plan cannot yield it any other way.
 type PlanResult struct {
-	Plan     model.DownloadPlan
-	Messages []Notice
+	Plan        model.DownloadPlan
+	Messages    []Notice
+	InstallPath string
 }
 
 // addMessage appends a non-error display message when it carries text.
@@ -137,6 +143,7 @@ func (d *Downloader) BuildPlan(ctx context.Context, req InstallRequest) (PlanRes
 		}
 	}
 	installPath := d.cfg.Directories.Directory + installDirectory
+	res.InstallPath = installPath
 
 	// The depot items (galaxyGetDepotItemVectorFromJson, 3900-4020).
 	planItems, err := d.resolveDepotItems(ctx, manifest, req)

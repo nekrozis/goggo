@@ -17,7 +17,10 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/transfer"
 	"golang.org/x/term"
 )
 
@@ -29,10 +32,11 @@ import (
 // to ask whether the input is a real terminal, which the buffered reader hides.
 // All four fields are interface values, so their order does not affect the size.
 type console struct {
-	in     *bufio.Reader
-	rawIn  io.Reader
-	out    io.Writer
-	errOut io.Writer
+	in       *bufio.Reader
+	rawIn    io.Reader
+	out      io.Writer
+	errOut   io.Writer
+	renderer *renderer
 }
 
 func newConsole(in io.Reader, out, errOut io.Writer) *console {
@@ -42,6 +46,36 @@ func newConsole(in io.Reader, out, errOut io.Writer) *console {
 // Out and ErrOut expose the two streams; see core.Console for the stream policy.
 func (c *console) Out() io.Writer    { return c.out }
 func (c *console) ErrOut() io.Writer { return c.errOut }
+
+// attachRenderer wires the progress renderer over this console's streams. It
+// runs for every install: the C++ printProgress loop paints unconditionally,
+// and a non-terminal destination simply receives the frames on stdout.
+// The terminal width comes from the input descriptor — Util::getTerminalWidth
+// queries the output side, which this console does not keep a descriptor for
+// (Δ, review D75).
+func (c *console) attachRenderer(cfg config.Config) {
+	var width func() int
+	if fd, ok := c.terminalFd(); ok {
+		width = func() int {
+			w, _, err := term.GetSize(fd)
+			if err != nil || w <= 0 {
+				return 80
+			}
+			return w
+		}
+	}
+	c.renderer = newRenderer(c.out, cfg.Unicode, cfg.Color, cfg.UnitFormat,
+		time.Duration(cfg.ProgressInterval)*time.Millisecond, width)
+}
+
+// OnEvent hands the transfer event stream to the renderer. The method exists
+// so core's optional-ability assertion finds the console capable (review
+// D75): core knows no renderer type, only this behaviour.
+func (c *console) OnEvent(ev transfer.Event) {
+	if c.renderer != nil {
+		c.renderer.OnEvent(ev)
+	}
+}
 
 // terminalFd returns the descriptor of the input stream when that stream is a
 // real terminal. It is the single place that answers "can a prompt be answered

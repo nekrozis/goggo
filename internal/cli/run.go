@@ -181,12 +181,16 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	// --galaxy-install (main.cpp:886). The engine is not ported yet, so this
-	// ends in core.ErrNotImplemented — and it takes the same error path as every
-	// other failure rather than growing an exit code of its own.
+	// --galaxy-install (main.cpp:886). The renderer paints the progress the
+	// way printProgress does; failures take the same error path as every other
+	// command rather than growing an exit code of their own (review D65a).
 	if inv.GalaxyInstall != "" {
 		req := core.NewInstallRequest(inv.Config, installProduct, installBuild)
-		if err := d.Install(ctx, req); err != nil {
+		ui.attachRenderer(inv.Config)
+		ui.renderer.Start()
+		err := d.Install(ctx, req)
+		ui.renderer.Stop()
+		if err != nil {
 			fmt.Fprintf(stderr, "Error: %v\n", err)
 			return 1
 		}

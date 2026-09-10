@@ -155,26 +155,36 @@ func TestInstallEndToEnd(t *testing.T) {
 	if err := d.Install(context.Background(), NewInstallRequest(cfg, planProductID, "")); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	t.Logf("CONSOLE OUT: %q", console.out.String())
-	t.Logf("CONSOLE ERR: %q", console.errOut.String())
 
 	// The assembled files carry the decompressed content of the chunks the
-	// plan selected — the DLC's bytes over the base game's for data.bin.
+	// plan selected — the DLC's bytes over the base game's for data.bin — and
+	// the small-files container unpacks its member and is gone (review D73).
 	assertFileContent(t, installPath+"/game/data.bin", dlc.content)
 	assertFileContent(t, installPath+"/game/dep/depfile.bin", dep.content)
-	assertFileContent(t, installPath+"/galaxy_smallfilescontainer_"+planProductID, sfc.content)
+	// The fixture's sfcRef advertises 100 bytes but the container holds fewer:
+	// the section reader stops at EOF, so the member carries the whole
+	// container body.
+	assertFileContent(t, installPath+"/game/small1.txt", sfc.content)
+	assertFileAbsent(t, installPath+"/galaxy_smallfilescontainer_"+planProductID)
 
-	// The container's member was never a download task, and the gone file was
-	// removed by ApplyPlanChanges.
-	assertFileAbsent(t, installPath+"/game/small1.txt")
+	// The gone file was removed by ApplyPlanChanges.
 	assertFileAbsent(t, installPath+"/game/oldfile.bin")
 
 	out := console.out.String()
-	for _, want := range []string{"The Witcher 3: Wild Hunt", "Files: 3"} {
+	for _, want := range []string{
+		"The Witcher 3: Wild Hunt", "Files: 3",
+		"Extracting small files container " + installPath + "/galaxy_smallfilescontainer_" + planProductID,
+		"Deleting small files container " + installPath + "/galaxy_smallfilescontainer_" + planProductID,
+		"Checking for orphaned files",
+		// The install metadata file is an orphan as written: upstream has no
+		// special case for it either. Deletion is off, so it survives.
+		"\t1 orphaned files",
+	} {
 		if !bytes.Contains([]byte(out), []byte(want)) {
 			t.Errorf("console output missing %q", want)
 		}
 	}
+	assertFileContent(t, installPath+"/goggame-"+planProductID+".info", `{"buildId":"b-old"}`)
 }
 
 func assertFileContent(t *testing.T, path, want string) {

@@ -48,7 +48,8 @@ func NewConfig(configHome, cacheHome string) Config {
 	// in bytes per second.
 	cfg.Curl.LowSpeedTimeout = 30
 	cfg.Curl.LowSpeedTimeoutRate = 200
-	cfg.Color = true // --no-color clears it
+	cfg.Color = true   // --no-color clears it
+	cfg.Unicode = true // --no-unicode clears it (main.cpp:283,538)
 	return cfg
 }
 

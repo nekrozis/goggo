@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/nekrozis/goggo/internal/transfer"
 	"github.com/nekrozis/goggo/internal/webapi"
 )
 
@@ -46,4 +47,14 @@ type Console interface {
 	// here — no terminal, or unreadable input — and the caller reports it the
 	// way the C++ source reports an unanswerable prompt.
 	SelectProduct(items []string) (int, error)
+}
+
+// transferEventSink is the optional ability of a front end to consume the full
+// transfer event stream, the per-task progress included. The install run
+// checks for it with a type assertion and hands the whole stream to a front
+// end that has it; a plain Console keeps the message-only path (review D75).
+// The interface stays unexported on purpose: the CLI satisfies it structurally
+// and core's public surface does not grow.
+type transferEventSink interface {
+	OnEvent(transfer.Event)
 }

@@ -568,3 +568,25 @@ func TestParseThreadsProgressInterval(t *testing.T) {
 		t.Error("--threads -1 must be refused")
 	}
 }
+
+// TestParseNoUnicode locks the progress bar's Unicode switch: it defaults to
+// on and --no-unicode clears it (main.cpp:283,538; review D78).
+func TestParseNoUnicode(t *testing.T) {
+	if !parse(t).Config.Unicode {
+		t.Error("Unicode = false, want the true default")
+	}
+	if parse(t, "--no-unicode").Config.Unicode {
+		t.Error("--no-unicode must clear Unicode")
+	}
+}
+
+// TestParseDeleteOrphans locks the D74 promotion: --delete-orphans left the
+// recognised-but-unimplemented list and now sets the install tail's gate.
+func TestParseDeleteOrphans(t *testing.T) {
+	if parse(t).Config.DownloadConfig.DeleteOrphans {
+		t.Error("DeleteOrphans = true, want the false default")
+	}
+	if !parse(t, "--delete-orphans").Config.DownloadConfig.DeleteOrphans {
+		t.Error("--delete-orphans must set DeleteOrphans")
+	}
+}

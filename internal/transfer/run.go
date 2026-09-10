@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/nekrozis/goggo/internal/httpx"
@@ -27,10 +28,11 @@ import (
 // nil when every task has ended, even if some failed. Only a cancelled context
 // makes Run return an error.
 //
-// The per-chunk fetch is the d1 minimal body: GET the whole chunk, verify its
-// compressed md5, decompress and append. The chunk-internal resume of a retry
-// (CURLOPT_RESUME_FROM_LARGE) and the finer failure cleanup are S20; a retry
-// re-downloads the whole chunk.
+// The per-chunk fetch mirrors upstream's chunk-in-memory model: the buffer
+// accumulates across retries (a transport failure resumes from the bytes
+// already held, a hash mismatch empties it), the verified chunk is
+// decompressed and appended, and the server's Last-Modified moves onto the
+// file (review D72, D77).
 //
 // The scheduling itself lives in schedule: worker fan-out, the single
 // deliverer and the cancellation handling are shared with the website path
@@ -97,12 +99,16 @@ func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps R
 	return nil
 }
 
-// downloadChunk fetches one chunk, verifies its compressed md5 and appends the
-// decompressed bytes to the task's file, retrying the whole chunk on failure
-// (downloader.cpp:4673-4744). The URL is resolved once per chunk; a retry
-// re-performs the same URL. Upstream resumes a retried curl transfer from the
-// bytes it already has (CURLOPT_RESUME_FROM_LARGE, downloader.cpp:4695); that
-// refinement is S20 — here a retry re-downloads the whole chunk.
+// downloadChunk fetches one chunk into memory, verifies its compressed md5 and
+// appends the decompressed bytes to the task's file (downloader.cpp:4673-4744).
+// The URL is resolved once per chunk; a retry re-performs the same URL.
+//
+// The chunk lives in memory the way upstream's ChunkMemoryStruct does, and the
+// two retry causes never mix (review D72): a transport failure resumes the
+// next attempt from the bytes already in memory (Range from the prefix
+// length, the CURLOPT_RESUME_FROM_LARGE equivalent), while a hash mismatch
+// empties the buffer so the retry starts the chunk from scratch — a corrupt
+// prefix must not take part in the next hash.
 func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk model.GalaxyDepotItemChunk, opts Options, deps RunDeps, emit func(Event)) error {
 	label := fmt.Sprintf("%s (chunk %d/%d)", task.Destination, index+1, len(task.Item.Chunks))
 
@@ -111,7 +117,9 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 		return err
 	}
 
+	var body []byte
 	reason := ""
+	lastModified := time.Time{}
 	for attempt := 0; ; attempt++ {
 		// The delay precedes every attempt, including the first
 		// (downloader.cpp:4682-4684).
@@ -128,27 +136,86 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 				Kind: EventMessageInfo})
 		}
 
-		body, err := fetchChunkBody(ctx, deps.HTTP, url)
-		if err == nil {
+		resume := len(body) > 0
+		data, lm, code, err := fetchChunkBody(ctx, deps.HTTP, url, resume, len(body))
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !lm.IsZero() {
+			lastModified = lm
+		}
+
+		if err != nil {
+			// A transport break mid-body keeps whatever arrived: the bytes
+			// are the memory prefix the next attempt resumes from, the way
+			// curl's write callback left them in chunk.memory. Status errors
+			// carry no body to keep.
+			var status *httpx.StatusError
+			if !errors.As(err, &status) && len(data) > 0 {
+				body = append(body, data...)
+			}
+		} else {
+			// A server that ignores Range answers 200 with the whole body
+			// again: folding it back to the suffix keeps the resume semantics.
+			// The guard fires only for an attempt that actually asked for a
+			// range past its first byte and got 200 back (review D72) — a
+			// first attempt and a 206 never take this path.
+			if resume && code == http.StatusOK && len(data) >= len(body) {
+				data = data[len(body):]
+			}
+			body = append(body, data...)
+		}
+
+		// A 416 keeps the buffer for the hash check below: the server has
+		// nothing past the requested offset, so the bytes already in memory
+		// may be the whole chunk (upstream runs the hash check on
+		// chunk.memory for exactly this reason, 4706-4726). With an empty
+		// buffer a 416 fails the task outright — a hash check over nothing
+		// can never succeed (review D65/S19; Δ — upstream would retry it).
+		var rangeNotSatisfiable bool
+		if err != nil {
+			var status *httpx.StatusError
+			if errors.As(err, &status) && status.Code == http.StatusRequestedRangeNotSatisfiable {
+				rangeNotSatisfiable = true
+				if len(body) == 0 {
+					return err
+				}
+			}
+		}
+
+		// The hash check runs on the whole buffer, the way the C++ source
+		// hashes chunk.memory (downloader.cpp:4721-4726) — after a complete
+		// response, or after a 416 with the chunk already complete in memory.
+		if err == nil || rangeNotSatisfiable {
 			sum := md5.Sum(body)
 			if hex.EncodeToString(sum[:]) != chunk.CompressedMD5 {
+				// The corrupt prefix must not join the next hash: empty the
+				// buffer so the retry starts from zero
+				// (downloader.cpp:4728-4732).
+				body = nil
 				err = errors.New("chunk failed hash check")
 			}
 		}
 
-		// A 416 is the one HTTP status that never retries
-		// (downloader.cpp:4706-4712); everything else — transport errors and
-		// any other status — does.
 		if err == nil {
 			if err := appendChunk(ctx, task.Destination, body); err != nil {
 				return err
 			}
+			if !lastModified.IsZero() {
+				// The server's timestamp moves onto the file; a failure to
+				// set it is a warning, not a failed chunk (review D77; the
+				// per-chunk setting is Δ — upstream sets it once per file
+				// from the last successful response, the final value is the
+				// same).
+				if cerr := os.Chtimes(task.Destination, lastModified, lastModified); cerr != nil {
+					emit(Event{Path: task.Destination, Text: cerr.Error(), Kind: EventMessageWarning})
+				}
+			}
 			return nil
 		}
-		var status *httpx.StatusError
-		if errors.As(err, &status) && status.Code == http.StatusRequestedRangeNotSatisfiable {
-			return err
-		}
+
+		// Retry classification (downloader.cpp:4706-4744): transport errors,
+		// statuses other than 416, and hash mismatches all retry.
 		if attempt >= opts.Retries {
 			return err
 		}
@@ -156,23 +223,37 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 	}
 }
 
-// fetchChunkBody performs one GET and returns the response body. It uses the
-// non-retrying Do on purpose: the retry loop above owns the retry policy, the
-// way curl_easy_perform does upstream.
-func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string) ([]byte, error) {
+// fetchChunkBody performs one GET and returns the response body, the response
+// code and the Last-Modified timestamp. It uses the non-retrying Do on
+// purpose: the retry loop above owns the retry policy, the way
+// curl_easy_perform does upstream. When resumeLen is positive the request
+// carries a Range header from that offset; the code is returned so the caller
+// can fold a 200 answer to a ranged request.
+func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bool, resumeLen int) ([]byte, time.Time, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, 0, err
+	}
+	if resume && resumeLen > 0 {
+		req.Header.Set("Range", "bytes="+strconv.Itoa(resumeLen)+"-")
 	}
 	resp, err := hx.Do(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, 0, err
 	}
 	defer resp.Body.Close()
+	lm := lastModifiedFrom(resp)
 	if resp.StatusCode >= 400 {
-		return nil, &httpx.StatusError{Method: http.MethodGet, URL: url, Code: resp.StatusCode}
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return nil, lm, resp.StatusCode, &httpx.StatusError{Method: http.MethodGet, URL: url, Code: resp.StatusCode}
 	}
-	return io.ReadAll(resp.Body)
+	// The body streams into the buffer instead of ReadAll: a break
+	// mid-transfer leaves the bytes already received in the buffer, which is
+	// what the caller resumes from — the chunk.memory model
+	// (downloader.cpp:4677-4680).
+	var buf bytes.Buffer
+	_, cpErr := io.Copy(&buf, resp.Body)
+	return buf.Bytes(), lm, resp.StatusCode, cpErr
 }
 
 // appendChunk decompresses the zlib stream and appends the uncompressed bytes

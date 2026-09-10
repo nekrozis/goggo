@@ -5,24 +5,45 @@ import (
 	"fmt"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/nekrozis/goggo/internal/webapi"
 )
 
-// promptCredentials asks for the account credentials on the injected streams.
-// The C++ source prompts on std::cin when --login-email/--login-password are
-// not both set (downloader.cpp:249-276).
-func (c *console) promptCredentials() (email, password string, err error) {
+// promptEmail asks for the account e-mail on the injected streams.
+func (c *console) promptEmail() (string, error) {
 	fmt.Fprint(c.out, "Email: ")
-	email, err = c.readLine()
+	email, err := c.readLine()
 	if err != nil {
-		return "", "", fmt.Errorf("read email: %w", err)
+		return "", fmt.Errorf("read email: %w", err)
+	}
+	return email, nil
+}
+
+// promptPassword asks for the account password.
+//
+// When the input is a real terminal the typed characters are hidden, using
+// golang.org/x/term (the only platform-portable way to do so). With an injected
+// reader — tests, pipes, redirection — there is no terminal to hide behind, so
+// the line is read normally and stays visible; that fallback is what keeps the
+// front end testable.
+func (c *console) promptPassword() (string, error) {
+	if f, ok := c.rawIn.(interface{ Fd() uintptr }); ok && term.IsTerminal(int(f.Fd())) {
+		fmt.Fprint(c.out, "Password: ")
+		secret, err := term.ReadPassword(int(f.Fd()))
+		// The hidden read consumes the newline, so the terminal needs one back.
+		fmt.Fprintln(c.out)
+		if err != nil {
+			return "", fmt.Errorf("read password: %w", err)
+		}
+		return strings.TrimRight(string(secret), "\r\n"), nil
 	}
 	fmt.Fprint(c.out, "Password: ")
-	password, err = c.readLine()
+	password, err := c.readLine()
 	if err != nil {
-		return "", "", fmt.Errorf("read password: %w", err)
+		return "", fmt.Errorf("read password: %w", err)
 	}
-	return email, password, nil
+	return password, nil
 }
 
 // resolveChallenge finishes an interactive login: it prints what the user has

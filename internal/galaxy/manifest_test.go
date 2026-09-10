@@ -119,8 +119,8 @@ func TestHashToGalaxyPath(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := hashToGalaxyPath(c.hash); got != c.want {
-				t.Errorf("hashToGalaxyPath(%q) = %q, want %q", c.hash, got, c.want)
+			if got := HashToGalaxyPath(c.hash); got != c.want {
+				t.Errorf("HashToGalaxyPath(%q) = %q, want %q", c.hash, got, c.want)
 			}
 		})
 	}

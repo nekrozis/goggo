@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/httpx"
@@ -151,7 +153,7 @@ func TestLoginRedirectHop(t *testing.T) {
 // twoStepServer models a login that redirects to a two-step challenge. It
 // exposes the submitted letter names and the auth code that reached the token
 // endpoint.
-func twoStepServer(t *testing.T, kind CodeKind) (*httptest.Server, *string, *string) {
+func twoStepServer(t *testing.T, kind codeKind) (*httptest.Server, *string, *string) {
 	t.Helper()
 	var submitted string
 	var gotCode string
@@ -160,7 +162,7 @@ func twoStepServer(t *testing.T, kind CodeKind) (*httptest.Server, *string, *str
 	letterNames := []string{"letter_1", "letter_2", "letter_3", "letter_4"}
 	letterPrefix := "second_step_authentication[token]"
 	tokenName := "second_step_authentication[_token]"
-	if kind == CodeTOTP {
+	if kind == codeTOTP {
 		challengePath = "/totp"
 		submitPath = "/login/two_factor/totp"
 		letterNames = []string{"letter_1", "letter_2", "letter_3", "letter_4", "letter_5", "letter_6"}
@@ -204,7 +206,7 @@ func twoStepServer(t *testing.T, kind CodeKind) (*httptest.Server, *string, *str
 }
 
 func TestLoginTwoStepChallengeAndContinue(t *testing.T) {
-	srv, submitted, gotCode := twoStepServer(t, CodeTwoStep)
+	srv, submitted, gotCode := twoStepServer(t, codeTwoStep)
 	defer srv.Close()
 	cl, _ := newTestClient(t, srv, 2)
 
@@ -247,7 +249,7 @@ func TestLoginTwoStepChallengeAndContinue(t *testing.T) {
 }
 
 func TestLoginTOTPChallengeAndContinue(t *testing.T) {
-	srv, submitted, gotCode := twoStepServer(t, CodeTOTP)
+	srv, submitted, gotCode := twoStepServer(t, codeTOTP)
 	defer srv.Close()
 	cl, _ := newTestClient(t, srv, 2)
 
@@ -526,7 +528,7 @@ func TestLoginNilGalaxyRejected(t *testing.T) {
 // TestContinueLoginConsumedOnSecondCall locks the one-shot contract: after a
 // successful continuation the same challenge cannot be used again.
 func TestContinueLoginConsumedOnSecondCall(t *testing.T) {
-	srv, _, _ := twoStepServer(t, CodeTwoStep)
+	srv, _, _ := twoStepServer(t, codeTwoStep)
 	defer srv.Close()
 	cl, _ := newTestClient(t, srv, 2)
 
@@ -581,7 +583,7 @@ func TestContinueLoginConsumedBeforeSideEffect(t *testing.T) {
 // may only be continued by the Client that created it, and a mismatch does
 // not consume the challenge (the owning client can still finish it).
 func TestContinueLoginRejectsForeignClient(t *testing.T) {
-	srv, _, _ := twoStepServer(t, CodeTwoStep)
+	srv, _, _ := twoStepServer(t, codeTwoStep)
 	defer srv.Close()
 	owner, _ := newTestClient(t, srv, 2)
 	foreign, _ := newTestClient(t, srv, 2)
@@ -596,5 +598,105 @@ func TestContinueLoginRejectsForeignClient(t *testing.T) {
 	// Not consumed: the owning client can still complete the login.
 	if err := owner.ContinueLogin(context.Background(), challenge, "1234"); err != nil {
 		t.Errorf("owner ContinueLogin after mismatch: %v", err)
+	}
+}
+
+// TestNewPreservesCallerShouldRetry locks the R09a-2 fix: New may override
+// only MaxAttempts and Wait of the httpx policy, never the caller's ShouldRetry
+// predicate. A predicate that refuses every retry must yield exactly one hit.
+func TestNewPreservesCallerShouldRetry(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	cfg := httpx.Config{
+		UserAgent: "goggo-test/1.0",
+		RetryPolicy: httpx.RetryPolicy{
+			ShouldRetry: func(*http.Response, error) bool { return false },
+		},
+	}
+	cl, err := New(cfg, config.NewGalaxyConfig(), Options{Retries: 3})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	cl.ep = endpoints{auth: srv.URL, login: srv.URL, www: srv.URL, embed: srv.URL}
+
+	if _, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{}); err == nil {
+		t.Fatal("Login: want error for HTTP 500")
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Errorf("hits = %d, want 1 (caller ShouldRetry must not be overwritten)", got)
+	}
+}
+
+// TestLoginRetryWaitApplied verifies Options.Wait reaches the retry policy:
+// with Retries=2 there are two extra attempts and therefore two waits. Only a
+// lower bound is asserted so scheduling jitter (which can only add time)
+// cannot make the test flaky; it checks that the waits happened, not how long
+// the request took.
+func TestLoginRetryWaitApplied(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	cl, err := New(httpx.Config{UserAgent: "goggo-test/1.0"}, config.NewGalaxyConfig(),
+		Options{Retries: 2, Wait: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	cl.ep = endpoints{auth: srv.URL, login: srv.URL, www: srv.URL, embed: srv.URL}
+
+	start := time.Now()
+	if _, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{}); err == nil {
+		t.Fatal("Login: want error for HTTP 500")
+	}
+	if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
+		t.Errorf("elapsed = %v, want >= 100ms (two 50ms retry waits)", elapsed)
+	}
+}
+
+// TestWalkRedirectChainBoundaries pins the terminal cases of the manual
+// redirect walk: a 3xx without a Location, a non-3xx response without a code,
+// and a self-referential redirect must each end the walk instead of looping.
+func TestWalkRedirectChainBoundaries(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/noloc", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusFound) // 302 with no Location header
+	})
+	mux.HandleFunc("/plain", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "no code here")
+	})
+	mux.HandleFunc("/loop", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/loop", http.StatusFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cl, _ := newTestClient(t, srv, 0)
+
+	for _, tc := range []struct {
+		name string
+		in   string
+	}{
+		{"3xx without location", srv.URL + "/noloc"},
+		{"non-3xx without code", srv.URL + "/plain"},
+		{"self redirect", srv.URL + "/loop"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, consumeURL, err := cl.walkRedirectChain(context.Background(), tc.in)
+			if err != nil {
+				t.Fatalf("walkRedirectChain: %v", err)
+			}
+			if code != "" {
+				t.Errorf("code = %q, want empty", code)
+			}
+			if consumeURL == "" {
+				t.Errorf("consumeURL = %q, want the current url", consumeURL)
+			}
+		})
 	}
 }

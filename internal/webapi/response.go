@@ -31,15 +31,23 @@ func (c *Client) getResponseJSON(ctx context.Context, url string) (map[string]an
 	return decodeJSONObject(body)
 }
 
-// decodeJSONObject decodes a JSON object body. An empty body is an error
-// (there is no "null object" convention to preserve from the C++ side here).
+// decodeJSONObject decodes a JSON object body. A body that is empty, malformed
+// or not a JSON object is reported as ErrNotJSON: this is a response-SHAPE
+// problem, which callers may want to translate into their own hint (the C++
+// source prints the "--login" advice when the account response is not JSON,
+// website.cpp:820). HTTP-level failures never reach here — getResponse has
+// already turned >= 400 into a *httpx.StatusError.
 func decodeJSONObject(body string) (map[string]any, error) {
 	if strings.TrimSpace(body) == "" {
-		return nil, fmt.Errorf("webapi: empty JSON response")
+		return nil, fmt.Errorf("%w: empty body", ErrNotJSON)
 	}
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(body), &obj); err != nil {
-		return nil, err
+	var v any
+	if err := json.Unmarshal([]byte(body), &v); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrNotJSON, err)
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonKind(v))
 	}
 	return obj, nil
 }

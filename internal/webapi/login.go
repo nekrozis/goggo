@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 // CodeKind distinguishes the two one-time-code flavours internally.
@@ -65,30 +66,54 @@ type LoginOptions struct {
 	ForceBrowser bool
 }
 
-// LoginResult is a successful-login marker. The acquired tokens are stored
-// in the GalaxyConfig passed at construction (SetJSON), not duplicated here.
-type LoginResult struct{}
+// Sentinel errors for the LoginChallenge lifecycle. Other failures are
+// returned as wrapped errors; these two are part of the API contract.
+var (
+	// ErrChallengeConsumed is returned when a LoginChallenge is passed to
+	// ContinueLogin a second time.
+	ErrChallengeConsumed = errors.New("webapi: login challenge already consumed")
+	// ErrChallengeClientMismatch is returned when a LoginChallenge is handed
+	// to a Client other than the one that created it.
+	ErrChallengeClientMismatch = errors.New("webapi: login challenge belongs to a different client")
+)
 
 // LoginChallenge describes an interaction the login flow needs. It carries
 // opaque state (CSRF token, submit endpoint, code kind) that the caller must
 // NOT interpret; the caller only reads Kind/CodeLength/BrowserURL to prompt
 // the user, then passes the obtained string to ContinueLogin.
 //
-// Lifecycle contract: a challenge is bound to the Client that produced it
-// (its state belongs to that client's session and cookie jar). It is not
-// serialisable, must not be handed to a different Client, and must not be
-// used concurrently. ContinueLogin consumes it once.
+// Lifecycle (enforced at runtime, not just documented): a challenge is bound
+// to the Client that produced it (its state belongs to that client's session
+// and cookie jar), and ContinueLogin consumes it exactly once — a second
+// call returns ErrChallengeConsumed. It is not serialisable and must not be
+// used concurrently.
+//
+// It deliberately has no String()/fmt.Stringer method: the state holds an
+// authentication CSRF token that must never leak into logs.
+//
+// Fields are ordered to minimise padding: the state block (strings + int)
+// first, then the exposed strings/int, the pointer, the atomic bool and the
+// kind byte.
 type LoginChallenge struct {
-	Kind ChallengeKind
-	// CodeLength is the expected one-time code length for a
-	// ChallengeTwoFactor challenge (4 or 6, website.cpp:515-525).
-	CodeLength int
+	// state is the opaque continuation state owned by Client.
+	state challengeState
+
 	// BrowserURL is the authorize URL to open for a ChallengeBrowser
 	// challenge.
 	BrowserURL string
 
-	// state is the opaque continuation state owned by Client.
-	state challengeState
+	// CodeLength is the expected one-time code length for a
+	// ChallengeTwoFactor challenge (4 or 6, website.cpp:515-525).
+	CodeLength int
+
+	// client is the Client that produced this challenge.
+	client *Client
+
+	// used is set atomically before the first network side effect of
+	// ContinueLogin, so a challenge can never be submitted twice.
+	used atomic.Bool
+
+	Kind ChallengeKind
 }
 
 // challengeState holds what ContinueLogin needs to finish a two-factor
@@ -117,82 +142,114 @@ const (
 // Login performs the website OAuth login (website.cpp:306-380) up to the
 // first interaction it needs. It resets the client credentials, fetches the
 // login form, tries the curl-based form login unless ForceBrowser is set, and
-// then either completes the token exchange (returning a non-nil LoginResult)
-// or returns a LoginChallenge:
+// then either completes the token exchange or returns a LoginChallenge:
 //
-//   - ChallengeTwoFactor: two-step e-mail or TOTP verification is required.
-//   - ChallengeBrowser: reCAPTCHA blocked the form login, or ForceBrowser
-//     was set; the user must finish login in a browser.
+//   - nil challenge, nil error: login completed; tokens are in the
+//     GalaxyConfig passed at construction.
+//   - challenge, nil error: user interaction is required; call ContinueLogin.
+//   - nil challenge, error: login failed.
 //
-// Complete the flow with ContinueLogin once the user supplied the code or
-// callback URL. Cookie persistence (the C++ COOKIELIST FLUSH) is deferred to
-// S10; the session cookie jar already lives inside the httpx Client.
-func (c *Client) Login(ctx context.Context, email, password string, opts LoginOptions) (*LoginResult, *LoginChallenge, error) {
+// Cookie persistence (the C++ COOKIELIST FLUSH) is deferred to S10; the
+// session cookie jar already lives inside the httpx Client.
+func (c *Client) Login(ctx context.Context, email, password string, opts LoginOptions) (*LoginChallenge, error) {
 	c.galaxy.ResetClient()
 
 	authURL := c.authURL()
 	formHTML, err := c.getResponse(ctx, authURL)
 	if err != nil {
-		return nil, nil, fmt.Errorf("webapi: fetch login form: %w", err)
+		return nil, fmt.Errorf("webapi: fetch login form: %w", err)
 	}
 	bRecaptcha := strings.Contains(formHTML, recaptchaMarker)
 
 	if !opts.ForceBrowser {
 		code, challenge, formErr := c.formLogin(ctx, formHTML, email, password)
 		if challenge != nil {
-			return nil, challenge, nil
+			return challenge, nil
 		}
 		if code != "" {
 			if err := c.exchangeCode(ctx, code); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
-			return &LoginResult{}, nil, nil
+			return nil, nil
 		}
 		// No code: either the form failed or the server wants a captcha.
 		// The C++ source falls back to the browser only when reCAPTCHA was
 		// detected (website.cpp:376).
 		if !bRecaptcha {
 			if formErr != nil {
-				return nil, nil, formErr
+				return nil, formErr
 			}
-			return nil, nil, errors.New("webapi: failed to get auth code")
+			return nil, errors.New("webapi: failed to get auth code")
 		}
 	}
 
-	return nil, &LoginChallenge{Kind: ChallengeBrowser, BrowserURL: authURL}, nil
+	return c.newBrowserChallenge(authURL), nil
 }
 
 // ContinueLogin finishes a Login that returned a LoginChallenge. response is
 // the security code for ChallengeTwoFactor or the pasted callback URL for
 // ChallengeBrowser. The opaque state inside challenge drives the flow.
-func (c *Client) ContinueLogin(ctx context.Context, challenge *LoginChallenge, response string) (*LoginResult, error) {
+//
+// The challenge must belong to c and may be used only once. An invalid
+// response (wrong code length, callback URL without a code) is a caller error
+// that does NOT consume the challenge, so the user can retry. Once a valid
+// response starts the network submission, the challenge is consumed even if
+// the request fails — the same challenge can never be submitted twice.
+func (c *Client) ContinueLogin(ctx context.Context, challenge *LoginChallenge, response string) error {
 	if challenge == nil {
-		return nil, errors.New("webapi: nil login challenge")
+		return errors.New("webapi: nil login challenge")
 	}
+	if challenge.client != c {
+		return ErrChallengeClientMismatch
+	}
+
+	// Validate first: invalid arguments must leave the challenge reusable.
+	code := ""
 	switch challenge.Kind {
 	case ChallengeTwoFactor:
 		if len(response) != challenge.CodeLength {
 			// The C++ source exits here (website.cpp:528-532); Go reports
 			// the invalid length instead of terminating the process.
-			return nil, fmt.Errorf("webapi: security code must be %d characters long", challenge.CodeLength)
+			return fmt.Errorf("webapi: security code must be %d characters long", challenge.CodeLength)
 		}
-		code, err := c.submitSecurityCode(ctx, challenge.state, response)
-		if err != nil {
-			return nil, err
-		}
-		return c.finishWithCode(ctx, code)
 	case ChallengeBrowser:
-		code := extractCode(response)
+		code = extractCode(response)
 		if code == "" {
-			return nil, errors.New("webapi: no auth code in the url pasted from the browser")
+			return errors.New("webapi: no auth code in the url pasted from the browser")
 		}
+	default:
+		return fmt.Errorf("webapi: unknown challenge kind %d", challenge.Kind)
+	}
+
+	// Consume once, atomically, BEFORE any network side effect: a failed
+	// submission must not be retriable with the same challenge.
+	if !challenge.used.CompareAndSwap(false, true) {
+		return ErrChallengeConsumed
+	}
+
+	switch challenge.Kind {
+	case ChallengeTwoFactor:
+		authCode, err := c.submitSecurityCode(ctx, challenge.state, response)
+		if err != nil {
+			return err
+		}
+		return c.finishWithCode(ctx, authCode)
+	case ChallengeBrowser:
 		// Consume the callback URL once with redirects enabled
 		// (website.cpp:627-635). Errors there are printed but do not discard
 		// the code in the C++ source, so they are ignored here too.
 		_ = c.followGet(ctx, response)
 		return c.finishWithCode(ctx, code)
-	default:
-		return nil, fmt.Errorf("webapi: unknown challenge kind %d", challenge.Kind)
+	}
+	return nil // unreachable: kind validated above
+}
+
+// newBrowserChallenge builds a browser challenge bound to c.
+func (c *Client) newBrowserChallenge(authURL string) *LoginChallenge {
+	return &LoginChallenge{
+		client:     c,
+		BrowserURL: authURL,
+		Kind:       ChallengeBrowser,
 	}
 }
 
@@ -275,8 +332,9 @@ func (c *Client) maybeChallenge(ctx context.Context, redirectURL string) (*Login
 		return nil, fmt.Errorf("webapi: no %s token in challenge page", kind)
 	}
 	return &LoginChallenge{
-		Kind:       ChallengeTwoFactor,
+		client:     c,
 		CodeLength: length,
+		Kind:       ChallengeTwoFactor,
 		state:      challengeState{kind: kind, token: token, submit: submit},
 	}, nil
 }
@@ -325,11 +383,8 @@ func (c *Client) submitSecurityCode(ctx context.Context, state challengeState, c
 
 // finishWithCode exchanges an authorization code at the token endpoint and
 // stores the result in galaxy (website.cpp:316-337).
-func (c *Client) finishWithCode(ctx context.Context, code string) (*LoginResult, error) {
-	if err := c.exchangeCode(ctx, code); err != nil {
-		return nil, err
-	}
-	return &LoginResult{}, nil
+func (c *Client) finishWithCode(ctx context.Context, code string) error {
+	return c.exchangeCode(ctx, code)
 }
 
 // exchangeCode performs the token exchange (website.cpp:318-337).

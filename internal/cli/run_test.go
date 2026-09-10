@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/core"
 	"github.com/nekrozis/goggo/internal/model"
 )
 
@@ -177,5 +178,163 @@ func TestRenderWishlist(t *testing.T) {
 	}, "\n")
 	if buf.String() != want {
 		t.Errorf("wishlist output:\n got %q\nwant %q", buf.String(), want)
+	}
+}
+
+// TestGalaxyCommandArgument locks the split of the "<product id or
+// gamename>[/<build id or index>]" argument (main.cpp:840-845). The C++ source
+// ignores anything past the second token, and reads past the end of an empty
+// vector for an argument that produces no token at all.
+func TestGalaxyCommandArgument(t *testing.T) {
+	cases := []struct {
+		value     string
+		wantID    string
+		wantBuild string
+		wantErr   bool
+	}{
+		{value: ""},
+		{value: "12345", wantID: "12345"},
+		{value: "12345/2", wantID: "12345", wantBuild: "2"},
+		{value: "Some Game/1.0", wantID: "Some Game", wantBuild: "1.0"},
+		{value: "12345/2/3", wantID: "12345"},
+		{value: "/", wantErr: true},
+		{value: "//", wantErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.value, func(t *testing.T) {
+			productID, buildID, err := galaxyCommandArgument(c.value, "--galaxy-show-builds")
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("galaxyCommandArgument(%q) must fail", c.value)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("galaxyCommandArgument(%q): %v", c.value, err)
+			}
+			if productID != c.wantID || buildID != c.wantBuild {
+				t.Errorf("got %q/%q, want %q/%q", productID, buildID, c.wantID, c.wantBuild)
+			}
+		})
+	}
+}
+
+// TestRunGalaxyArgumentError locks that a malformed Galaxy argument fails before
+// any session work: no directory is created, no request is made.
+func TestRunGalaxyArgumentError(t *testing.T) {
+	code, out, errOut := run(t, "", "--galaxy-show-builds", "/")
+	if code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+	if out != "" {
+		t.Errorf("stdout = %q, want empty", out)
+	}
+	if !strings.Contains(errOut, "no product id") {
+		t.Errorf("stderr = %q, want the argument error", errOut)
+	}
+}
+
+// TestRunHelpListsGalaxyOptions keeps the help text in step with the parser: an
+// option that runs but is not documented is a user-visible gap.
+func TestRunHelpListsGalaxyOptions(t *testing.T) {
+	_, out, _ := run(t, "", "--help")
+	for _, want := range []string{
+		"--galaxy-show-builds", "--galaxy-list-cdns", "--galaxy-builds-sort", "--galaxy-platform",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("--help output does not mention %s: %q", want, out)
+		}
+	}
+}
+
+// TestRenderBuilds locks the listing line (downloader.cpp:4906-4913).
+func TestRenderBuilds(t *testing.T) {
+	var buf bytes.Buffer
+	rows := []core.BuildRow{
+		{Index: 0, VersionName: "1.0.2", DatePublished: "2024-03-02", Generation: 2, BuildID: "b-new"},
+		{Index: 1, VersionName: "1.0.1", DatePublished: "2024-01-05", Generation: 1, BuildID: "b-old"},
+	}
+	if err := renderBuilds(&buf, rows); err != nil {
+		t.Fatalf("renderBuilds: %v", err)
+	}
+	want := "0: Version 1.0.2 - 2024-03-02 (Gen 2) (Build id: b-new)\n" +
+		"1: Version 1.0.1 - 2024-01-05 (Gen 1) (Build id: b-old)\n"
+	if buf.String() != want {
+		t.Errorf("got %q\nwant %q", buf.String(), want)
+	}
+
+	buf.Reset()
+	if err := renderBuilds(&buf, nil); err != nil {
+		t.Fatalf("renderBuilds(nil): %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("empty listing = %q, want nothing", buf.String())
+	}
+}
+
+// TestRenderManifest locks the three properties the C++ StyledStreamWriter
+// output has: tab indentation, keys in byte order and no HTML escaping. A user
+// pasting the document into a tool must find the URLs intact, so the & of a
+// query string may not become \u0026.
+func TestRenderManifest(t *testing.T) {
+	var buf bytes.Buffer
+	doc := map[string]any{
+		"z": "https://cdn.gog.com/x?a=1&b=<2>",
+		"a": map[string]any{"items": []any{float64(2), true}},
+	}
+	if err := renderManifest(&buf, doc); err != nil {
+		t.Fatalf("renderManifest: %v", err)
+	}
+	want := "{\n" +
+		"\t\"a\": {\n" +
+		"\t\t\"items\": [\n" +
+		"\t\t\t2,\n" +
+		"\t\t\ttrue\n" +
+		"\t\t]\n" +
+		"\t},\n" +
+		"\t\"z\": \"https://cdn.gog.com/x?a=1&b=<2>\"\n" +
+		"}\n"
+	if buf.String() != want {
+		t.Errorf("got %q\nwant %q", buf.String(), want)
+	}
+}
+
+// TestRenderCDNNames locks the one-name-per-line output
+// (downloader.cpp:4394-4395).
+func TestRenderCDNNames(t *testing.T) {
+	var buf bytes.Buffer
+	if err := renderCDNNames(&buf, []string{"gog-cdn-fastly", "gog-cdn-cloudflare"}); err != nil {
+		t.Fatalf("renderCDNNames: %v", err)
+	}
+	if want := "gog-cdn-fastly\ngog-cdn-cloudflare\n"; buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
+// TestRenderNotice locks the stream split: the C++ source prints the support and
+// generation messages to stdout and the argument-resolution failures to stderr.
+func TestRenderNotice(t *testing.T) {
+	var out, errOut bytes.Buffer
+
+	renderNotice(&out, &errOut, core.Notice{})
+	if out.Len() != 0 || errOut.Len() != 0 {
+		t.Errorf("an empty notice wrote %q / %q, want nothing", out.String(), errOut.String())
+	}
+
+	renderNotice(&out, &errOut, core.Notice{Text: "Only generation 2 builds are supported currently"})
+	if want := "Only generation 2 builds are supported currently\n"; out.String() != want {
+		t.Errorf("stdout = %q, want %q", out.String(), want)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr = %q, want nothing for a stdout notice", errOut.String())
+	}
+
+	out.Reset()
+	renderNotice(&out, &errOut, core.Notice{Text: "Didn't match any products", Err: true})
+	if out.Len() != 0 {
+		t.Errorf("stdout = %q, want nothing for a stderr notice", out.String())
+	}
+	if want := "Didn't match any products\n"; errOut.String() != want {
+		t.Errorf("stderr = %q, want %q", errOut.String(), want)
 	}
 }

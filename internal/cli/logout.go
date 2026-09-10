@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/core"
 )
 
 // logout clears the local login state: the Galaxy token store and the cookie
@@ -23,10 +24,10 @@ import (
 // cache root holds the XML directory; all of those are left alone, as is any
 // other program's data.
 //
-// It deliberately does NOT go through Open: a Session flushes its cookie jar on
-// Close, which would write cookies.txt straight back and undo the removal, and
-// an Open that is allowed to log in could start a fresh login. Nothing here
-// creates a directory, opens a socket or reads a cookie.
+// It deliberately does NOT go through core.Open: a core.Downloader flushes its
+// cookie jar on Close, which would write cookies.txt straight back and undo the
+// removal, and an Open that is allowed to log in could start a fresh login.
+// Nothing here creates a directory, opens a socket or reads a cookie.
 //
 // Removal is idempotent: a path that is already gone counts as success, so
 // running --logout twice is as successful as running it once. Only a genuine
@@ -36,9 +37,10 @@ import (
 // leaves the first one already gone.
 //
 // The paths come from the configuration rather than being rebuilt here, so a
-// later configurable cookie path is followed automatically.
+// later configurable cookie path is followed automatically; the token store is
+// named through core, which defines where it lives.
 func logout(cfg config.Config, out io.Writer) error {
-	for _, path := range []string{tokenPath(cfg), cfg.Curl.CookiePath} {
+	for _, path := range []string{core.TokenPath(cfg), cfg.Curl.CookiePath} {
 		if err := removeAuthFile(path); err != nil {
 			return err
 		}

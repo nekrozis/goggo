@@ -329,3 +329,74 @@ func TestIdentityIsSeparateFromCompatibility(t *testing.T) {
 		t.Errorf("UserAgent = %q must not carry the upstream product name", ua)
 	}
 }
+
+// TestParseGalaxyCommands locks the two Galaxy commands and their two settings
+// (main.cpp:329,334,340,346), including the two defaults this layer owns
+// because the C++ front end declares them next to the options.
+func TestParseGalaxyCommands(t *testing.T) {
+	inv := parse(t)
+	if inv.Config.GalaxyBuildSortingOrder != defaultGalaxyBuildSort {
+		t.Errorf("galaxy-builds-sort default = %q, want %q",
+			inv.Config.GalaxyBuildSortingOrder, defaultGalaxyBuildSort)
+	}
+	if inv.Config.DownloadConfig.GalaxyPlatform != config.PlatformWindows {
+		t.Errorf("galaxy-platform default = %d, want the Windows value",
+			inv.Config.DownloadConfig.GalaxyPlatform)
+	}
+	if inv.GalaxyShowBuilds != "" || inv.GalaxyListCDNs != "" {
+		t.Error("no Galaxy command may be requested by default")
+	}
+
+	// The argument is kept verbatim: splitting it into product and build is the
+	// dispatcher's job (main.cpp:840-845).
+	inv = parse(t, "--galaxy-show-builds", "12345/2")
+	if inv.GalaxyShowBuilds != "12345/2" {
+		t.Errorf("--galaxy-show-builds = %q, want the raw argument", inv.GalaxyShowBuilds)
+	}
+
+	inv = parse(t, "--galaxy-list-cdns=12345", "--galaxy-builds-sort", "date", "--galaxy-platform", "linux")
+	if inv.GalaxyListCDNs != "12345" {
+		t.Errorf("--galaxy-list-cdns = %q, want the value after =", inv.GalaxyListCDNs)
+	}
+	if inv.Config.GalaxyBuildSortingOrder != "date" {
+		t.Errorf("galaxy-builds-sort = %q, want date", inv.Config.GalaxyBuildSortingOrder)
+	}
+	if inv.Config.DownloadConfig.GalaxyPlatform != config.PlatformLinux {
+		t.Errorf("galaxy-platform = %d, want the Linux value", inv.Config.DownloadConfig.GalaxyPlatform)
+	}
+
+	// An unrecognised order is accepted: the C++ source only acts on two of them
+	// and leaves the list alone otherwise (downloader.cpp:6826-6830).
+	inv = parse(t, "--galaxy-builds-sort", "whatever")
+	if inv.Config.GalaxyBuildSortingOrder != "whatever" {
+		t.Errorf("galaxy-builds-sort = %q, want the value stored as given",
+			inv.Config.GalaxyBuildSortingOrder)
+	}
+}
+
+// TestParseGalaxyErrors locks the two rejected shapes: a missing value and an
+// unmatched platform. The platform rejection is a recorded difference — the C++
+// Util::getOptionValue returns 0 for an unknown name and the front end then
+// treats it as Windows, while --platform already rejects it here.
+func TestParseGalaxyErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "missing value", args: []string{"--galaxy-show-builds"}, want: "requires a value"},
+		{name: "missing sort value", args: []string{"--galaxy-builds-sort"}, want: "requires a value"},
+		{
+			name: "unknown platform", args: []string{"--galaxy-platform", "nope"},
+			want: "invalid value for --galaxy-platform",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := Parse(c.args, testDefaults())
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err = %v, want it to contain %q", err, c.want)
+			}
+		})
+	}
+}

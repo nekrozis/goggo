@@ -1,4 +1,4 @@
-package cli
+package core
 
 import (
 	"context"
@@ -10,83 +10,68 @@ import (
 
 	"github.com/nekrozis/goggo/internal/auth"
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/galaxy"
 	"github.com/nekrozis/goggo/internal/httpx"
 	"github.com/nekrozis/goggo/internal/webapi"
 )
 
-// Session is the state one run needs: the website client (which owns the
-// transport and the cookie jar), the Galaxy credential store and whether the
-// account is usable.
-//
-// Fields are ordered to minimise padding: the pointers and the config first,
-// then the bool.
-//
-// This is the temporary home of the orchestration the C++ original keeps in
-// Downloader (downloader.cpp:179-237 and its constructor). When internal/core
-// is ported (S17) it moves there; nothing else in this package should grow into
-// a second orchestration layer in the meantime.
-type Session struct {
-	Config config.Config
-	HTTP   *httpx.Client
-	Web    *webapi.Client
-	Galaxy *config.GalaxyConfig
-
-	// LoggedIn mirrors Downloader::isLoggedIn(): the website session is valid
-	// AND the Galaxy access token is not expired.
-	LoggedIn bool
-}
-
-// Open prepares a session: it loads the persisted cookies and token, refreshes
-// the token when it has expired and, unless allowLogin is false, runs the login
-// flow when the account is not usable.
+// Open prepares the run: it creates the directories, the transport, the cookie
+// jar, the two protocol clients and the Galaxy credential store, loads the
+// persisted cookies and token, refreshes the token when it has expired and,
+// unless allowLogin is false, runs the login flow when the account is not
+// usable.
 //
 // allowLogin exists because the C++ front end answers --check-login-status
 // before it ever considers logging in (main.cpp:685-698).
-func Open(ctx context.Context, cfg config.Config, ui *console, allowLogin bool) (*Session, error) {
+func Open(ctx context.Context, cfg config.Config, ui Console, allowLogin bool) (*Downloader, error) {
 	// Directories first: every persistence path below writes into them.
 	if err := ensureDirectories(cfg); err != nil {
 		return nil, err
 	}
-	galaxy := config.NewGalaxyConfig()
+	galaxyStore := config.NewGalaxyConfig()
 	// The session owns the transport: the login flow's cookies live in this
 	// client's jar, and the same handle persists them.
 	hx, err := httpx.New(httpxCfg(cfg))
 	if err != nil {
 		return nil, err
 	}
-	web, err := webapi.New(hx, galaxy)
+	web, err := webapi.New(hx, galaxyStore)
+	if err != nil {
+		return nil, err
+	}
+	gx, err := galaxy.New(hx, galaxyStore)
 	if err != nil {
 		return nil, err
 	}
 
-	s := &Session{Config: cfg, HTTP: hx, Web: web, Galaxy: galaxy}
+	d := &Downloader{cfg: cfg, ui: ui, http: hx, web: web, galaxy: gx, token: galaxyStore}
 	if err := hx.LoadCookies(); err != nil {
 		return nil, err
 	}
-	if err := auth.LoadTokenFile(s.Galaxy, tokenPath(cfg)); err != nil {
+	if err := auth.LoadTokenFile(d.token, TokenPath(cfg)); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
 			return nil, err
 		}
 		// No token file yet: a fresh install, exactly like the C++ loader
 		// leaving an empty store.
 	}
-	s.Galaxy.SetFilepath(tokenPath(cfg))
+	d.token.SetFilepath(TokenPath(cfg))
 
-	if s.Galaxy.IsExpired() && s.Galaxy.GetRefreshToken() != "" {
-		if err := auth.NewClient(hx).Refresh(ctx, s.Galaxy); err == nil {
-			_ = auth.SaveTokenFile(s.Galaxy, s.Galaxy.GetFilepath())
+	if d.token.IsExpired() && d.token.GetRefreshToken() != "" {
+		if err := auth.NewClient(hx).Refresh(ctx, d.token); err == nil {
+			_ = auth.SaveTokenFile(d.token, d.token.GetFilepath())
 		}
 		// A failed refresh is not fatal here: the login flow below decides.
 	}
 
-	s.LoggedIn = s.checkLoggedIn(ctx)
-	if allowLogin && (cfg.Login || !s.LoggedIn) {
-		if err := s.login(ctx, ui); err != nil {
+	d.loggedIn = d.checkLoggedIn(ctx)
+	if allowLogin && (cfg.Login || !d.loggedIn) {
+		if err := d.Login(ctx); err != nil {
 			return nil, err
 		}
-		s.LoggedIn = true
+		d.loggedIn = true
 	}
-	return s, nil
+	return d, nil
 }
 
 // httpxCfg maps the CLI configuration onto the transport configuration.
@@ -109,18 +94,20 @@ func httpxCfg(cfg config.Config) httpx.Config {
 	}
 }
 
-// tokenPath is the Galaxy token store location (main.cpp:81).
-func tokenPath(cfg config.Config) string {
+// TokenPath is the Galaxy token store location (main.cpp:81). It is exported
+// because the location is this layer's to define: Open loads and saves through
+// it, and the front end's local logout removes exactly this file.
+func TokenPath(cfg config.Config) string {
 	return cfg.ConfigDirectory + "/galaxy_tokens.json"
 }
 
 // checkLoggedIn mirrors Downloader::isLoggedIn (downloader.cpp:179-198).
-func (s *Session) checkLoggedIn(ctx context.Context) bool {
-	ok, err := s.Web.IsLoggedIn(ctx)
+func (d *Downloader) checkLoggedIn(ctx context.Context) bool {
+	ok, err := d.web.IsLoggedIn(ctx)
 	if err != nil {
 		return false
 	}
-	return ok && !s.Galaxy.IsExpired()
+	return ok && !d.token.IsExpired()
 }
 
 // ensureDirectories creates the per-user directories the program writes to,
@@ -160,10 +147,10 @@ func ensureDirectories(cfg config.Config) error {
 //   - and a value still empty is reported the way upstream reports it
 //     (downloader.cpp:282-288).
 //
-// interactive is passed in rather than read from ui here so the branch
+// interactive is passed in rather than read from the console here so the branch
 // structure is testable without a terminal; the decision itself lives in one
-// place, console.terminalFd.
-func credentials(cfg config.Config, ui *console, interactive bool) (email, password string, err error) {
+// place, Console.IsTerminal.
+func credentials(cfg config.Config, ui Console, interactive bool) (email, password string, err error) {
 	email, password = cfg.Email, cfg.Password
 	if email != "" && password != "" {
 		return email, password, nil
@@ -175,12 +162,12 @@ func credentials(cfg config.Config, ui *console, interactive bool) (email, passw
 		return "", "", headlessCredentials(cfg, ui)
 	}
 	if email == "" {
-		if email, err = ui.promptEmail(); err != nil {
+		if email, err = ui.PromptEmail(); err != nil {
 			return "", "", err
 		}
 	}
 	if password == "" {
-		if password, err = ui.promptPassword(); err != nil {
+		if password, err = ui.PromptPassword(); err != nil {
 			return "", "", err
 		}
 	}
@@ -205,60 +192,60 @@ func credentials(cfg config.Config, ui *console, interactive bool) (email, passw
 //     credentials. The behavioural difference the C++ source attached to the
 //     file check lives in the code above, not in the wording. ② keeps the hint
 //     actionable: --login cannot prompt here either, so the flags are named.
-func headlessCredentials(cfg config.Config, ui *console) error {
-	fmt.Fprintln(ui.out, cfg.Curl.CookiePath)
-	fmt.Fprintln(ui.out, tokenPath(cfg))
+func headlessCredentials(cfg config.Config, ui Console) error {
+	fmt.Fprintln(ui.Out(), cfg.Curl.CookiePath)
+	fmt.Fprintln(ui.Out(), TokenPath(cfg))
 	return errors.New("no credentials available in a non-interactive session; " +
 		"run --login in a terminal, or pass --login-email/--login-password")
 }
 
-// login runs the login flow (downloader.cpp:243-326), reporting progress on
+// Login runs the login flow (downloader.cpp:243-326), reporting progress on
 // stderr the way the C++ source does.
-func (s *Session) login(ctx context.Context, ui *console) error {
-	email, password, err := credentials(s.Config, ui, ui.isTerminal())
+func (d *Downloader) Login(ctx context.Context) error {
+	email, password, err := credentials(d.cfg, d.ui, d.ui.IsTerminal())
 	if err != nil {
 		return err
 	}
 
-	challenge, err := s.Web.Login(ctx, email, password, webapi.LoginOptions{
-		ForceBrowser: s.Config.ForceBrowserLogin,
+	challenge, err := d.web.Login(ctx, email, password, webapi.LoginOptions{
+		ForceBrowser: d.cfg.ForceBrowserLogin,
 	})
 	if err != nil {
 		return fmt.Errorf("Galaxy: Login failed: %w", err)
 	}
 	if challenge != nil {
-		if err := ui.resolveChallenge(ctx, s.Web, challenge); err != nil {
+		if err := d.ui.ResolveChallenge(ctx, d.web, challenge); err != nil {
 			// An unfinished challenge leaves the flow without tokens, which
 			// the C++ source also reports as a Galaxy login failure
 			// (website.cpp:345-348, downloader.cpp:300-304).
 			return fmt.Errorf("Galaxy: Login failed: %w", err)
 		}
 	}
-	fmt.Fprintln(ui.errOut, "Galaxy: Login successful")
+	fmt.Fprintln(d.ui.ErrOut(), "Galaxy: Login successful")
 
 	// Persist what the login produced: the token file (saveGalaxyJSON,
 	// downloader.cpp:308-312) and the cookie jar (the C++ COOKIELIST FLUSH).
-	if err := auth.SaveTokenFile(s.Galaxy, s.Galaxy.GetFilepath()); err != nil {
+	if err := auth.SaveTokenFile(d.token, d.token.GetFilepath()); err != nil {
 		return err
 	}
 
 	// The website session probe that decides HTTP login success
 	// (downloader.cpp:314-322).
-	ok, err := s.Web.IsLoggedIn(ctx)
+	ok, err := d.web.IsLoggedIn(ctx)
 	if err != nil {
 		return fmt.Errorf("HTTP: Login failed: %w", err)
 	}
 	if !ok {
 		return errors.New("HTTP: Login failed")
 	}
-	fmt.Fprintln(ui.errOut, "HTTP: Login successful")
+	fmt.Fprintln(d.ui.ErrOut(), "HTTP: Login successful")
 
-	_, err = s.HTTP.SaveCookies()
+	_, err = d.http.SaveCookies()
 	return err
 }
 
 // Close flushes the cookie jar, mirroring the C++ flush on the way out.
-func (s *Session) Close() error {
-	_, err := s.HTTP.SaveCookies()
+func (d *Downloader) Close() error {
+	_, err := d.http.SaveCookies()
 	return err
 }

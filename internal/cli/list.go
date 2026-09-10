@@ -9,6 +9,7 @@ import (
 
 	"github.com/nekrozis/goggo/internal/catalog"
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/core"
 	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/util"
 )
@@ -24,36 +25,44 @@ const (
 // renderList fetches and prints one of the list formats this build supports.
 // The data always comes from internal/catalog (or webapi for the tag table);
 // the CLI never re-implements filtering or mapping here.
-func renderList(ctx context.Context, s *Session, inv Invocation, w io.Writer) error {
+//
+// The fetching still happens on this side of the boundary: S17 moved the
+// session and the Galaxy commands into internal/core but deliberately left the
+// listing command where it was (review ruling D17=b), so the orchestration it
+// needs is reached through the two accessors below. The whole function moves
+// into internal/core when the listing does.
+func renderList(ctx context.Context, d *core.Downloader, inv Invocation, w io.Writer) error {
+	cfg := d.Config()
+	web := d.Web()
 	switch inv.ListFormat {
 	case config.ListFormatGames:
-		res, err := catalog.List(ctx, s.Web, catalog.ListOptions{
-			Tags:              s.Config.DownloadConfig.Tags,
-			GameRegex:         s.Config.GameRegex,
-			FilterListPath:    s.Config.GameListFilePath,
-			IgnoreDLCCountRE:  s.Config.IgnoreDLCCountRegex,
-			InstallerPlatform: s.Config.DownloadConfig.InstallerPlatform,
-			Include:           s.Config.DownloadConfig.Include,
-			Updated:           s.Config.Updated,
-			NewOnly:           s.Config.New,
-			IncludeHidden:     s.Config.IncludeHiddenProducts,
-			PlatformDetection: s.Config.PlatformDetection,
-			UpdateCache:       s.Config.UpdateCache,
+		res, err := catalog.List(ctx, web, catalog.ListOptions{
+			Tags:              cfg.DownloadConfig.Tags,
+			GameRegex:         cfg.GameRegex,
+			FilterListPath:    cfg.GameListFilePath,
+			IgnoreDLCCountRE:  cfg.IgnoreDLCCountRegex,
+			InstallerPlatform: cfg.DownloadConfig.InstallerPlatform,
+			Include:           cfg.DownloadConfig.Include,
+			Updated:           cfg.Updated,
+			NewOnly:           cfg.New,
+			IncludeHidden:     cfg.IncludeHiddenProducts,
+			PlatformDetection: cfg.PlatformDetection,
+			UpdateCache:       cfg.UpdateCache,
 		})
 		if err != nil {
 			return err
 		}
-		return renderGames(w, res.Games, s.Config.Color)
+		return renderGames(w, res.Games, cfg.Color)
 	case config.ListFormatTags:
-		tags, err := s.Web.Tags(ctx)
+		tags, err := web.Tags(ctx)
 		if err != nil {
 			return err
 		}
 		return renderTags(w, tags)
 	case config.ListFormatWishlist:
-		items, err := catalog.Wishlist(ctx, s.Web, catalog.WishlistOptions{
-			InstallerPlatform: s.Config.DownloadConfig.InstallerPlatform,
-			PlatformDetection: s.Config.PlatformDetection,
+		items, err := catalog.Wishlist(ctx, web, catalog.WishlistOptions{
+			InstallerPlatform: cfg.DownloadConfig.InstallerPlatform,
+			PlatformDetection: cfg.PlatformDetection,
 		})
 		if err != nil {
 			return err

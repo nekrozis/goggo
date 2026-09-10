@@ -23,6 +23,14 @@ type Invocation struct {
 	// is reported as an error rather than silently succeeding.
 	Unsupported string
 
+	// GalaxyShowBuilds and GalaxyListCDNs carry the --galaxy-show-builds and
+	// --galaxy-list-cdns arguments. Both are "<product id or gamename>[/<build
+	// id or index>]"; an empty value means the command was not requested, which
+	// is also what an explicitly empty argument means (main.cpp:839,888 test
+	// the value for emptiness).
+	GalaxyShowBuilds string
+	GalaxyListCDNs   string
+
 	// ListFormat is the --list format mask; 0 means --list was not given.
 	ListFormat uint32
 
@@ -32,6 +40,15 @@ type Invocation struct {
 	Logout           bool
 	List             bool
 }
+
+// Galaxy option defaults (main.cpp:329,340). They live here rather than in
+// internal/config because they are boost default_value values, which the C++
+// front end declares next to the options themselves; config.NewConfig gains the
+// remaining option defaults with the full table (S24).
+const (
+	defaultGalaxyBuildSort = "score"
+	defaultGalaxyPlatform  = "w"
+)
 
 // Parse applies the command-line flags on top of cfg (the defaults), returning
 // the resulting invocation.
@@ -45,6 +62,12 @@ type Invocation struct {
 // an error.
 func Parse(args []string, cfg config.Config) (Invocation, error) {
 	inv := Invocation{Config: cfg}
+
+	// Galaxy option defaults, applied before any flag is read the way boost's
+	// default_value does (main.cpp:329,340): the build sorting order and the
+	// Galaxy platform.
+	inv.Config.GalaxyBuildSortingOrder = defaultGalaxyBuildSort
+	inv.Config.DownloadConfig.GalaxyPlatform = util.OptionValue(defaultGalaxyPlatform, config.Platforms, true)
 
 	var (
 		includeSeen string
@@ -247,6 +270,40 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 			} else {
 				inv.Config.IgnoreDLCCountRegex = ".*"
 			}
+		case "galaxy-builds-sort":
+			v, err := takeValue()
+			if err != nil {
+				return inv, err
+			}
+			// The C++ source stores the value without validating it; an
+			// unknown order simply does not reorder anything (downloader
+			// .cpp:6826-6830).
+			inv.Config.GalaxyBuildSortingOrder = v
+		case "galaxy-show-builds":
+			v, err := takeValue()
+			if err != nil {
+				return inv, err
+			}
+			inv.GalaxyShowBuilds = v
+		case "galaxy-list-cdns":
+			v, err := takeValue()
+			if err != nil {
+				return inv, err
+			}
+			inv.GalaxyListCDNs = v
+		case "galaxy-platform":
+			v, err := takeValue()
+			if err != nil {
+				return inv, err
+			}
+			// Difference (recorded): Util::getOptionValue returns 0 for an
+			// unmatched value and the C++ source then treats it as Windows; this
+			// port rejects it, the way --platform already does.
+			mask := util.OptionValue(v, config.Platforms, true)
+			if mask == 0 {
+				return inv, fmt.Errorf("invalid value for --galaxy-platform: %q", v)
+			}
+			inv.Config.DownloadConfig.GalaxyPlatform = mask
 		// Recognised but not implemented in this build (review lock, W2/W3):
 		// they fail loudly instead of pretending to work.
 		case "save-config", "reset-config", "update-cache",
@@ -333,6 +390,10 @@ Options:
   --unit-format <IEC|SI>      Unit format (default: IEC)
   --retries <n>               Maximum number of retries (default: 3)
   --wait <microseconds>       Time to wait between requests
+  --galaxy-builds-sort <s>    Sorting order for Galaxy builds (date|score|none, default: score)
+  --galaxy-show-builds <id>   Show game builds (<product id or gamename>[/<build id or index>])
+  --galaxy-list-cdns <id>     List available CDNs (<product id or gamename>[/<build id or index>])
+  --galaxy-platform <spec>    Galaxy platform (default: w)
   --cacert <path>             CA certificate bundle in PEM format
   --no-color                  Don't use coloring in the status messages
   --respect-umask             Do not adjust permissions of sensitive files

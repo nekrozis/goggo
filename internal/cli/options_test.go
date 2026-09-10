@@ -217,6 +217,61 @@ func TestParseBrowserLoginImpliesLogin(t *testing.T) {
 	}
 }
 
+// TestParseLogout locks the goggo-native --logout flag: it selects the local
+// logout action and must not imply a login.
+func TestParseLogout(t *testing.T) {
+	inv := parse(t, "--logout")
+	if !inv.Logout {
+		t.Error("--logout must set Logout")
+	}
+	if inv.Config.Login || inv.Config.ForceBrowserLogin {
+		t.Error("--logout must not imply a login")
+	}
+}
+
+// TestParseLogoutConflicts locks the Q1/Q5 ruling: --logout is a mutation that
+// clears the whole local login state, so pairing it with another action is
+// refused by name rather than resolved silently. --check-login-status is a
+// query and is deliberately NOT a conflict (query > mutation, Q7), and
+// --help/--version are answered by the dispatcher before anything runs.
+func TestParseLogoutConflicts(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string // empty means the command line is accepted
+	}{
+		{name: "alone", args: []string{"--logout"}},
+		{name: "with login", args: []string{"--logout", "--login"}, want: "--logout cannot be combined with --login"},
+		{name: "login first", args: []string{"--login", "--logout"}, want: "--logout cannot be combined with --login"},
+		{name: "with browser login", args: []string{"--logout", "--browser-login"}, want: "--logout cannot be combined with --browser-login"},
+		{name: "with list", args: []string{"--logout", "--list"}, want: "--logout cannot be combined with --list"},
+		{name: "with list format", args: []string{"--logout", "--list", "tags"}, want: "--logout cannot be combined with --list"},
+		{name: "with check-login-status", args: []string{"--logout", "--check-login-status"}},
+		{name: "with help", args: []string{"--logout", "--help"}},
+		{name: "with version", args: []string{"--logout", "--version"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			inv, err := Parse(c.args, testDefaults())
+			if c.want == "" {
+				if err != nil {
+					t.Fatalf("Parse(%v) must be accepted: %v", c.args, err)
+				}
+				if !inv.Logout {
+					t.Errorf("Parse(%v) must still set Logout", c.args)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Parse(%v) must be refused", c.args)
+			}
+			if err.Error() != c.want {
+				t.Errorf("err = %q, want %q", err.Error(), c.want)
+			}
+		})
+	}
+}
+
 func TestParseIgnoresExtraDashesAndEquals(t *testing.T) {
 	inv := parse(t, "-directory=/games", "--retries=2")
 	if inv.Config.Directories.Directory != "/games" || inv.Config.Retries != 2 {

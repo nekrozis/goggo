@@ -20,14 +20,19 @@ import (
 )
 
 // console carries the streams and the buffered reader shared by the prompts.
+//
+// rawIn is the reader exactly as it was handed in: the password prompt needs it
+// to ask whether the input is a real terminal, which the buffered reader hides.
+// All four fields are interface values, so their order does not affect the size.
 type console struct {
 	in     *bufio.Reader
+	rawIn  io.Reader
 	out    io.Writer
 	errOut io.Writer
 }
 
 func newConsole(in io.Reader, out, errOut io.Writer) *console {
-	return &console{in: bufio.NewReader(in), out: out, errOut: errOut}
+	return &console{in: bufio.NewReader(in), rawIn: in, out: out, errOut: errOut}
 }
 
 // readLine reads one line without its trailing newline.

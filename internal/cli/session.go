@@ -3,7 +3,9 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
+	"os"
 	"time"
 
 	"github.com/nekrozis/goggo/internal/auth"
@@ -41,6 +43,10 @@ type Session struct {
 // allowLogin exists because the C++ front end answers --check-login-status
 // before it ever considers logging in (main.cpp:685-698).
 func Open(ctx context.Context, cfg config.Config, ui *console, allowLogin bool) (*Session, error) {
+	// Directories first: every persistence path below writes into them.
+	if err := ensureDirectories(cfg); err != nil {
+		return nil, err
+	}
 	galaxy := config.NewGalaxyConfig()
 	// The session owns the transport: the login flow's cookies live in this
 	// client's jar, and the same handle persists them.
@@ -112,16 +118,52 @@ func (s *Session) checkLoggedIn(ctx context.Context) bool {
 	return ok && !s.Galaxy.IsExpired()
 }
 
-// login runs the interactive login flow: credentials come from the flags when
-// both are set, otherwise from the prompt (downloader.cpp:249-276).
-func (s *Session) login(ctx context.Context, ui *console) error {
-	email, password := s.Config.Email, s.Config.Password
-	if email == "" || password == "" {
-		var err error
-		email, password, err = ui.promptCredentials()
-		if err != nil {
-			return err
+// ensureDirectories creates the per-user directories the program writes to,
+// mirroring main.cpp:377-406 (the XML, configuration and cache directories).
+//
+// The token, cookie and configuration files all live under the configuration
+// directory and their writers create temporary files there, so it has to exist
+// before the first persistence — the C++ front end creates it during startup
+// for the same reason.
+//
+// The mode is Unix semantics. On Windows the permission bits carry no
+// filesystem meaning; there the requirement is simply that the directory gets
+// created.
+func ensureDirectories(cfg config.Config) error {
+	for _, dir := range []string{cfg.XMLDirectory, cfg.ConfigDirectory, cfg.CacheDirectory} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("create directory %q: %w", dir, err)
 		}
+	}
+	return nil
+}
+
+// credentials resolves the login credentials, prompting only for what is
+// missing.
+//
+// Intentional difference from the C++ source, which prompts for both unless
+// both flags are set (downloader.cpp:249-252): each missing value is asked for
+// on demand, so --login-email alone asks only for the password.
+func credentials(cfg config.Config, ui *console) (email, password string, err error) {
+	email, password = cfg.Email, cfg.Password
+	if email == "" {
+		if email, err = ui.promptEmail(); err != nil {
+			return "", "", err
+		}
+	}
+	if password == "" {
+		if password, err = ui.promptPassword(); err != nil {
+			return "", "", err
+		}
+	}
+	return email, password, nil
+}
+
+// login runs the interactive login flow (downloader.cpp:249-276).
+func (s *Session) login(ctx context.Context, ui *console) error {
+	email, password, err := credentials(s.Config, ui)
+	if err != nil {
+		return err
 	}
 
 	challenge, err := s.Web.Login(ctx, email, password, webapi.LoginOptions{

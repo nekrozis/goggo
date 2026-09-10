@@ -194,6 +194,29 @@ func TestParseLoginAndFilterFlags(t *testing.T) {
 	}
 }
 
+// TestParseBrowserLoginImpliesLogin locks main.cpp:472-475: --browser-login
+// selects the login path itself, so it must set Login too. Without it, Open's
+// trigger (cfg.Login || !LoggedIn) would short-circuit on a stored session and
+// a requested browser login would never run.
+func TestParseBrowserLoginImpliesLogin(t *testing.T) {
+	inv := parse(t, "--browser-login")
+	if !inv.Config.ForceBrowserLogin {
+		t.Error("--browser-login must set ForceBrowserLogin")
+	}
+	if !inv.Config.Login {
+		t.Error("--browser-login must also set Login (main.cpp:472-475)")
+	}
+
+	// The implication is one-way: --login must not force the browser flow.
+	inv = parse(t, "--login")
+	if !inv.Config.Login {
+		t.Error("--login must set Login")
+	}
+	if inv.Config.ForceBrowserLogin {
+		t.Error("--login must not set ForceBrowserLogin")
+	}
+}
+
 func TestParseIgnoresExtraDashesAndEquals(t *testing.T) {
 	inv := parse(t, "-directory=/games", "--retries=2")
 	if inv.Config.Directories.Directory != "/games" || inv.Config.Retries != 2 {

@@ -86,7 +86,12 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 		case "login":
 			inv.Config.Login = true
 		case "browser-login":
+			// --browser-login selects the login path itself (main.cpp:472-475):
+			// it must force a fresh login even when a session is already
+			// stored, and Open's trigger (cfg.Login || !LoggedIn) does that
+			// only when Login is set.
 			inv.Config.ForceBrowserLogin = true
+			inv.Config.Login = true
 		case "login-email":
 			v, err := takeValue()
 			if err != nil {

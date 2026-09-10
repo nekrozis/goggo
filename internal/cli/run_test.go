@@ -240,10 +240,33 @@ func TestRunHelpListsGalaxyOptions(t *testing.T) {
 	_, out, _ := run(t, "", "--help")
 	for _, want := range []string{
 		"--galaxy-show-builds", "--galaxy-list-cdns", "--galaxy-builds-sort", "--galaxy-platform",
+		"--galaxy-install", "--galaxy-language", "--galaxy-arch",
+		"--galaxy-cdn-priority", "--subdir-galaxy-install",
+		"--galaxy-no-dependencies", "--no-subdirectories",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("--help output does not mention %s: %q", want, out)
 		}
+	}
+}
+
+// TestRunGalaxyInstallArgumentError locks that the install argument is resolved
+// before any session work, like the other two Galaxy commands: a malformed one
+// fails without opening a session or touching the network.
+//
+// The not-implemented answer needs a session, so it is covered where the
+// orchestration lives (core.TestInstallNotImplemented) plus a field check; this
+// test stays on the side of the boundary that is offline.
+func TestRunGalaxyInstallArgumentError(t *testing.T) {
+	code, out, errOut := run(t, "", "--galaxy-install", "/")
+	if code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+	if out != "" {
+		t.Errorf("stdout = %q, want empty", out)
+	}
+	if !strings.Contains(errOut, "no product id") {
+		t.Errorf("stderr = %q, want the argument error", errOut)
 	}
 }
 

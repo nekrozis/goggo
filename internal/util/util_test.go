@@ -149,6 +149,33 @@ func TestParseOptionString(t *testing.T) {
 	}
 }
 
+// TestOptionByID locks the exact-match lookup: the Galaxy layer resolves a
+// language flag to its expression and an architecture flag to its code this way,
+// and both fall back when nothing matches.
+func TestOptionByID(t *testing.T) {
+	o, ok := OptionByID(config.LangEN, config.Languages)
+	if !ok || o.Code != "en" || o.Regexp != "en|eng|english|en[_-]US" {
+		t.Errorf("OptionByID(LangEN) = %+v, %v", o, ok)
+	}
+
+	if _, ok := OptionByID(0, config.Languages); ok {
+		t.Error("0 must match no entry")
+	}
+	// A composite flag equals no single entry, which is what the C++ loop finds
+	// too: it compares id for equality.
+	if _, ok := OptionByID(config.LangEN|config.LangDE, config.Languages); ok {
+		t.Error("a composite flag must match no entry")
+	}
+
+	o, ok = OptionByID(config.ArchX64, config.GalaxyArchs)
+	if !ok || o.Code != "64" {
+		t.Errorf("OptionByID(ArchX64) = %+v, %v", o, ok)
+	}
+	if o, ok := OptionByID(config.ArchX86, config.GalaxyArchs); !ok || o.Code != "32" {
+		t.Errorf("OptionByID(ArchX86) = %+v, %v", o, ok)
+	}
+}
+
 func TestStrippedStringASCIIOnly(t *testing.T) {
 	in := "Ab1 -_.[]{}() \t\né界"
 	want := "Ab1 -_.[]{}() "

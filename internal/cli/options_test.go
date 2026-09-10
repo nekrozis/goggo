@@ -22,8 +22,10 @@ func parse(t *testing.T, args ...string) Invocation {
 
 func TestParseDefaultsComeFromConfig(t *testing.T) {
 	inv := parse(t)
-	if inv.Config.Directories.Directory != "." {
-		t.Errorf("directory default = %q, want .", inv.Config.Directories.Directory)
+	// "." becomes "./" : Parse normalises directory arguments after the flags
+	// are read (main.cpp:647).
+	if inv.Config.Directories.Directory != "./" {
+		t.Errorf("directory default = %q, want ./", inv.Config.Directories.Directory)
 	}
 	if inv.Config.PlatformPriority != config.DefaultPlatformPriority {
 		t.Errorf("platform default = %q", inv.Config.PlatformPriority)
@@ -49,7 +51,9 @@ func TestParseDefaultsComeFromConfig(t *testing.T) {
 func TestParseFlagsOverrideDefaults(t *testing.T) {
 	inv := parse(t, "--directory", "/games", "--retries", "7", "--wait", "5",
 		"--no-color", "--respect-umask", "--include-hidden-products")
-	if inv.Config.Directories.Directory != "/games" {
+	// Parse normalises directory arguments (main.cpp:647), so the value gains a
+	// trailing separator.
+	if inv.Config.Directories.Directory != "/games/" {
 		t.Errorf("directory = %q", inv.Config.Directories.Directory)
 	}
 	if inv.Config.Retries != 7 || inv.Config.Wait != 5 {
@@ -274,7 +278,8 @@ func TestParseLogoutConflicts(t *testing.T) {
 
 func TestParseIgnoresExtraDashesAndEquals(t *testing.T) {
 	inv := parse(t, "-directory=/games", "--retries=2")
-	if inv.Config.Directories.Directory != "/games" || inv.Config.Retries != 2 {
+	// The directory is normalised like any other (main.cpp:647).
+	if inv.Config.Directories.Directory != "/games/" || inv.Config.Retries != 2 {
 		t.Errorf("config = %+v", inv.Config)
 	}
 }
@@ -398,5 +403,124 @@ func TestParseGalaxyErrors(t *testing.T) {
 				t.Fatalf("err = %v, want it to contain %q", err, c.want)
 			}
 		})
+	}
+}
+
+// TestParseGalaxyInstallDefaults locks the defaults the option layer owns
+// (main.cpp:341-345). Two of them are the positive side of a negated option,
+// which matters because their zero values are the opposite.
+func TestParseGalaxyInstallDefaults(t *testing.T) {
+	inv := parse(t)
+
+	if inv.GalaxyInstall != "" {
+		t.Errorf("GalaxyInstall = %q, want no command", inv.GalaxyInstall)
+	}
+	if inv.Config.DownloadConfig.GalaxyLanguage != config.LangEN {
+		t.Errorf("galaxy language = %d, want the English flag", inv.Config.DownloadConfig.GalaxyLanguage)
+	}
+	if inv.Config.DownloadConfig.GalaxyArch != config.ArchX64 {
+		t.Errorf("galaxy arch = %d, want the 64-bit flag", inv.Config.DownloadConfig.GalaxyArch)
+	}
+	priority := inv.Config.DownloadConfig.GalaxyCDNPriority
+	want := []string{"edgecast", "akamai_edgecast_proxy", "fastly"}
+	if len(priority) != len(want) {
+		t.Fatalf("galaxy cdn priority = %v, want %v", priority, want)
+	}
+	for i := range want {
+		if priority[i] != want[i] {
+			t.Errorf("galaxy cdn priority = %v, want %v", priority, want)
+		}
+	}
+	if inv.Config.Directories.GalaxyInstallSubdir != "%install_dir%" {
+		t.Errorf("install subdir = %q, want the template default", inv.Config.Directories.GalaxyInstallSubdir)
+	}
+	// --no-subdirectories and --galaxy-no-dependencies are negations, so their
+	// defaults are true — the zero value here would be wrong.
+	if !inv.Config.Directories.SubDirectories {
+		t.Error("SubDirectories = false, want true by default")
+	}
+	if !inv.Config.DownloadConfig.GalaxyDependencies {
+		t.Error("GalaxyDependencies = false, want true by default")
+	}
+}
+
+// TestParseGalaxyInstallFlags locks the seven flags, including that the command
+// argument is kept whole: splitting it is the dispatcher's job.
+func TestParseGalaxyInstallFlags(t *testing.T) {
+	inv := parse(t, "--galaxy-install", "12345/2", "--galaxy-language", "de",
+		"--galaxy-arch", "x86", "--galaxy-cdn-priority", "a,,b",
+		"--subdir-galaxy-install", "%product_id%",
+		"--galaxy-no-dependencies", "--no-subdirectories")
+
+	if inv.GalaxyInstall != "12345/2" {
+		t.Errorf("GalaxyInstall = %q, want the raw argument", inv.GalaxyInstall)
+	}
+	if inv.Config.DownloadConfig.GalaxyLanguage != config.LangDE {
+		t.Errorf("galaxy language = %d, want the German flag", inv.Config.DownloadConfig.GalaxyLanguage)
+	}
+	if inv.Config.DownloadConfig.GalaxyArch != config.ArchX86 {
+		t.Errorf("galaxy arch = %d, want the 32-bit flag", inv.Config.DownloadConfig.GalaxyArch)
+	}
+	// The empty element is dropped, exactly as Util::tokenize does.
+	if priority := inv.Config.DownloadConfig.GalaxyCDNPriority; len(priority) != 2 ||
+		priority[0] != "a" || priority[1] != "b" {
+		t.Errorf("galaxy cdn priority = %v, want [a b]", priority)
+	}
+	if inv.Config.Directories.GalaxyInstallSubdir != "%product_id%" {
+		t.Errorf("install subdir = %q", inv.Config.Directories.GalaxyInstallSubdir)
+	}
+	if inv.Config.DownloadConfig.GalaxyDependencies {
+		t.Error("--galaxy-no-dependencies must clear the setting")
+	}
+	if inv.Config.Directories.SubDirectories {
+		t.Error("--no-subdirectories must clear the setting")
+	}
+}
+
+// TestParseGalaxyLanguageArchUnmatched locks the deliberate difference from
+// --galaxy-platform: an unrecognised language or architecture is not refused.
+// The C++ source does not refuse it either, and the Galaxy layer turns a
+// missing match into its own default (downloader.cpp:3904-3922).
+func TestParseGalaxyLanguageArchUnmatched(t *testing.T) {
+	inv := parse(t, "--galaxy-language", "nope")
+	if inv.Config.DownloadConfig.GalaxyLanguage != 0 {
+		t.Errorf("galaxy language = %d, want no match", inv.Config.DownloadConfig.GalaxyLanguage)
+	}
+
+	// "all" and an unmatched value both mean 64-bit (main.cpp:579-580).
+	for _, value := range []string{"nope", "all"} {
+		inv = parse(t, "--galaxy-arch", value)
+		if inv.Config.DownloadConfig.GalaxyArch != config.ArchX64 {
+			t.Errorf("--galaxy-arch %s = %d, want the 64-bit flag",
+				value, inv.Config.DownloadConfig.GalaxyArch)
+		}
+	}
+
+	// The integer channel is real: std::stoi runs before the table walk, so a
+	// number selects the entry carrying that flag value.
+	inv = parse(t, "--galaxy-language", "4")
+	if inv.Config.DownloadConfig.GalaxyLanguage != config.LangFR {
+		t.Errorf("galaxy language 4 = %d, want the French flag",
+			inv.Config.DownloadConfig.GalaxyLanguage)
+	}
+}
+
+// TestEnsureTrailingSlash locks the post-parse normalisation (main.cpp:28-40).
+// Only a forward slash counts, so a backslash path gains one.
+func TestEnsureTrailingSlash(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{in: "", want: "./"},
+		{in: ".", want: "./"},
+		{in: "/games", want: "/games/"},
+		{in: "/games/", want: "/games/"},
+		{in: `C:\games`, want: `C:\games/`},
+	}
+	for _, c := range cases {
+		if got := ensureTrailingSlash(c.in, "./"); got != c.want {
+			t.Errorf("ensureTrailingSlash(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	if got := ensureTrailingSlash("", "/fallback/"); got != "/fallback/" {
+		t.Errorf("fallback = %q, want /fallback/", got)
 	}
 }

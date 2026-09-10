@@ -201,6 +201,14 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 				return inv, err
 			}
 			inv.Config.Directories.Directory = v
+		case "ignorelist":
+			// main.cpp:272: the second filter file the orphan walk consults
+			// (review D-G2). The default path is already in NewConfig.
+			v, err := takeValue()
+			if err != nil {
+				return inv, err
+			}
+			inv.Config.IgnorelistFilePath = v
 		case "platform":
 			v, err := takeValue()
 			if err != nil {
@@ -549,6 +557,7 @@ Options:
   --no-subdirectories         Don't create subdirectories for extras, patches and language packs
   --cacert <path>             CA certificate bundle in PEM format
   --no-color                  Don't use coloring in the status messages
+  --ignorelist <path>         Filepath to ignorelist (default: <config>/ignorelist.txt)
   --no-unicode                Don't use Unicode in the progress bar
   --delete-orphans            Delete orphaned files (default: false)
   --respect-umask             Do not adjust permissions of sensitive files

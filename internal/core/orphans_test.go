@@ -81,3 +81,59 @@ func TestCheckOrphanedFilesDelete(t *testing.T) {
 	assertFileContent(t, filepath.Join(f.root, "game", "data.bin"), "x")
 	assertFileContent(t, filepath.Join(f.root, "game", "small1.txt"), "x")
 }
+
+// TestCheckOrphanedFilesIgnorelist locks the D-G4 filter: a file on the
+// ignorelist is skipped during the walk — it is neither counted as an orphan
+// nor deleted, and the verbose notice lands on the error stream.
+func TestCheckOrphanedFilesIgnorelist(t *testing.T) {
+	f := newOrphansFixture(t)
+	cfg := planTestConfig(t)
+	cfg.DownloadConfig.DeleteOrphans = true
+	cfg.MsgLevel = 2 // verbose: the skip notices must be rendered
+	ignorePath := filepath.Join(t.TempDir(), "ignorelist.txt")
+	if err := os.WriteFile(ignorePath, []byte("R leftover"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.IgnorelistFilePath = ignorePath
+	d := newOfflineDownloader(t, noopServer(t), cfg, newFakeConsole())
+
+	if err := d.CheckOrphanedFiles(context.Background(), f.res); err != nil {
+		t.Fatalf("CheckOrphanedFiles: %v", err)
+	}
+	// The ignorelisted file survives deletion and is not an orphan.
+	assertFileContent(t, filepath.Join(f.root, "leftover.bin"), "x")
+	if strings.Contains(consoleText(t, d), "orphaned files") &&
+		strings.Contains(consoleText(t, d), "\t1 orphaned files") {
+		t.Errorf("the ignorelisted file was counted: %s", consoleText(t, d))
+	}
+	if !strings.Contains(consoleText(t, d), "\t0 orphaned files") {
+		t.Errorf("output = %q, want 0 orphans after the ignorelist skip", consoleText(t, d))
+	}
+	if !strings.Contains(consoleErrText(t, d), "skipped ignorelisted file") {
+		t.Errorf("stderr = %q, want the verbose skip notice", consoleErrText(t, d))
+	}
+}
+
+// consoleErrText pulls the error-stream output the fake console captured.
+func consoleErrText(t *testing.T, d *Downloader) string {
+	t.Helper()
+	c, ok := d.ui.(*fakeConsole)
+	if !ok {
+		t.Fatalf("ui is %T, want *fakeConsole", d.ui)
+	}
+	return c.errOut.String()
+}
+
+// TestCheckOrphanedFilesIgnorelistReadError locks the D-G3 boundary: a
+// read failure on the ignorelist file is an error, never a silent empty filter.
+func TestCheckOrphanedFilesIgnorelistReadError(t *testing.T) {
+	f := newOrphansFixture(t)
+	cfg := planTestConfig(t)
+	// A directory in place of the file makes the read fail without absence.
+	cfg.IgnorelistFilePath = t.TempDir()
+	d := newOfflineDownloader(t, noopServer(t), cfg, newFakeConsole())
+
+	if err := d.CheckOrphanedFiles(context.Background(), f.res); err == nil {
+		t.Fatal("CheckOrphanedFiles = nil, want the ignorelist read error")
+	}
+}

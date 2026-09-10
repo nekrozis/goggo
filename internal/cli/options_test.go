@@ -590,3 +590,14 @@ func TestParseDeleteOrphans(t *testing.T) {
 		t.Error("--delete-orphans must set DeleteOrphans")
 	}
 }
+
+// TestParseIgnorelist locks the second filter file's flag: it overrides the
+// <config>/ignorelist.txt default (main.cpp:272).
+func TestParseIgnorelist(t *testing.T) {
+	if parse(t).Config.IgnorelistFilePath == "" {
+		t.Error("IgnorelistFilePath = empty, want the config-directory default")
+	}
+	if got := parse(t, "--ignorelist", "other.txt").Config.IgnorelistFilePath; got != "other.txt" {
+		t.Errorf("IgnorelistFilePath = %q, want other.txt", got)
+	}
+}

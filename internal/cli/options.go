@@ -373,6 +373,10 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 		case "no-subdirectories":
 			// main.cpp:287,542: the option is the negation of the setting.
 			inv.Config.Directories.SubDirectories = false
+		case "check-free-space":
+			// main.cpp:319: a plain boolean, default false. It gates the plan
+			// builder's free-space check.
+			inv.Config.DownloadConfig.FreeSpaceCheck = true
 		// Recognised but not implemented in this build (review lock, W2/W3):
 		// they fail loudly instead of pretending to work.
 		case "save-config", "reset-config", "update-cache",
@@ -494,6 +498,7 @@ Options:
   --galaxy-cdn-priority <a,b> Galaxy CDN priority (default: edgecast,akamai_edgecast_proxy,fastly)
   --subdir-galaxy-install <t> Subdirectory for Galaxy install (default: %install_dir%)
   --galaxy-no-dependencies    Don't download dependencies during --galaxy-install
+  --check-free-space          Check for available free space before starting download
   --no-subdirectories         Don't create subdirectories for extras, patches and language packs
   --cacert <path>             CA certificate bundle in PEM format
   --no-color                  Don't use coloring in the status messages

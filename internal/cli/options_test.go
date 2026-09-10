@@ -524,3 +524,14 @@ func TestEnsureTrailingSlash(t *testing.T) {
 		t.Errorf("fallback = %q, want /fallback/", got)
 	}
 }
+
+// TestParseCheckFreeSpace locks the plan-builder's space gate option: it is a
+// plain boolean, off by default (main.cpp:319).
+func TestParseCheckFreeSpace(t *testing.T) {
+	if parse(t).Config.DownloadConfig.FreeSpaceCheck {
+		t.Error("FreeSpaceCheck = true, want the false default")
+	}
+	if !parse(t, "--check-free-space").Config.DownloadConfig.FreeSpaceCheck {
+		t.Error("--check-free-space must set FreeSpaceCheck")
+	}
+}

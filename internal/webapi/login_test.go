@@ -100,6 +100,45 @@ func successLoginServer(t *testing.T, withRecaptcha bool) (*httptest.Server, *st
 	return srv, &gotCode
 }
 
+// TestLoginTokenExchangeErrorHidesCredentials locks the R4a call site: the token
+// exchange URL carries client_secret and the one-time code, so a failing
+// exchange must be rendered without it (httpx.SafeError). This was observed in
+// the field (a GATE-A run pasted the full URL into a report).
+func TestLoginTokenExchangeErrorHidesCredentials(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth":
+			fmt.Fprint(w, loginFormPage(false))
+		case "/login_check":
+			http.Redirect(w, r, "/cb?code=AUTH1", http.StatusFound)
+		case "/cb":
+			fmt.Fprint(w, "ok")
+		case "/token":
+			w.WriteHeader(http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	// retries=0 keeps the failing response single-attempt.
+	cl, _ := newTestClient(t, srv, 0)
+
+	_, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
+	if err == nil {
+		t.Fatal("Login must fail when the token exchange returns 400")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "webapi: token exchange: HTTP 400") {
+		t.Errorf("error = %q, want the sanitized status form", msg)
+	}
+	for _, leak := range []string{"client_secret", "code=", "grant_type", "?client_id", "127.0.0.1"} {
+		if strings.Contains(msg, leak) {
+			t.Errorf("error %q leaks %q", msg, leak)
+		}
+	}
+}
+
 func TestLoginSuccess(t *testing.T) {
 	srv, gotCode := successLoginServer(t, false)
 	defer srv.Close()

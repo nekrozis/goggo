@@ -52,6 +52,34 @@ func newClientFor(t *testing.T, base string) *Client {
 	return c
 }
 
+// TestRefreshErrorHidesCredentials locks the R4a call site: the refresh request
+// URL carries client_secret and refresh_token, so a failing request must be
+// rendered without it (httpx.SafeError). Without this, a future edit that goes
+// back to %w would silently re-leak a ~30-day credential.
+func TestRefreshErrorHidesCredentials(t *testing.T) {
+	srv, cap := refreshServer(t, nil, http.StatusInternalServerError)
+	c := newClientFor(t, srv.URL)
+	g := testGalaxy(t, tokenMap(map[string]any{"refresh_token": "rt-secret"}))
+
+	err := c.Refresh(context.Background(), g)
+	if err == nil {
+		t.Fatal("Refresh must fail on a 500 response")
+	}
+	// Precondition: the request really did carry the credential.
+	if !cap.has("refresh_token", "rt-secret") {
+		t.Fatalf("query %q must carry the refresh token", cap.rawQuery)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "auth: refresh token: HTTP 500") {
+		t.Errorf("error = %q, want the sanitized status form", msg)
+	}
+	for _, leak := range []string{"rt-secret", "client_secret", "refresh_token=", "grant_type", "?client_id", "127.0.0.1"} {
+		if strings.Contains(msg, leak) {
+			t.Errorf("error %q leaks %q", msg, leak)
+		}
+	}
+}
+
 func TestRefreshSuccess(t *testing.T) {
 	srv, cap := refreshServer(t, map[string]any{
 		"access_token":  "at-2",

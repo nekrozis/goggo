@@ -18,10 +18,9 @@ import (
 // files, which is why they are added back to the set (downloader.cpp:4303-4306).
 //
 // The count always prints; the deletion happens only under --delete-orphans,
-// the way bDeleteOrphans gates it upstream. Files on the blacklist are skipped
-// during the walk (downloader.cpp:4326-4336); the ignorelist pass has no Go
-// counterpart yet, so ignorelisted files would surface as orphans — Δ
-// recorded (review S20).
+// the way bDeleteOrphans gates it upstream. The walk consults both filter
+// files, ignorelist first then blacklist, the way the C++ source does
+// (downloader.cpp:4326-4336).
 func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) error {
 	fmt.Fprintln(d.ui.Out(), "Checking for orphaned files")
 
@@ -33,12 +32,16 @@ func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) err
 		installed[path] = true
 	}
 
+	il, err := blacklist.LoadBlacklist(d.cfg.IgnorelistFilePath)
+	if err != nil {
+		return err
+	}
 	bl, err := blacklist.LoadBlacklist(d.cfg.BlacklistFilePath)
 	if err != nil {
 		return err
 	}
 
-	orphans, err := d.orphanedFiles(res, bl, installed)
+	orphans, err := d.orphanedFiles(res, il, bl, installed)
 	if err != nil {
 		return err
 	}
@@ -60,12 +63,13 @@ func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) err
 }
 
 // orphanedFiles walks the install root and collects the files whose full path
-// no depot item carries. Directories are never orphans, and the blacklist is
-// consulted with the same absolute-path matching the plan builder uses. There
-// is no special case for the install metadata file: upstream has none either,
-// so a goggame-*.info from a previous installation counts as an orphan there
-// as it does here.
-func (d *Downloader) orphanedFiles(res PlanResult, bl *blacklist.Blacklist, installed map[string]bool) ([]string, error) {
+// no depot item carries. Directories are never orphans, and both filter files
+// are consulted with the same absolute-path matching the plan builder uses —
+// ignorelist first, then blacklist, the way the C++ source orders them
+// (downloader.cpp:4326-4336). There is no special case for the install
+// metadata file: upstream has none either, so a goggame-*.info from a previous
+// installation counts as an orphan there as it does here.
+func (d *Downloader) orphanedFiles(res PlanResult, il, bl *blacklist.Blacklist, installed map[string]bool) ([]string, error) {
 	var orphans []string
 	root := res.InstallPath
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
@@ -73,6 +77,12 @@ func (d *Downloader) orphanedFiles(res PlanResult, bl *blacklist.Blacklist, inst
 			return err
 		}
 		if entry.IsDir() {
+			return nil
+		}
+		if il.IsBlacklisted(path) {
+			if d.cfg.MsgLevel >= msgLevelVerbose {
+				fmt.Fprintln(d.ui.ErrOut(), "skipped ignorelisted file "+path)
+			}
 			return nil
 		}
 		if bl.IsBlacklisted(path) {

@@ -505,3 +505,182 @@ func mustChunkMD5(t *testing.T, cdn *testCDN, content string) string {
 	sum := md5.Sum(buf.Bytes())
 	return hex.EncodeToString(sum[:])
 }
+
+// TestRunChunkResumeFromMemory locks the D72 model: a break mid-body keeps the
+// bytes already received in memory, and the retry carries a Range header from
+// that offset — the suffix appends and the chunk's hash passes.
+func TestRunChunkResumeFromMemory(t *testing.T) {
+	full := compress(t, "chunk body content")
+	var mu sync.Mutex
+	var ranges []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		ranges = append(ranges, r.Header.Get("Range"))
+		mu.Unlock()
+		if r.Header.Get("Range") == "" {
+			// First attempt: a partial body, then an abrupt close.
+			w.Header().Set("Content-Length", fmt.Sprint(len(full)))
+			w.Write(full[:6])
+			w.(http.Flusher).Flush()
+			conn, buf, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				return
+			}
+			buf.Flush()
+			conn.Close()
+			return
+		}
+		// Retry: serve the requested suffix as a proper 206 (a server that
+		// ignores Range and answers 200 is the fold test's job).
+		from := 6
+		w.WriteHeader(http.StatusPartialContent)
+		w.Write(full[from:])
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "data.bin")
+	chunk := model.GalaxyDepotItemChunk{CompressedMD5: md5OfBytes(full)}
+	deps := RunDeps{HTTP: mustHTTP(t), URL: urlFunc(func(_ context.Context, _ model.FileTask, _ model.GalaxyDepotItemChunk) (string, error) {
+		return srv.URL + "/c", nil
+	}), Observer: &recordingObserver{}}
+
+	if err := Run(context.Background(), singleTask(dest, chunk), Options{Workers: 1, Retries: 3}, deps); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	assertFileContent(t, dest, "chunk body content")
+	mu.Lock()
+	defer mu.Unlock()
+	if len(ranges) < 2 || ranges[1] != "bytes=6-" {
+		t.Errorf("Range headers = %q, want the second attempt to resume from 6", ranges)
+	}
+}
+
+// TestRunChunkHashReset locks the second retry cause: a hash mismatch empties
+// the buffer, so the retry asks for the chunk from the very beginning again —
+// a corrupt prefix must not join the next hash.
+func TestRunChunkHashReset(t *testing.T) {
+	good := compress(t, "good content")
+	var mu sync.Mutex
+	var ranges []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		ranges = append(ranges, r.Header.Get("Range"))
+		mu.Unlock()
+		// Always the wrong bytes: the hash can never pass.
+		w.Write(good[:len(good)/2])
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "data.bin")
+	chunk := model.GalaxyDepotItemChunk{CompressedMD5: md5OfBytes(good)}
+	deps := RunDeps{HTTP: mustHTTP(t), URL: urlFunc(func(_ context.Context, _ model.FileTask, _ model.GalaxyDepotItemChunk) (string, error) {
+		return srv.URL + "/c", nil
+	}), Observer: &recordingObserver{}}
+
+	// D65a: the failed task leaves as an error event; Run itself is nil.
+	if err := Run(context.Background(), singleTask(dest, chunk), Options{Workers: 1, Retries: 2}, deps); err != nil {
+		t.Fatalf("Run = %v, want nil", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for i, r := range ranges {
+		if r != "" {
+			t.Errorf("attempt %d carried Range %q: a hash reset must restart from zero", i, r)
+		}
+	}
+	assertFileAbsent(t, dest)
+}
+
+// TestRunChunkRange200Fold locks the deliberate fold: when a retried request
+// with a Range header is answered 200 with the whole body (a server ignoring
+// Range), the repeated prefix is dropped and the hash still passes. A first
+// attempt without a Range header never folds.
+func TestRunChunkRange200Fold(t *testing.T) {
+	full := compress(t, "resumed content")
+	var mu sync.Mutex
+	var ranges []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		ranges = append(ranges, r.Header.Get("Range"))
+		mu.Unlock()
+		// Always the whole body, whatever the Range asks for: the first
+		// attempt truncates (a transport break keeps a prefix), the retry
+		// answers 200 in full.
+		if r.Header.Get("Range") == "" {
+			w.Header().Set("Content-Length", fmt.Sprint(len(full)))
+			w.Write(full[:5])
+			w.(http.Flusher).Flush()
+			conn, buf, _ := w.(http.Hijacker).Hijack()
+			buf.Flush()
+			conn.Close()
+			return
+		}
+		w.Write(full)
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "data.bin")
+	chunk := model.GalaxyDepotItemChunk{CompressedMD5: md5OfBytes(full)}
+	deps := RunDeps{HTTP: mustHTTP(t), URL: urlFunc(func(_ context.Context, _ model.FileTask, _ model.GalaxyDepotItemChunk) (string, error) {
+		return srv.URL + "/c", nil
+	}), Observer: &recordingObserver{}}
+
+	if err := Run(context.Background(), singleTask(dest, chunk), Options{Workers: 1, Retries: 3}, deps); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	assertFileContent(t, dest, "resumed content")
+	mu.Lock()
+	defer mu.Unlock()
+	if len(ranges) < 2 {
+		t.Fatalf("attempts = %d, want at least 2", len(ranges))
+	}
+}
+
+// TestRunChunkFiletime locks the D77 addition: the server's Last-Modified
+// moves onto the assembled file, and a chunk that carries no timestamp leaves
+// the mtime alone.
+func TestRunChunkFiletime(t *testing.T) {
+	lm := time.Date(2021, 7, 6, 5, 4, 3, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Last-Modified", lm.Format(http.TimeFormat))
+		w.Write(compress(t, "stamped"))
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "data.bin")
+	chunk := model.GalaxyDepotItemChunk{CompressedMD5: md5OfBytes(compress(t, "stamped"))}
+	deps := RunDeps{HTTP: mustHTTP(t), URL: urlFunc(func(_ context.Context, _ model.FileTask, _ model.GalaxyDepotItemChunk) (string, error) {
+		return srv.URL + "/c", nil
+	}), Observer: &recordingObserver{}}
+
+	if err := Run(context.Background(), singleTask(dest, chunk), Options{Workers: 1}, deps); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	fi, err := os.Stat(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fi.ModTime().UTC(); got.Year() != 2021 || got.Month() != time.July {
+		t.Errorf("mtime = %v, want the Last-Modified value", got)
+	}
+}
+
+// compress is the zlib stream over content — the chunk bodies' wire format.
+func compress(t *testing.T, content string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zlib.NewWriter(&buf)
+	if _, err := zw.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// md5OfBytes is the hex md5 of raw bytes.
+func md5OfBytes(b []byte) string {
+	sum := md5.Sum(b)
+	return hex.EncodeToString(sum[:])
+}

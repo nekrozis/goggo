@@ -17,13 +17,15 @@ import (
 var ErrNotImplemented = errors.New("not implemented in this build")
 
 // Install resolves one install request into a plan, applies its destructive
-// changes and runs the transfer. Display output — the plan summary, the
-// deletions, the transfer messages — streams through the front end's console
-// as it happens.
+// changes, runs the transfer and unpacks the small-files containers and the
+// orphan check. Display output — the plan summary, the deletions, the transfer
+// messages — streams through the front end's console as it happens.
 //
 // Task failures during the transfer leave as error events and do not fail the
 // run: the C++ source never folds them into the exit code either
-// (downloader.cpp:886 calls a void function; review D65a).
+// (downloader.cpp:886 calls a void function; review D65a). The post-transfer
+// steps run only when the transfer itself returned without a cancelled
+// context, mirroring the C++ sequence after the thread join.
 func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 	res, err := d.BuildPlan(ctx, req)
 	d.emitNotices(res.Messages)
@@ -37,11 +39,33 @@ func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 		return err
 	}
 
-	return transfer.Run(ctx, res.Plan.Tasks, d.transferOptions(), transfer.RunDeps{
+	if err := transfer.Run(ctx, res.Plan.Tasks, d.transferOptions(), transfer.RunDeps{
 		HTTP:     d.http,
 		URL:      d.chunkURLProvider(),
-		Observer: observerFunc(d.onTransferEvent),
-	})
+		Observer: d.transferObserver(),
+	}); err != nil {
+		return err
+	}
+
+	// The post-transfer steps (downloader.cpp:4265-4343): the small-files
+	// containers unpack and the orphan check. Both print as they go and both
+	// are non-fatal in their per-item failures, the way the C++ source is.
+	if err := d.ExtractSmallFilesContainers(ctx, res); err != nil {
+		return err
+	}
+	return d.CheckOrphanedFiles(ctx, res)
+}
+
+// transferObserver picks the observer for a transfer run. A front end that can
+// consume the whole event stream — the CLI renderer — gets it through the
+// optional-ability assertion; a plain Console keeps the message-only adapter
+// (review D75). The capability interface stays unexported; the CLI satisfies
+// it structurally.
+func (d *Downloader) transferObserver() transfer.Observer {
+	if sink, ok := d.ui.(transferEventSink); ok {
+		return sink
+	}
+	return observerFunc(d.onTransferEvent)
 }
 
 // emitNotices renders plan-phase messages through the front end's console:

@@ -253,6 +253,10 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 			inv.Config.IncludeHiddenProducts = true
 		case "no-color":
 			inv.Config.Color = false
+		case "no-unicode":
+			// main.cpp:283,538: the negation of the progress bar's Unicode
+			// setting (review D78).
+			inv.Config.Unicode = false
 		case "respect-umask":
 			inv.Config.RespectUmask = true
 		case "cacert":
@@ -416,9 +420,13 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 			inv.Config.DownloadConfig.FreeSpaceCheck = true
 		// Recognised but not implemented in this build (review lock, W2/W3):
 		// they fail loudly instead of pretending to work.
+		case "delete-orphans":
+			// main.cpp:317: the install tail's orphan check deletes what it
+			// finds when this is set (review D74).
+			inv.Config.DownloadConfig.DeleteOrphans = true
 		case "save-config", "reset-config", "update-cache",
 			"download", "repair", "status", "notifications", "create-xml",
-			"check-orphans", "delete-orphans", "download-file", "output-file", "o",
+			"check-orphans", "download-file", "output-file", "o",
 			"clear-update-flags", "report":
 			inv.Unsupported = "--" + name
 		default:
@@ -541,6 +549,8 @@ Options:
   --no-subdirectories         Don't create subdirectories for extras, patches and language packs
   --cacert <path>             CA certificate bundle in PEM format
   --no-color                  Don't use coloring in the status messages
+  --no-unicode                Don't use Unicode in the progress bar
+  --delete-orphans            Delete orphaned files (default: false)
   --respect-umask             Do not adjust permissions of sensitive files
   --help                      Show this help
   --version                   Show version

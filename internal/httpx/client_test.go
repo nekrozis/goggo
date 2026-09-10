@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -192,5 +194,56 @@ func TestGetInsecureSkipVerify(t *testing.T) {
 	}
 	if string(body) != "tls-ok" {
 		t.Errorf("body = %q", body)
+	}
+}
+
+// TestNewCookieFileWiring covers the four Config combinations: CookieFile is
+// wired to a cookieStore only when this package builds the http.Client, and a
+// caller-provided HTTPClient is never modified.
+func TestNewCookieFileWiring(t *testing.T) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &http.Client{Jar: jar}
+	path := filepath.Join(t.TempDir(), "cookies.txt")
+
+	cases := []struct {
+		name       string
+		cfg        Config
+		wantStore  bool
+		wantFile   string
+		wantShared bool
+	}{
+		{"default", Config{}, false, "", false},
+		{"cookie file", Config{CookieFile: path}, true, path, false},
+		{"caller client", Config{HTTPClient: caller}, false, "", true},
+		{"caller client + cookie file", Config{HTTPClient: caller, CookieFile: path}, false, path, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := New(tc.cfg)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if got := c.store != nil; got != tc.wantStore {
+				t.Errorf("store != nil = %v, want %v", got, tc.wantStore)
+			}
+			if c.cookieFile != tc.wantFile {
+				t.Errorf("cookieFile = %q, want %q", c.cookieFile, tc.wantFile)
+			}
+			if tc.wantShared {
+				if c.hc != caller {
+					t.Error("caller-provided HTTPClient was not used as-is")
+				}
+				if c.hc.Jar != jar {
+					t.Error("caller-provided jar was replaced")
+				}
+			} else if c.hc.Jar == nil {
+				t.Error("transport has no cookie jar")
+			} else if tc.wantStore && c.hc.Jar != http.CookieJar(c.store) {
+				t.Error("store is not installed as the transport jar")
+			}
+		})
 	}
 }

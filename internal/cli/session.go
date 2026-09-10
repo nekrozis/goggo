@@ -138,14 +138,37 @@ func ensureDirectories(cfg config.Config) error {
 	return nil
 }
 
-// credentials resolves the login credentials, prompting only for what is
-// missing.
+// credentials resolves the credentials the login flow needs. It follows the
+// branch structure of Downloader::login (downloader.cpp:249-288):
 //
-// Intentional difference from the C++ source, which prompts for both unless
-// both flags are set (downloader.cpp:249-252): each missing value is asked for
-// on demand, so --login-email alone asks only for the password.
-func credentials(cfg config.Config, ui *console) (email, password string, err error) {
+//   - a supplied pair (flags or configuration) is used as it is;
+//   - with --browser-login the credentials are irrelevant, so nothing is asked
+//     for and an empty pair is not an error (downloader.cpp:254,376);
+//   - otherwise a non-terminal input takes the headless branch, which names the
+//     files it expects instead of prompting. A PARTIALLY supplied pair takes
+//     that branch too: the C++ tests the pair before anything else
+//     (downloader.cpp:249), so a lone --login-email is not used without a
+//     terminal either;
+//   - otherwise each MISSING value is asked for on demand — an intentional
+//     difference from the C++, which prompts for both unless both flags are set
+//     (review ruling B, S12.2-R1);
+//   - and a value still empty is reported the way upstream reports it
+//     (downloader.cpp:282-288).
+//
+// interactive is passed in rather than read from ui here so the branch
+// structure is testable without a terminal; the decision itself lives in one
+// place, console.terminalFd.
+func credentials(cfg config.Config, ui *console, interactive bool) (email, password string, err error) {
 	email, password = cfg.Email, cfg.Password
+	if email != "" && password != "" {
+		return email, password, nil
+	}
+	if cfg.ForceBrowserLogin {
+		return email, password, nil
+	}
+	if !interactive {
+		return "", "", headlessCredentials(cfg, ui)
+	}
 	if email == "" {
 		if email, err = ui.promptEmail(); err != nil {
 			return "", "", err
@@ -156,12 +179,38 @@ func credentials(cfg config.Config, ui *console) (email, password string, err er
 			return "", "", err
 		}
 	}
+	if email == "" || password == "" {
+		return "", "", errors.New("Email and/or password empty")
+	}
 	return email, password, nil
 }
 
-// login runs the interactive login flow (downloader.cpp:249-276).
+// headlessCredentials mirrors the non-terminal branch of Downloader::login
+// (downloader.cpp:256-265): with no terminal there is nobody to prompt, so the
+// cookie file and the token file it would have used are printed to stdout and
+// the login gives up.
+//
+// Intentional differences, both review rulings:
+//
+//   - Q1=b: where the C++ source goes on to log in with the empty credential
+//     pair when both files exist, this port stops. An empty credential pair is
+//     never posted, so this branch always ends in an explicit failure.
+//   - ①: the failure message is the same whether or not the two files exist,
+//     because both cases leave the caller with the same job — supply
+//     credentials. The behavioural difference the C++ source attached to the
+//     file check lives in the code above, not in the wording. ② keeps the hint
+//     actionable: --login cannot prompt here either, so the flags are named.
+func headlessCredentials(cfg config.Config, ui *console) error {
+	fmt.Fprintln(ui.out, cfg.Curl.CookiePath)
+	fmt.Fprintln(ui.out, tokenPath(cfg))
+	return errors.New("no credentials available in a non-interactive session; " +
+		"run --login in a terminal, or pass --login-email/--login-password")
+}
+
+// login runs the login flow (downloader.cpp:243-326), reporting progress on
+// stderr the way the C++ source does.
 func (s *Session) login(ctx context.Context, ui *console) error {
-	email, password, err := credentials(s.Config, ui)
+	email, password, err := credentials(s.Config, ui, ui.isTerminal())
 	if err != nil {
 		return err
 	}
@@ -170,19 +219,35 @@ func (s *Session) login(ctx context.Context, ui *console) error {
 		ForceBrowser: s.Config.ForceBrowserLogin,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("Galaxy: Login failed: %w", err)
 	}
 	if challenge != nil {
 		if err := ui.resolveChallenge(ctx, s.Web, challenge); err != nil {
-			return err
+			// An unfinished challenge leaves the flow without tokens, which
+			// the C++ source also reports as a Galaxy login failure
+			// (website.cpp:345-348, downloader.cpp:300-304).
+			return fmt.Errorf("Galaxy: Login failed: %w", err)
 		}
 	}
+	fmt.Fprintln(ui.errOut, "Galaxy: Login successful")
 
-	// Persist what the login produced: the token file and the cookie jar
-	// (the C++ COOKIELIST FLUSH).
+	// Persist what the login produced: the token file (saveGalaxyJSON,
+	// downloader.cpp:308-312) and the cookie jar (the C++ COOKIELIST FLUSH).
 	if err := auth.SaveTokenFile(s.Galaxy, s.Galaxy.GetFilepath()); err != nil {
 		return err
 	}
+
+	// The website session probe that decides HTTP login success
+	// (downloader.cpp:314-322).
+	ok, err := s.Web.IsLoggedIn(ctx)
+	if err != nil {
+		return fmt.Errorf("HTTP: Login failed: %w", err)
+	}
+	if !ok {
+		return errors.New("HTTP: Login failed")
+	}
+	fmt.Fprintln(ui.errOut, "HTTP: Login successful")
+
 	_, err = s.HTTP.SaveCookies()
 	return err
 }

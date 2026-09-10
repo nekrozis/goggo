@@ -17,6 +17,8 @@ package cli
 import (
 	"bufio"
 	"io"
+
+	"golang.org/x/term"
 )
 
 // console carries the streams and the buffered reader shared by the prompts.
@@ -33,6 +35,33 @@ type console struct {
 
 func newConsole(in io.Reader, out, errOut io.Writer) *console {
 	return &console{in: bufio.NewReader(in), rawIn: in, out: out, errOut: errOut}
+}
+
+// terminalFd returns the descriptor of the input stream when that stream is a
+// real terminal. It is the single place that answers "can a prompt be answered
+// here?", so the password prompt and the login flow cannot disagree.
+//
+// rawIn is the reader exactly as it was handed in: io.Reader never exposes a
+// descriptor, so anything that is not an *os.File — tests, pipes, redirection —
+// is not a terminal.
+func (c *console) terminalFd() (int, bool) {
+	f, ok := c.rawIn.(interface{ Fd() uintptr })
+	if !ok {
+		return 0, false
+	}
+	fd := int(f.Fd())
+	if !term.IsTerminal(fd) {
+		return 0, false
+	}
+	return fd, true
+}
+
+// isTerminal reports whether prompts can be answered on this input. It maps the
+// C++ isatty(STDIN_FILENO) test that selects between prompting and the headless
+// login branch (downloader.cpp:256).
+func (c *console) isTerminal() bool {
+	_, ok := c.terminalFd()
+	return ok
 }
 
 // readLine reads one line without its trailing newline.

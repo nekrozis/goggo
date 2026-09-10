@@ -3,6 +3,7 @@ package util
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/config"
@@ -326,6 +327,9 @@ func TestHomeDirSet(t *testing.T) {
 }
 
 func TestConfigHomeSemantics(t *testing.T) {
+	if usesStdlibRoots() {
+		t.Skip("XDG semantics apply to the Unix branch only (see TestConfigHomeUsesPlatformRoots)")
+	}
 	g := clearEnv(t, "HOME")
 	clearEnv(t, "XDG_CONFIG_HOME")
 	t.Setenv("HOME", "/tmp/testhome")
@@ -353,6 +357,9 @@ func TestConfigHomeSemantics(t *testing.T) {
 }
 
 func TestCacheHomeSemantics(t *testing.T) {
+	if usesStdlibRoots() {
+		t.Skip("XDG semantics apply to the Unix branch only (see TestCacheHomeUsesPlatformRoots)")
+	}
 	clearEnv(t, "HOME")
 	clearEnv(t, "XDG_CACHE_HOME")
 	t.Setenv("HOME", "/tmp/testhome")
@@ -370,6 +377,63 @@ func TestCacheHomeSemantics(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "")
 	if got, err := CacheHome(); err != nil || got != "" {
 		t.Errorf("CacheHome empty = %q, %v", got, err)
+	}
+}
+
+// TestConfigHomeUsesPlatformRoots locks the platform split (S12.2): on Windows
+// and macOS the configuration root comes from the standard library, which is
+// what lets the CLI start when HOME is not set.
+func TestConfigHomeUsesPlatformRoots(t *testing.T) {
+	if !usesStdlibRoots() {
+		t.Skip("XDG branch is covered by TestConfigHomeSemantics")
+	}
+	clearEnv(t, "HOME") // the point of the platform split: no HOME required
+	clearEnv(t, "XDG_CONFIG_HOME")
+
+	want, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("os.UserConfigDir: %v", err)
+	}
+	got, err := ConfigHome()
+	if err != nil {
+		t.Fatalf("ConfigHome without HOME: %v", err)
+	}
+	if got != want {
+		t.Errorf("ConfigHome = %q, want the platform root %q", got, want)
+	}
+	t.Logf("config root on %s: %q", runtime.GOOS, got)
+}
+
+// TestCacheHomeUsesPlatformRoots is the cache counterpart; on Windows the two
+// roots must stay distinct (%AppData% vs %LocalAppData%).
+func TestCacheHomeUsesPlatformRoots(t *testing.T) {
+	if !usesStdlibRoots() {
+		t.Skip("XDG branch is covered by TestCacheHomeSemantics")
+	}
+	clearEnv(t, "HOME")
+	clearEnv(t, "XDG_CACHE_HOME")
+
+	want, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatalf("os.UserCacheDir: %v", err)
+	}
+	got, err := CacheHome()
+	if err != nil {
+		t.Fatalf("CacheHome without HOME: %v", err)
+	}
+	if got != want {
+		t.Errorf("CacheHome = %q, want the platform root %q", got, want)
+	}
+	t.Logf("cache root on %s: %q", runtime.GOOS, got)
+
+	if runtime.GOOS == "windows" {
+		cfgRoot, err := ConfigHome()
+		if err != nil {
+			t.Fatalf("ConfigHome: %v", err)
+		}
+		if cfgRoot == got {
+			t.Errorf("config and cache roots must differ on Windows (got %q twice)", got)
+		}
 	}
 }
 

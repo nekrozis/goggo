@@ -535,3 +535,36 @@ func TestParseCheckFreeSpace(t *testing.T) {
 		t.Error("--check-free-space must set FreeSpaceCheck")
 	}
 }
+
+// TestParseThreadsProgressInterval locks the execution parameters the transfer
+// consumes: the thread count passes through (the run clamps it to the task
+// count) and the progress interval is clamped into 1..10000 ms (main.cpp:313).
+func TestParseThreadsProgressInterval(t *testing.T) {
+	inv := parse(t)
+	if inv.Config.Threads != 4 {
+		t.Errorf("threads default = %d, want 4", inv.Config.Threads)
+	}
+	if inv.Config.ProgressInterval != 100 {
+		t.Errorf("progress interval default = %d, want 100", inv.Config.ProgressInterval)
+	}
+
+	inv = parse(t, "--threads", "8", "--progress-interval", "5000")
+	if inv.Config.Threads != 8 || inv.Config.ProgressInterval != 5000 {
+		t.Errorf("threads/interval = %d/%d, want 8/5000",
+			inv.Config.Threads, inv.Config.ProgressInterval)
+	}
+
+	// Out-of-range intervals fall back to the default, and a negative thread
+	// count is refused the way an unsigned option is.
+	inv = parse(t, "--progress-interval", "0")
+	if inv.Config.ProgressInterval != 100 {
+		t.Errorf("interval 0 = %d, want the 100 fallback", inv.Config.ProgressInterval)
+	}
+	inv = parse(t, "--progress-interval", "20000")
+	if inv.Config.ProgressInterval != 100 {
+		t.Errorf("interval 20000 = %d, want the 100 fallback", inv.Config.ProgressInterval)
+	}
+	if _, err := Parse([]string{"--threads", "-1"}, testDefaults()); err == nil {
+		t.Error("--threads -1 must be refused")
+	}
+}

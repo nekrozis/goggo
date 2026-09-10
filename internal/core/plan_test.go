@@ -32,7 +32,7 @@ const (
 )
 
 func planChunk(compressed, uncompressed string) string {
-	return `{"md5_compressed":"` + compressed + `","md5_uncompressed":"` + uncompressed + `","compressedSize":10,"size":20}`
+	return `{"compressedMd5":"` + compressed + `","md5":"` + uncompressed + `","compressedSize":10,"size":20}`
 }
 
 // planFixture serves the build, manifest and dependency documents BuildPlan
@@ -382,7 +382,7 @@ func TestBuildPlanFreeSpaceGate(t *testing.T) {
 	// fire without mocking the disk query.
 	huge := `{"depot":{"items":[` +
 		`{"path":"game/data.bin","md5":"dlc-md5","chunks":[` +
-		`{"md5_compressed":"c3c","md5_uncompressed":"c3u","compressedSize":4611686018427387904,"size":4611686018427387904}]}]}}`
+		`{"compressedMd5":"c3c","md5":"c3u","compressedSize":4611686018427387904,"size":4611686018427387904}]}]}}`
 	f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(planDepotHashDLC), huge)
 
 	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())

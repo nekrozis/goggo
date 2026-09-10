@@ -59,6 +59,14 @@ const (
 	defaultGalaxyCDNPriority   = "edgecast,akamai_edgecast_proxy,fastly"
 	defaultGalaxyInstallSubdir = "%install_dir%"
 	defaultDirectory           = "./"
+
+	// Concurrency and rendering defaults (main.cpp:311,313). The progress
+	// interval must stay within 1..10000 ms; an out-of-range value falls back
+	// to 100.
+	defaultThreads          = 4
+	defaultProgressInterval = 100
+	progressIntervalMin     = 1
+	progressIntervalMax     = 10000
 )
 
 // Parse applies the command-line flags on top of cfg (the defaults), returning
@@ -81,6 +89,8 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 	inv.Config.GalaxyBuildSortingOrder = defaultGalaxyBuildSort
 	inv.Config.DownloadConfig.GalaxyPlatform = util.OptionValue(defaultGalaxyPlatform, config.Platforms, true)
 	inv.Config.DownloadConfig.GalaxyLanguage = util.OptionValue(defaultGalaxyLanguage, config.Languages, true)
+	inv.Config.Threads = defaultThreads
+	inv.Config.ProgressInterval = defaultProgressInterval
 	inv.Config.DownloadConfig.GalaxyArch = util.OptionValue(defaultGalaxyArch, config.GalaxyArchs, false)
 	inv.Config.DownloadConfig.GalaxyCDNPriority = util.Split(defaultGalaxyCDNPriority, ",")
 	// --galaxy-no-dependencies and --no-subdirectories are the negations of
@@ -271,6 +281,33 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 				return inv, fmt.Errorf("invalid value for --wait: %q", v)
 			}
 			inv.Config.Wait = n
+		case "threads":
+			v, err := takeValue()
+			if err != nil {
+				return inv, err
+			}
+			// main.cpp:311: an unsigned count; a negative value is refused the
+			// way boost refuses it for an unsigned option.
+			n, err := strconv.ParseUint(v, 10, 32)
+			if err != nil {
+				return inv, fmt.Errorf("invalid value for --threads: %q", v)
+			}
+			inv.Config.Threads = uint32(n)
+		case "progress-interval":
+			v, err := takeValue()
+			if err != nil {
+				return inv, err
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return inv, fmt.Errorf("invalid value for --progress-interval: %q", v)
+			}
+			// main.cpp:313: the value must be between 1 and 10000 ms; an
+			// out-of-range value falls back to the default 100.
+			if n < progressIntervalMin || n > progressIntervalMax {
+				n = defaultProgressInterval
+			}
+			inv.Config.ProgressInterval = n
 		case "unit-format":
 			v, err := takeValue()
 			if err != nil {
@@ -488,6 +525,8 @@ Options:
   --unit-format <IEC|SI>      Unit format (default: IEC)
   --retries <n>               Maximum number of retries (default: 3)
   --wait <microseconds>       Time to wait between requests
+  --threads <n>               Number of download threads (default: 4)
+  --progress-interval <ms>    Interval for progress bar updates (default: 100)
   --galaxy-builds-sort <s>    Sorting order for Galaxy builds (date|score|none, default: score)
   --galaxy-show-builds <id>   Show game builds (<product id or gamename>[/<build id or index>])
   --galaxy-list-cdns <id>     List available CDNs (<product id or gamename>[/<build id or index>])

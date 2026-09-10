@@ -23,13 +23,15 @@ type Invocation struct {
 	// is reported as an error rather than silently succeeding.
 	Unsupported string
 
-	// GalaxyShowBuilds and GalaxyListCDNs carry the --galaxy-show-builds and
-	// --galaxy-list-cdns arguments. Both are "<product id or gamename>[/<build
-	// id or index>]"; an empty value means the command was not requested, which
-	// is also what an explicitly empty argument means (main.cpp:839,888 test
-	// the value for emptiness).
+	// GalaxyShowBuilds, GalaxyListCDNs and GalaxyInstall carry the
+	// --galaxy-show-builds, --galaxy-list-cdns and --galaxy-install arguments.
+	// All three are "<product id or gamename>[/<build id or index>]"; an empty
+	// value means the command was not requested, which is also what an
+	// explicitly empty argument means (main.cpp:839,886,888 test the value for
+	// emptiness). Splitting the value is the dispatcher's job.
 	GalaxyShowBuilds string
 	GalaxyListCDNs   string
+	GalaxyInstall    string
 
 	// ListFormat is the --list format mask; 0 means --list was not given.
 	ListFormat uint32
@@ -41,13 +43,22 @@ type Invocation struct {
 	List             bool
 }
 
-// Galaxy option defaults (main.cpp:329,340). They live here rather than in
+// Galaxy option defaults (main.cpp:329,340-345). They live here rather than in
 // internal/config because they are boost default_value values, which the C++
 // front end declares next to the options themselves; config.NewConfig gains the
 // remaining option defaults with the full table (S24).
+//
+// That means a caller that builds a configuration without going through Parse
+// does not get these values — including SubDirectories, whose zero value is the
+// opposite of the C++ default.
 const (
-	defaultGalaxyBuildSort = "score"
-	defaultGalaxyPlatform  = "w"
+	defaultGalaxyBuildSort     = "score"
+	defaultGalaxyPlatform      = "w"
+	defaultGalaxyLanguage      = "en"
+	defaultGalaxyArch          = "x64"
+	defaultGalaxyCDNPriority   = "edgecast,akamai_edgecast_proxy,fastly"
+	defaultGalaxyInstallSubdir = "%install_dir%"
+	defaultDirectory           = "./"
 )
 
 // Parse applies the command-line flags on top of cfg (the defaults), returning
@@ -64,10 +75,20 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 	inv := Invocation{Config: cfg}
 
 	// Galaxy option defaults, applied before any flag is read the way boost's
-	// default_value does (main.cpp:329,340): the build sorting order and the
-	// Galaxy platform.
+	// default_value does (main.cpp:329,340-345): the build sorting order, the
+	// Galaxy platform, language, architecture, CDN priority and install
+	// subdirectory, plus the two settings whose option is a negation.
 	inv.Config.GalaxyBuildSortingOrder = defaultGalaxyBuildSort
 	inv.Config.DownloadConfig.GalaxyPlatform = util.OptionValue(defaultGalaxyPlatform, config.Platforms, true)
+	inv.Config.DownloadConfig.GalaxyLanguage = util.OptionValue(defaultGalaxyLanguage, config.Languages, true)
+	inv.Config.DownloadConfig.GalaxyArch = util.OptionValue(defaultGalaxyArch, config.GalaxyArchs, false)
+	inv.Config.DownloadConfig.GalaxyCDNPriority = util.Split(defaultGalaxyCDNPriority, ",")
+	// --galaxy-no-dependencies and --no-subdirectories are the negations of
+	// their settings (main.cpp:542,544), so the defaults are the positive
+	// values and the flags clear them below.
+	inv.Config.DownloadConfig.GalaxyDependencies = true
+	inv.Config.Directories.GalaxyInstallSubdir = defaultGalaxyInstallSubdir
+	inv.Config.Directories.SubDirectories = true
 
 	var (
 		includeSeen string
@@ -304,6 +325,54 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 				return inv, fmt.Errorf("invalid value for --galaxy-platform: %q", v)
 			}
 			inv.Config.DownloadConfig.GalaxyPlatform = mask
+		case "galaxy-install":
+			v, err := takeValue()
+			if err != nil {
+				return inv, err
+			}
+			// Kept as given: splitting "<product id or gamename>[/<build id or
+			// index>]" is the dispatcher's job (main.cpp:840-845), exactly as it
+			// is for the other two Galaxy commands.
+			inv.GalaxyInstall = v
+		case "galaxy-language":
+			v, err := takeValue()
+			if err != nil {
+				return inv, err
+			}
+			// A value matching no entry leaves 0 behind, which the Galaxy layer
+			// reads as the English expression (downloader.cpp:3904-3913). Unlike
+			// --galaxy-platform it is not rejected, because the C++ source does
+			// not reject it either (main.cpp:576).
+			inv.Config.DownloadConfig.GalaxyLanguage = util.OptionValue(v, config.Languages, true)
+		case "galaxy-arch":
+			v, err := takeValue()
+			if err != nil {
+				return inv, err
+			}
+			// main.cpp:577-580: "all", and equally no match at all, means 64-bit.
+			arch := util.OptionValue(v, config.GalaxyArchs, false)
+			if arch == 0 || arch == util.OptionValue("all", config.GalaxyArchs, false) {
+				arch = config.ArchX64
+			}
+			inv.Config.DownloadConfig.GalaxyArch = arch
+		case "galaxy-cdn-priority":
+			v, err := takeValue()
+			if err != nil {
+				return inv, err
+			}
+			inv.Config.DownloadConfig.GalaxyCDNPriority = util.Split(v, ",")
+		case "galaxy-no-dependencies":
+			// main.cpp:343,544: the option is the negation of the setting.
+			inv.Config.DownloadConfig.GalaxyDependencies = false
+		case "subdir-galaxy-install":
+			v, err := takeValue()
+			if err != nil {
+				return inv, err
+			}
+			inv.Config.Directories.GalaxyInstallSubdir = v
+		case "no-subdirectories":
+			// main.cpp:287,542: the option is the negation of the setting.
+			inv.Config.Directories.SubDirectories = false
 		// Recognised but not implemented in this build (review lock, W2/W3):
 		// they fail loudly instead of pretending to work.
 		case "save-config", "reset-config", "update-cache",
@@ -329,6 +398,15 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 		inv.Config.DownloadConfig.Include = inc &^ exc
 	}
 
+	// Directory arguments are normalised once parsing is over (main.cpp:647):
+	// an empty value means the current directory, and any other value ends in a
+	// separator, which is what the install path is concatenated from.
+	//
+	// --wine-prefix gets the same treatment upstream (main.cpp:648). It is left
+	// alone here because nothing reads it yet; it joins this line with its first
+	// consumer (recorded in the audit).
+	inv.Config.Directories.Directory = ensureTrailingSlash(inv.Config.Directories.Directory, defaultDirectory)
+
 	// --logout is a mutation that clears the whole local login state, so it is
 	// refused alongside another action: quietly picking one of two contradictory
 	// requests would be a surprise, and the named flag is what tells the user
@@ -350,6 +428,22 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 		}
 	}
 	return inv, nil
+}
+
+// ensureTrailingSlash mirrors ensure_trailing_slash (main.cpp:28-40): an empty
+// path becomes the fallback, and any other path gains a separator unless it
+// already ends in one.
+//
+// Only a forward slash is tested, so a Windows path written with backslashes
+// gains one — the same result the C++ source produces.
+func ensureTrailingSlash(path, fallback string) string {
+	if path == "" {
+		return fallback
+	}
+	if !strings.HasSuffix(path, "/") {
+		return path + "/"
+	}
+	return path
 }
 
 // optionMask resolves a comma-separated option list to its bit mask, mirroring
@@ -394,6 +488,13 @@ Options:
   --galaxy-show-builds <id>   Show game builds (<product id or gamename>[/<build id or index>])
   --galaxy-list-cdns <id>     List available CDNs (<product id or gamename>[/<build id or index>])
   --galaxy-platform <spec>    Galaxy platform (default: w)
+  --galaxy-install <id>       Install a game (<product id or gamename>[/<build id or index>])
+  --galaxy-language <spec>    Galaxy language (default: en)
+  --galaxy-arch <spec>        Galaxy architecture (default: x64)
+  --galaxy-cdn-priority <a,b> Galaxy CDN priority (default: edgecast,akamai_edgecast_proxy,fastly)
+  --subdir-galaxy-install <t> Subdirectory for Galaxy install (default: %install_dir%)
+  --galaxy-no-dependencies    Don't download dependencies during --galaxy-install
+  --no-subdirectories         Don't create subdirectories for extras, patches and language packs
   --cacert <path>             CA certificate bundle in PEM format
   --no-color                  Don't use coloring in the status messages
   --respect-umask             Do not adjust permissions of sensitive files

@@ -83,6 +83,22 @@ func OptionNameString(value uint32, options []config.Option) string {
 	return strings.Join(names, ", ")
 }
 
+// OptionByID mirrors the tail of Util::getOptionValue (util.cpp:529-540): the
+// entry whose ID equals value exactly.
+//
+// A composite mask matches nothing, which is what the C++ loop does too — the
+// caller then falls back to its own default. This is how the Galaxy language
+// expression and the Galaxy architecture code are looked up
+// (downloader.cpp:3904-3922).
+func OptionByID(value uint32, options []config.Option) (config.Option, bool) {
+	for _, o := range options {
+		if o.ID == value {
+			return o, true
+		}
+	}
+	return config.Option{}, false
+}
+
 // ParseOptionString mirrors Util::parseOptionString (util.cpp:563-579). The
 // input uses "," to separate priority groups and "+" to combine values
 // inside one group.

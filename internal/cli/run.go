@@ -68,9 +68,9 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	ui := newConsole(stdin, stdout, stderr)
 	ctx := context.Background()
 
-	// The two Galaxy command arguments are resolved BEFORE any session work, so
-	// a malformed argument fails without opening one. The C++ source splits them
-	// at dispatch time instead (main.cpp:840-845) and reads the first token
+	// The three Galaxy command arguments are resolved BEFORE any session work,
+	// so a malformed argument fails without opening one. The C++ source splits
+	// them at dispatch time instead (main.cpp:840-845) and reads the first token
 	// without checking that the split produced any, which makes an argument of
 	// "/" read past the end of an empty vector.
 	showBuildsProduct, showBuildsID, err := galaxyCommandArgument(inv.GalaxyShowBuilds, "--galaxy-show-builds")
@@ -79,6 +79,11 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	listCDNsProduct, listCDNsID, err := galaxyCommandArgument(inv.GalaxyListCDNs, "--galaxy-list-cdns")
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
+	}
+	installProduct, installBuild, err := galaxyCommandArgument(inv.GalaxyInstall, "--galaxy-install")
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
 		return 1
@@ -170,6 +175,18 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return 1
 		}
 		if err := renderCDNNames(stdout, res.Names); err != nil {
+			fmt.Fprintf(stderr, "Error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
+	// --galaxy-install (main.cpp:886). The engine is not ported yet, so this
+	// ends in core.ErrNotImplemented — and it takes the same error path as every
+	// other failure rather than growing an exit code of its own.
+	if inv.GalaxyInstall != "" {
+		req := core.NewInstallRequest(inv.Config, installProduct, installBuild)
+		if err := d.Install(ctx, req); err != nil {
 			fmt.Fprintf(stderr, "Error: %v\n", err)
 			return 1
 		}

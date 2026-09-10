@@ -1,4 +1,4 @@
-package webapi
+package jsonval
 
 import (
 	"math"
@@ -20,47 +20,47 @@ func TestJSONKindNames(t *testing.T) {
 		{map[string]any{}, "object"},
 	}
 	for _, c := range cases {
-		if got := jsonKind(c.in); got != c.want {
-			t.Errorf("jsonKind(%#v) = %q, want %q", c.in, got, c.want)
+		if got := Kind(c.in); got != c.want {
+			t.Errorf("Kind(%#v) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
 
 func TestJSONObjectAndArray(t *testing.T) {
-	if _, err := jsonObject(map[string]any{"a": 1}); err != nil {
-		t.Errorf("jsonObject(object) = %v, want nil", err)
+	if _, err := Object(map[string]any{"a": 1}); err != nil {
+		t.Errorf("Object(object) = %v, want nil", err)
 	}
-	if _, err := jsonObject([]any{}); err == nil {
-		t.Error("jsonObject(array) = nil, want error")
+	if _, err := Object([]any{}); err == nil {
+		t.Error("Object(array) = nil, want error")
 	}
-	if _, err := jsonArray([]any{1}); err != nil {
-		t.Errorf("jsonArray(array) = %v, want nil", err)
+	if _, err := Array([]any{1}); err != nil {
+		t.Errorf("Array(array) = %v, want nil", err)
 	}
-	if _, err := jsonArray(map[string]any{}); err == nil {
-		t.Error("jsonArray(object) = nil, want error")
+	if _, err := Array(map[string]any{}); err == nil {
+		t.Error("Array(object) = nil, want error")
 	}
 }
 
 func TestJSONChildren(t *testing.T) {
-	arr, err := jsonChildren([]any{"a", "b"})
+	arr, err := Children([]any{"a", "b"})
 	if err != nil || len(arr) != 2 || arr[0] != "a" {
-		t.Errorf("jsonChildren(array) = %v, %v", arr, err)
+		t.Errorf("Children(array) = %v, %v", arr, err)
 	}
-	obj, err := jsonChildren(map[string]any{"k": "v"})
+	obj, err := Children(map[string]any{"k": "v"})
 	if err != nil || len(obj) != 1 || obj[0] != "v" {
-		t.Errorf("jsonChildren(object) = %v, %v", obj, err)
+		t.Errorf("Children(object) = %v, %v", obj, err)
 	}
-	if _, err := jsonChildren("scalar"); err == nil {
-		t.Error("jsonChildren(scalar) = nil, want error")
+	if _, err := Children("scalar"); err == nil {
+		t.Error("Children(scalar) = nil, want error")
 	}
-	if _, err := jsonChildren(nil); err == nil {
-		t.Error("jsonChildren(null) = nil, want error")
+	if _, err := Children(nil); err == nil {
+		t.Error("Children(null) = nil, want error")
 	}
 }
 
-// TestJSONStrLoose mirrors jsoncpp's asString(): null/boolean/numbers
-// stringify, containers do not.
-func TestJSONStrLoose(t *testing.T) {
+// TestJSONStr mirrors jsoncpp's asString(): null/boolean/numbers stringify,
+// containers do not.
+func TestJSONStr(t *testing.T) {
 	cases := []struct {
 		name    string
 		in      any
@@ -82,20 +82,20 @@ func TestJSONStrLoose(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := jsonStrLoose(c.in)
+			got, err := Str(c.in)
 			if (err != nil) != c.wantErr {
-				t.Fatalf("jsonStrLoose(%#v) err = %v, wantErr %v", c.in, err, c.wantErr)
+				t.Fatalf("Str(%#v) err = %v, wantErr %v", c.in, err, c.wantErr)
 			}
 			if !c.wantErr && got != c.want {
-				t.Errorf("jsonStrLoose(%#v) = %q, want %q", c.in, got, c.want)
+				t.Errorf("Str(%#v) = %q, want %q", c.in, got, c.want)
 			}
 		})
 	}
 }
 
-// TestJSONIntStrict covers the integer reader: jsoncpp's null/bool handling is
-// kept, non-integral numbers and strings are refused instead of truncated.
-func TestJSONIntStrict(t *testing.T) {
+// TestJSONInt covers the integer reader: jsoncpp's null/bool handling is kept,
+// non-integral numbers and strings are refused instead of truncated.
+func TestJSONInt(t *testing.T) {
 	cases := []struct {
 		name    string
 		in      any
@@ -123,12 +123,12 @@ func TestJSONIntStrict(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := jsonIntStrict(c.in)
+			got, err := Int(c.in)
 			if (err != nil) != c.wantErr {
-				t.Fatalf("jsonIntStrict(%#v) err = %v, wantErr %v", c.in, err, c.wantErr)
+				t.Fatalf("Int(%#v) err = %v, wantErr %v", c.in, err, c.wantErr)
 			}
 			if !c.wantErr && got != c.want {
-				t.Errorf("jsonIntStrict(%#v) = %d, want %d", c.in, got, c.want)
+				t.Errorf("Int(%#v) = %d, want %d", c.in, got, c.want)
 			}
 		})
 	}
@@ -155,12 +155,12 @@ func TestJSONNum(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := jsonNum(c.in)
+			got, err := Num(c.in)
 			if (err != nil) != c.wantErr {
-				t.Fatalf("jsonNum(%#v) err = %v, wantErr %v", c.in, err, c.wantErr)
+				t.Fatalf("Num(%#v) err = %v, wantErr %v", c.in, err, c.wantErr)
 			}
 			if !c.wantErr && got != c.want {
-				t.Errorf("jsonNum(%#v) = %v, want %v", c.in, got, c.want)
+				t.Errorf("Num(%#v) = %v, want %v", c.in, got, c.want)
 			}
 		})
 	}
@@ -168,13 +168,13 @@ func TestJSONNum(t *testing.T) {
 
 func TestIsJSONNumber(t *testing.T) {
 	for _, in := range []any{float64(1), int(1), int64(1), uint64(1)} {
-		if !isJSONNumber(in) {
-			t.Errorf("isJSONNumber(%#v) = false, want true", in)
+		if !IsNumber(in) {
+			t.Errorf("IsNumber(%#v) = false, want true", in)
 		}
 	}
 	for _, in := range []any{nil, "1", true, []any{}, map[string]any{}} {
-		if isJSONNumber(in) {
-			t.Errorf("isJSONNumber(%#v) = true, want false", in)
+		if IsNumber(in) {
+			t.Errorf("IsNumber(%#v) = true, want false", in)
 		}
 	}
 }
@@ -200,12 +200,12 @@ func TestJSONBool(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := jsonBool(c.in)
+			got, err := Bool(c.in)
 			if (err != nil) != c.wantErr {
-				t.Fatalf("jsonBool(%#v) err = %v, wantErr %v", c.in, err, c.wantErr)
+				t.Fatalf("Bool(%#v) err = %v, wantErr %v", c.in, err, c.wantErr)
 			}
 			if !c.wantErr && got != c.want {
-				t.Errorf("jsonBool(%#v) = %v, want %v", c.in, got, c.want)
+				t.Errorf("Bool(%#v) = %v, want %v", c.in, got, c.want)
 			}
 		})
 	}

@@ -21,8 +21,15 @@ import (
 // login share the root.
 func newTestClient(t *testing.T, srv *httptest.Server, retries int) (*Client, *config.GalaxyConfig) {
 	t.Helper()
+	hx, err := httpx.New(httpx.Config{
+		UserAgent:   "goggo-test/1.0",
+		RetryPolicy: RetryPolicyFor(retries, 0),
+	})
+	if err != nil {
+		t.Fatalf("httpx.New: %v", err)
+	}
 	galaxy := config.NewGalaxyConfig()
-	cl, err := New(httpx.Config{UserAgent: "goggo-test/1.0"}, galaxy, Options{Retries: retries})
+	cl, err := New(hx, galaxy)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -519,9 +526,18 @@ func TestIsLoggedInRedirectElsewhereIsFalse(t *testing.T) {
 	}
 }
 
-func TestLoginNilGalaxyRejected(t *testing.T) {
-	if _, err := New(httpx.Config{}, nil, Options{}); err == nil {
-		t.Fatal("New: want error for nil galaxy")
+// TestNewRejectsNilInputs locks the constructor guards: webapi never invents a
+// transport, so both the transport and the credential store must be supplied.
+func TestNewRejectsNilInputs(t *testing.T) {
+	hx, err := httpx.New(httpx.Config{UserAgent: "goggo-test/1.0"})
+	if err != nil {
+		t.Fatalf("httpx.New: %v", err)
+	}
+	if _, err := New(hx, nil); err == nil {
+		t.Error("New: want error for nil galaxy")
+	}
+	if _, err := New(nil, config.NewGalaxyConfig()); err == nil {
+		t.Error("New: want error for nil http client")
 	}
 }
 
@@ -601,10 +617,10 @@ func TestContinueLoginRejectsForeignClient(t *testing.T) {
 	}
 }
 
-// TestNewPreservesCallerShouldRetry locks the R09a-2 fix: New may override
-// only MaxAttempts and Wait of the httpx policy, never the caller's ShouldRetry
-// predicate. A predicate that refuses every retry must yield exactly one hit.
-func TestNewPreservesCallerShouldRetry(t *testing.T) {
+// TestLoginHonoursCallerTransportPolicy locks the ownership rule: webapi uses
+// the transport it was handed, including its retry predicate. A predicate that
+// refuses every retry must yield exactly one hit.
+func TestLoginHonoursCallerTransportPolicy(t *testing.T) {
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hits, 1)
@@ -612,13 +628,17 @@ func TestNewPreservesCallerShouldRetry(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := httpx.Config{
+	hx, err := httpx.New(httpx.Config{
 		UserAgent: "goggo-test/1.0",
 		RetryPolicy: httpx.RetryPolicy{
+			MaxAttempts: RetryPolicyFor(3, 0).MaxAttempts,
 			ShouldRetry: func(*http.Response, error) bool { return false },
 		},
+	})
+	if err != nil {
+		t.Fatalf("httpx.New: %v", err)
 	}
-	cl, err := New(cfg, config.NewGalaxyConfig(), Options{Retries: 3})
+	cl, err := New(hx, config.NewGalaxyConfig())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -628,11 +648,12 @@ func TestNewPreservesCallerShouldRetry(t *testing.T) {
 		t.Fatal("Login: want error for HTTP 500")
 	}
 	if got := atomic.LoadInt32(&hits); got != 1 {
-		t.Errorf("hits = %d, want 1 (caller ShouldRetry must not be overwritten)", got)
+		t.Errorf("hits = %d, want 1 (the caller's ShouldRetry must be honoured)", got)
 	}
 }
 
-// TestLoginRetryWaitApplied verifies Options.Wait reaches the retry policy:
+// TestLoginRetryWaitApplied verifies the configured wait reaches the
+// transport:
 // with Retries=2 there are two extra attempts and therefore two waits. Only a
 // lower bound is asserted so scheduling jitter (which can only add time)
 // cannot make the test flaky; it checks that the waits happened, not how long
@@ -643,8 +664,14 @@ func TestLoginRetryWaitApplied(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cl, err := New(httpx.Config{UserAgent: "goggo-test/1.0"}, config.NewGalaxyConfig(),
-		Options{Retries: 2, Wait: 50 * time.Millisecond})
+	hx, err := httpx.New(httpx.Config{
+		UserAgent:   "goggo-test/1.0",
+		RetryPolicy: RetryPolicyFor(2, 50*time.Millisecond),
+	})
+	if err != nil {
+		t.Fatalf("httpx.New: %v", err)
+	}
+	cl, err := New(hx, config.NewGalaxyConfig())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

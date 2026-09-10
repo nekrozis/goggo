@@ -36,3 +36,10 @@ const (
 	UnitStringKSI  = "kB"
 	UnitStringMSI  = "MB"
 )
+
+// Version identifiers. The C++ build derives them from CMake's
+// PROJECT_VERSION (CMakeLists.txt:74-76); they are kept in sync by hand.
+const (
+	VersionNumber = "3.18"
+	VersionString = "LGOGDownloader " + VersionNumber
+)

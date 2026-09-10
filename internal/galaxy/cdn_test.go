@@ -17,10 +17,13 @@ func linkDoc(t *testing.T, raw string) map[string]any {
 }
 
 // TestGalaxyPathPlaceholder locks the marker's exact value: the download layer
-// substitutes this string, so it is a contract between the two.
+// substitutes this string, so it is a contract between the two. The marker is
+// goggo's own template protocol — the API never sends it — and it deliberately
+// reuses the "{path}" spelling the API's url_format already uses for the path
+// parameter, whose value the parameter pass re-attaches the marker to.
 func TestGalaxyPathPlaceholder(t *testing.T) {
-	if GalaxyPathPlaceholder != "{LGOGDOWNLOADER_GALAXY_PATH}" {
-		t.Errorf("GalaxyPathPlaceholder = %q, want the upstream literal", GalaxyPathPlaceholder)
+	if GalaxyPathPlaceholder != "{path}" {
+		t.Errorf("GalaxyPathPlaceholder = %q, want %q", GalaxyPathPlaceholder, "{path}")
 	}
 }
 

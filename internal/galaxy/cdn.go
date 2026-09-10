@@ -14,11 +14,26 @@ import (
 // template where the caller has to insert the expanded galaxy path
 // (galaxyapi.cpp:783).
 //
-// The value is kept exactly as upstream writes it. It is an internal marker that
-// never reaches a server — the callers substitute it before the request is built
-// (downloader.cpp:4655 and 4661) — so it is a contract between this package and
-// the download layer rather than user-visible text.
-const GalaxyPathPlaceholder = "{LGOGDOWNLOADER_GALAXY_PATH}"
+// It is a contract between this package and the download layer, not wire text:
+// the GOG API never sends it, and the callers substitute it before a request is
+// built (downloader.cpp:4655 and 4661). Upstream wrote the same idea as
+// "{LGOGDOWNLOADER_GALAXY_PATH}", appended to the path parameter's value by its
+// own template builder (galaxyapi.cpp:781-784); the API's url_format itself
+// spells the path parameter "{path}", and this port keeps that spelling as the
+// internal marker instead of carrying upstream's long name.
+//
+// Two properties make the shared spelling safe:
+//
+//   - The parameter pass replaces "{path}" with the parameter value plus the
+//     re-attached marker in ONE pass (util.ReplaceAll is not a loop, unlike the
+//     upstream while-loop that would never terminate if its marker equalled its
+//     search string).
+//   - The final consumer's ReplaceAll therefore only ever hits the re-attached
+//     marker. Should a url_format carry "{path}" without a matching parameter —
+//     a case where upstream would leave the API placeholder unsubstituted and
+//     produce a broken URL — this port fills it with the galaxy path, which is
+//     the useful reading of that template.
+const GalaxyPathPlaceholder = "{path}"
 
 // CdnURLTemplatesFromJSON builds the ordered list of CDN URL templates from a
 // link document (galaxyapi.cpp:740-811).

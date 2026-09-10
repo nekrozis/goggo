@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/nekrozis/goggo/internal/httpx"
@@ -32,89 +31,32 @@ import (
 // compressed md5, decompress and append. The chunk-internal resume of a retry
 // (CURLOPT_RESUME_FROM_LARGE) and the finer failure cleanup are S20; a retry
 // re-downloads the whole chunk.
+//
+// The scheduling itself lives in schedule: worker fan-out, the single
+// deliverer and the cancellation handling are shared with the website path
+// (review D67).
 func Run(ctx context.Context, tasks []model.FileTask, opts Options, deps RunDeps) error {
 	if deps.HTTP == nil || deps.URL == nil || deps.Observer == nil {
 		return errors.New("transfer: run needs an http client, a url provider and an observer")
 	}
-	if len(tasks) == 0 {
-		return nil
-	}
-
-	workers := opts.Workers
-	if workers <= 0 {
-		workers = 1
-	}
-	if workers > len(tasks) {
-		workers = len(tasks)
-	}
-
-	// Events flow through one channel to a single deliverer goroutine: the
-	// order is stable and the Observer never sees a concurrent call (review
-	// D59). The deliverer drains until every sender is done, so senders never
-	// block on shutdown.
-	events := make(chan Event)
-	deliverDone := make(chan struct{})
-	go func() {
-		defer close(deliverDone)
-		for ev := range events {
-			deps.Observer.OnEvent(ev)
-		}
-	}()
-
-	queue := make(chan model.FileTask)
-	go func() {
-		defer close(queue)
-		for _, task := range tasks {
-			select {
-			case <-ctx.Done():
-				return
-			case queue <- task:
-			}
-		}
-	}()
-
-	var wg sync.WaitGroup
-	wg.Add(workers)
-	for i := 0; i < workers; i++ {
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case task, ok := <-queue:
-					if !ok {
-						return
-					}
-					if err := runTask(ctx, task, opts, deps, events); err != nil {
-						if ctx.Err() != nil {
-							return // cancelled: the run reports ctx.Err(), not per-task noise
-						}
-						// D65a: a task failure is an error event; the run and
-						// the remaining tasks continue.
-						events <- Event{Path: task.Destination, Text: err.Error(), Kind: EventMessageError}
-					}
-				}
-			}
-		}()
-	}
-	wg.Wait()
-	close(events)
-	<-deliverDone
-
-	return ctx.Err()
+	return schedule(ctx, tasks, opts.Workers,
+		func(ev Event) { deps.Observer.OnEvent(ev) },
+		func(ctx context.Context, task model.FileTask, emit func(Event)) error {
+			return runChunkTask(ctx, task, opts, deps, emit)
+		})
 }
 
-// runTask downloads one task: the parent directories, then every chunk in
+// runChunkTask downloads one task: the parent directories, then every chunk in
 // order, each fetched, verified and appended (downloader.cpp:4450-4790). A
-// failure ends this task and is returned; other tasks continue.
-func runTask(ctx context.Context, task model.FileTask, opts Options, deps RunDeps, events chan<- Event) error {
-	events <- Event{Path: task.Destination, ChunkCount: len(task.Item.Chunks), Kind: EventTaskStart}
+// failure ends this task and is returned; other tasks continue. The failure is
+// also emitted as an error event, so the caller's non-nil return only matters
+// for a cancelled context.
+func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps RunDeps, emit func(Event)) error {
+	emit(Event{Path: task.Destination, ChunkCount: len(task.Item.Chunks), Kind: EventTaskStart})
 
-	// fail ends the task with its finish event; the worker turns the returned
-	// error into the single error event (so a failed task reports exactly one).
 	fail := func(text string) error {
-		events <- Event{Path: task.Destination, Kind: EventTaskFinish}
+		emit(Event{Path: task.Destination, Text: text, Kind: EventMessageError})
+		emit(Event{Path: task.Destination, Kind: EventTaskFinish})
 		return errors.New(text)
 	}
 
@@ -131,7 +73,7 @@ func runTask(ctx context.Context, task model.FileTask, opts Options, deps RunDep
 		if err := f.Close(); err != nil {
 			return fail(err.Error())
 		}
-		events <- Event{Path: task.Destination, Kind: EventTaskFinish}
+		emit(Event{Path: task.Destination, Kind: EventTaskFinish})
 		return nil
 	}
 
@@ -139,19 +81,19 @@ func runTask(ctx context.Context, task model.FileTask, opts Options, deps RunDep
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err := downloadChunk(ctx, task, j, chunk, opts, deps, events); err != nil {
+		if err := downloadChunk(ctx, task, j, chunk, opts, deps, emit); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			return fail(err.Error())
 		}
-		events <- Event{
+		emit(Event{
 			Path: task.Destination, Current: int64(chunk.CompressedOffset + chunk.CompressedSize),
 			Total: int64(task.Item.TotalCompressedSize), ChunkIndex: j,
 			ChunkCount: len(task.Item.Chunks), Kind: EventProgress,
-		}
+		})
 	}
-	events <- Event{Path: task.Destination, ChunkCount: len(task.Item.Chunks), Kind: EventTaskFinish}
+	emit(Event{Path: task.Destination, ChunkCount: len(task.Item.Chunks), Kind: EventTaskFinish})
 	return nil
 }
 
@@ -161,7 +103,7 @@ func runTask(ctx context.Context, task model.FileTask, opts Options, deps RunDep
 // re-performs the same URL. Upstream resumes a retried curl transfer from the
 // bytes it already has (CURLOPT_RESUME_FROM_LARGE, downloader.cpp:4695); that
 // refinement is S20 — here a retry re-downloads the whole chunk.
-func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk model.GalaxyDepotItemChunk, opts Options, deps RunDeps, events chan<- Event) error {
+func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk model.GalaxyDepotItemChunk, opts Options, deps RunDeps, emit func(Event)) error {
 	label := fmt.Sprintf("%s (chunk %d/%d)", task.Destination, index+1, len(task.Item.Chunks))
 
 	url, err := deps.URL.URL(ctx, task, chunk)
@@ -181,9 +123,9 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 			}
 		}
 		if attempt > 0 {
-			events <- Event{Path: task.Destination,
+			emit(Event{Path: task.Destination,
 				Text: fmt.Sprintf("Retry %d/%d: %s (%s)", attempt, opts.Retries, label, reason),
-				Kind: EventMessageInfo}
+				Kind: EventMessageInfo})
 		}
 
 		body, err := fetchChunkBody(ctx, deps.HTTP, url)

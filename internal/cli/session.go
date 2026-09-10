@@ -101,6 +101,11 @@ func httpxCfg(cfg config.Config) httpx.Config {
 		// webapi concern; Wait keeps the C++ unit, microseconds — see the audit
 		// note on --wait.
 		RetryPolicy: webapi.RetryPolicyFor(cfg.Retries, time.Duration(cfg.Wait)*time.Microsecond),
+		// The transfer guard mirrors --lowspeed-timeout / --lowspeed-rate; the
+		// C++ field names cross over: LowSpeedTimeout is the duration in
+		// seconds, LowSpeedTimeoutRate the rate in bytes per second.
+		LowSpeedLimit: cfg.Curl.LowSpeedTimeoutRate,
+		LowSpeedTime:  time.Duration(cfg.Curl.LowSpeedTimeout) * time.Second,
 	}
 }
 

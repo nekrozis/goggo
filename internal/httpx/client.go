@@ -55,12 +55,28 @@ type Config struct {
 	// zero value leaves the default dial timeout.
 	Timeout time.Duration
 
+	// LowSpeedLimit mirrors CURLOPT_LOW_SPEED_LIMIT: the rate in bytes per
+	// second below which a transfer may be aborted with ErrLowSpeed;
+	// LowSpeedTime mirrors CURLOPT_LOW_SPEED_TIME: how long the average rate
+	// may stay below the limit before that happens (util.cpp:717-718).
+	//
+	// Zero values select the transport defaults (DefaultLowSpeedLimit /
+	// DefaultLowSpeedTime) — the same "zero means default" rule the retry
+	// policy follows — so the guard cannot be switched off by an accidental
+	// zero; DisableLowSpeedGuard is the explicit off switch.
+	LowSpeedLimit int64
+	LowSpeedTime  time.Duration
+
 	// InsecureSkipVerify mirrors CURLOPT_SSL_VERIFYPEER=0 (i.e. the C++
 	// bVerifyPeer=false case). It exists for behaviour compatibility with
 	// lgogdownloader, not as a recommended mode; the zero value (verify) is
 	// the secure default. The CLI layer (S12) maps a disabled verify setting
 	// to true here.
 	InsecureSkipVerify bool
+
+	// DisableLowSpeedGuard turns the low-speed watchdog off entirely, for
+	// callers and tests that need a transport without a transfer guard.
+	DisableLowSpeedGuard bool
 }
 
 // Client is the transport layer. The embedded *http.Client carries
@@ -73,13 +89,16 @@ type Config struct {
 // also when the caller supplied its own HTTPClient).
 //
 // Fields are ordered to minimise padding: RetryPolicy (24B), the strings
-// (16B each), then the pointers (8B each).
+// (16B each), then the 8B fields, then the bools.
 type Client struct {
-	policy     RetryPolicy
-	ua         string
-	cookieFile string
-	hc         *http.Client
-	store      *cookieStore
+	policy        RetryPolicy
+	ua            string
+	cookieFile    string
+	hc            *http.Client
+	store         *cookieStore
+	lowSpeedTime  time.Duration
+	lowSpeedLimit int64
+	lowSpeedGuard bool
 }
 
 // New builds a Client from cfg. It performs no file I/O: cookie persistence
@@ -91,6 +110,18 @@ func New(cfg Config) (*Client, error) {
 	}
 	if policy.ShouldRetry == nil {
 		policy.ShouldRetry = DefaultShouldRetry
+	}
+
+	// The low-speed guard: the transport owns the defaults so an unconfigured
+	// caller still gets upstream behaviour, and the explicit switch is the only
+	// way to turn it off.
+	guard := !cfg.DisableLowSpeedGuard
+	limit, window := cfg.LowSpeedLimit, cfg.LowSpeedTime
+	if limit <= 0 {
+		limit = DefaultLowSpeedLimit
+	}
+	if window <= 0 {
+		window = DefaultLowSpeedTime
 	}
 
 	hc := cfg.HTTPClient
@@ -133,12 +164,26 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	return &Client{
-		policy:     policy,
-		ua:         cfg.UserAgent,
-		cookieFile: cfg.CookieFile,
-		hc:         hc,
-		store:      store,
+		policy:        policy,
+		ua:            cfg.UserAgent,
+		cookieFile:    cfg.CookieFile,
+		hc:            hc,
+		store:         store,
+		lowSpeedTime:  window,
+		lowSpeedLimit: limit,
+		lowSpeedGuard: guard,
 	}, nil
+}
+
+// guardBody installs the low-speed watchdog on a response. Every response that
+// leaves this package goes through it (Do and DoNoRedirect), so all callers —
+// webapi, auth and the future download path — inherit the upstream guard
+// without implementing anything themselves.
+func (c *Client) guardBody(resp *http.Response) {
+	if !c.lowSpeedGuard || resp == nil || resp.Body == nil {
+		return
+	}
+	resp.Body = newLowSpeedBody(resp.Body, c.lowSpeedLimit, c.lowSpeedTime)
 }
 
 // Do performs a single request (no retry). ctx is honored through the
@@ -150,7 +195,12 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 	if c.ua != "" && req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", c.ua)
 	}
-	return c.hc.Do(req)
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	c.guardBody(resp)
+	return resp, nil
 }
 
 // DoNoRedirect performs a single request (no retry) and returns the response
@@ -169,7 +219,12 @@ func (c *Client) DoNoRedirect(ctx context.Context, req *http.Request) (*http.Res
 	}
 	oneShot := *c.hc
 	oneShot.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return oneShot.Do(req)
+	resp, err := oneShot.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	c.guardBody(resp)
+	return resp, nil
 }
 
 // Get performs a single GET request (no retry) and returns the raw response.

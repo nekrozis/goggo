@@ -42,6 +42,12 @@ func NewConfig(configHome, cacheHome string) Config {
 	cfg.UnitFormat = UnitFormatIEC
 	cfg.Retries = 3
 	cfg.Wait = 0
+	// Transfer guard (main.cpp:314-315, CURLOPT_LOW_SPEED_TIME/LIMIT): abort a
+	// transfer that stays below 200 B/s for 30 s. The names cross over —
+	// LowSpeedTimeout is the duration in seconds, LowSpeedTimeoutRate the rate
+	// in bytes per second.
+	cfg.Curl.LowSpeedTimeout = 30
+	cfg.Curl.LowSpeedTimeoutRate = 200
 	cfg.Color = true // --no-color clears it
 	return cfg
 }

@@ -111,6 +111,19 @@ func (c *Client) getResponse(ctx context.Context, target string) (string, error)
 // getResponseJSON fetches target and decodes the body as a JSON object
 // (galaxyapi.cpp:135-188), including the zlib retry described on
 // decodeJSONObject.
+// ResponseJSON fetches a Galaxy API document as JSON over an authenticated
+// GET. The website path resolves its downlink documents through it
+// (downloader.cpp:3094).
+func (c *Client) ResponseJSON(ctx context.Context, target string) (map[string]any, error) {
+	return c.getResponseJSON(ctx, target)
+}
+
+// Response fetches a Galaxy API document as text — the checksum XML behind a
+// website file's downlink (downloader.cpp:3122).
+func (c *Client) Response(ctx context.Context, target string) (string, error) {
+	return c.getResponse(ctx, target)
+}
+
 func (c *Client) getResponseJSON(ctx context.Context, target string) (map[string]any, error) {
 	body, err := c.getResponse(ctx, target)
 	if err != nil {

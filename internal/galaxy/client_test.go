@@ -36,7 +36,10 @@ func newTestClient(t *testing.T, srv *httptest.Server, token map[string]any) *Cl
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	cl.ep = endpoints{contentSystem: srv.URL}
+	// Both hosts point at the test server: leaving cdn empty would build a
+	// RELATIVE manifest URL, and the request would fail on an unsupported
+	// scheme (or reach the real CDN).
+	cl.ep = endpoints{contentSystem: srv.URL, cdn: srv.URL}
 	return cl
 }
 
@@ -119,7 +122,7 @@ func TestGetResponseHonoursTransportPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	cl.ep = endpoints{contentSystem: srv.URL}
+	cl.ep = endpoints{contentSystem: srv.URL, cdn: srv.URL}
 
 	if _, err := cl.getResponseJSON(context.Background(), srv.URL); err != nil {
 		t.Fatalf("getResponseJSON: %v", err)

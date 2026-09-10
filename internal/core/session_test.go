@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/auth"
@@ -670,5 +671,221 @@ func TestInitWithoutUsableTokenReportsFailure(t *testing.T) {
 	}
 	if !errors.Is(err, errNoToken) {
 		t.Errorf("error = %v, want it to wrap errNoToken", err)
+	}
+}
+
+// openTestServer models the endpoints Open touches and counts each of them, so a
+// test can tell "the login flow never ran" from "it ran": the account probe
+// decides LoggedIn, the token endpoint is the refresh, and the login form is the
+// only path that ends in a cookie flush.
+type openTestServer struct {
+	*httptest.Server
+
+	mu       sync.Mutex
+	accounts int
+	tokens   int
+	logins   int
+}
+
+func newOpenTestServer(t *testing.T) *openTestServer {
+	t.Helper()
+	s := &openTestServer{}
+	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		switch r.URL.Path {
+		case "/www/account":
+			s.accounts++
+			fmt.Fprint(w, "account")
+		case "/token":
+			s.tokens++
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"access_token":"at-new","refresh_token":"rt-new","expires_in":3600,"user_id":"u1"}`)
+		case "/auth":
+			fmt.Fprint(w, `<html><body><form><input name="login[_token]" value="tok"></form></body></html>`)
+		case "/login_check":
+			s.logins++
+			http.Redirect(w, r, "/callback?code=plain-code", http.StatusFound)
+		case "/callback":
+			http.SetCookie(w, &http.Cookie{Name: "SID", Value: "jar-cookie", Path: "/"})
+			fmt.Fprint(w, "callback")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(s.Close)
+	return s
+}
+
+func (s *openTestServer) counts() (accounts, tokens, logins int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.accounts, s.tokens, s.logins
+}
+
+// injectedDeps is the seam under test: only the network exit changes, so the
+// production cookie file, retry policy and low-speed guard stay in place.
+func injectedDeps(t *testing.T, srv *httptest.Server) Dependencies {
+	t.Helper()
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+	return Dependencies{HTTPTransport: &gogHostTransport{target: target}}
+}
+
+// seededToken writes a token store through the production writer, so the tests
+// do not depend on the file format.
+func seededToken(t *testing.T, cfg config.Config, expiresIn int) {
+	t.Helper()
+	if err := ensureDirectories(cfg); err != nil {
+		t.Fatalf("ensureDirectories: %v", err)
+	}
+	store := config.NewGalaxyConfig()
+	store.SetJSON(map[string]any{
+		"access_token": "at-seed", "refresh_token": "rt-seed",
+		"expires_in": expiresIn, "user_id": "u1",
+	})
+	if err := auth.SaveTokenFile(store, TokenPath(cfg)); err != nil {
+		t.Fatalf("seed the token store: %v", err)
+	}
+}
+
+// TestOpenWithInjectedTransportSeesAFreshAccount covers the seam's happy path
+// and the reason it replaces only the network exit (review ruling D28-3): the
+// run keeps its cookie file, so the session it builds persists like any other.
+func TestOpenWithInjectedTransportSeesAFreshAccount(t *testing.T) {
+	srv := newOpenTestServer(t)
+	cfg := config.NewConfig(t.TempDir(), t.TempDir())
+	seededToken(t, cfg, 3600)
+
+	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), false, injectedDeps(t, srv.Server))
+	if err != nil {
+		t.Fatalf("OpenWith: %v", err)
+	}
+	if !d.LoggedIn() {
+		t.Error("LoggedIn = false, want true: a fresh token and a 200 account probe are the logged-in state")
+	}
+	accounts, tokens, logins := srv.counts()
+	if accounts != 1 {
+		t.Errorf("account probes = %d, want exactly one", accounts)
+	}
+	if tokens != 0 {
+		t.Errorf("token requests = %d, want none: the seeded token is fresh", tokens)
+	}
+	if logins != 0 {
+		t.Errorf("login attempts = %d, want none", logins)
+	}
+
+	// The cookie file is the production path, and Close flushes into it: this is
+	// the property that a client-injecting seam would have lost.
+	if err := d.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := os.Stat(cfg.Curl.CookiePath); err != nil {
+		t.Errorf("cookie file %q was not written: %v", cfg.Curl.CookiePath, err)
+	}
+}
+
+// TestOpenWithInjectedTransportRefreshesExpiredToken covers the refresh branch
+// through Open itself (the S17 boundary this step exists to close).
+func TestOpenWithInjectedTransportRefreshesExpiredToken(t *testing.T) {
+	srv := newOpenTestServer(t)
+	cfg := config.NewConfig(t.TempDir(), t.TempDir())
+	seededToken(t, cfg, -10)
+
+	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), false, injectedDeps(t, srv.Server))
+	if err != nil {
+		t.Fatalf("OpenWith: %v", err)
+	}
+	_, tokens, logins := srv.counts()
+	if tokens != 1 {
+		t.Errorf("token requests = %d, want exactly one refresh", tokens)
+	}
+	if logins != 0 {
+		t.Errorf("login attempts = %d, want none: the refresh succeeded", logins)
+	}
+	if got := d.token.GetAccessToken(); got != "at-new" {
+		t.Errorf("access token = %q, want the refreshed one", got)
+	}
+
+	// Saved through the production reader: a fresh store sees the new token.
+	reread := config.NewGalaxyConfig()
+	if err := auth.LoadTokenFile(reread, TokenPath(cfg)); err != nil {
+		t.Fatalf("LoadTokenFile after OpenWith: %v", err)
+	}
+	if got := reread.GetAccessToken(); got != "at-new" {
+		t.Errorf("stored access token = %q, want the refreshed token written to disk", got)
+	}
+}
+
+// TestOpenWithInjectedTransportWithoutLoginPermission covers the
+// --check-login-status path: with allowLogin false a not-logged-in account is
+// reported, never logged in.
+func TestOpenWithInjectedTransportWithoutLoginPermission(t *testing.T) {
+	srv := newOpenTestServer(t)
+	cfg := config.NewConfig(t.TempDir(), t.TempDir())
+
+	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), false, injectedDeps(t, srv.Server))
+	if err != nil {
+		t.Fatalf("OpenWith: %v", err)
+	}
+	if d.LoggedIn() {
+		t.Error("LoggedIn = true, want false: the account probe succeeded but no usable token exists")
+	}
+	accounts, tokens, logins := srv.counts()
+	if accounts != 1 {
+		t.Errorf("account probes = %d, want exactly one", accounts)
+	}
+	if tokens != 0 || logins != 0 {
+		t.Errorf("token requests = %d and login attempts = %d, want none", tokens, logins)
+	}
+}
+
+// TestOpenWithInjectedTransportWithoutToken covers a fresh install: no token
+// file at all is not an error, exactly like the C++ loader leaving an empty
+// store.
+func TestOpenWithInjectedTransportWithoutToken(t *testing.T) {
+	srv := newOpenTestServer(t)
+	cfg := config.NewConfig(t.TempDir(), t.TempDir())
+
+	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), false, injectedDeps(t, srv.Server))
+	if err != nil {
+		t.Fatalf("OpenWith without a token file: %v", err)
+	}
+	if d.LoggedIn() {
+		t.Error("LoggedIn = true, want false without a token")
+	}
+}
+
+// TestOpenWithInjectedTransportRunsTheFullLogin locks the property D28-3 was
+// decided for: a run through the seam can complete a login AND flush its cookie
+// jar, because the seam changes the network exit only.
+func TestOpenWithInjectedTransportRunsTheFullLogin(t *testing.T) {
+	srv := newOpenTestServer(t)
+	cfg := config.NewConfig(t.TempDir(), t.TempDir())
+	cfg.Email, cfg.Password = "user@example.com", "pw"
+
+	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), true, injectedDeps(t, srv.Server))
+	if err != nil {
+		t.Fatalf("OpenWith with a login: %v", err)
+	}
+	if !d.LoggedIn() {
+		t.Error("LoggedIn = false after a completed login")
+	}
+	accounts, tokens, logins := srv.counts()
+	if logins != 1 || tokens != 1 {
+		t.Errorf("login attempts = %d, token requests = %d; want one of each", logins, tokens)
+	}
+	if accounts < 1 {
+		t.Errorf("account probes = %d, want the post-login probe to have run", accounts)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	for _, path := range []string{cfg.Curl.CookiePath, TokenPath(cfg)} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%q was not written: %v", path, err)
+		}
 	}
 }

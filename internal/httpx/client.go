@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -273,6 +274,38 @@ func (c *Client) GetBytesWithRetry(ctx context.Context, url string) ([]byte, err
 	}
 	if resp.StatusCode >= 400 {
 		return nil, &StatusError{Method: http.MethodGet, URL: url, Code: resp.StatusCode}
+	}
+	return body, nil
+}
+
+// DoBytesWithRetry runs req under the client's default RetryPolicy and reads
+// the final body. It is the request-carrying counterpart of
+// GetBytesWithRetry: a caller that needs its own headers (the Galaxy content
+// endpoints send "Authorization: Bearer <token>") still gets the transport's
+// retry policy, User-Agent and low-speed guard.
+//
+// Every attempt goes through Do, so nothing in the request path is bypassed and
+// no existing behaviour changes. The caller owns req and must not reuse it
+// afterwards; it must be re-issuable, because the policy may send it more than
+// once — a nil body (or a request carrying GetBody) is fine, a one-shot stream
+// is not. Statuses >= 400 on the final response produce a *StatusError.
+func (c *Client) DoBytesWithRetry(ctx context.Context, req *http.Request) ([]byte, error) {
+	if req == nil {
+		return nil, errors.New("httpx: nil request")
+	}
+	resp, err := DoWithRetry(ctx, c.policy, func(ctx context.Context) (*http.Response, error) {
+		return c.Do(ctx, req)
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, &StatusError{Method: req.Method, URL: req.URL.String(), Code: resp.StatusCode}
 	}
 	return body, nil
 }

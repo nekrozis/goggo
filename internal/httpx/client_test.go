@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -17,6 +19,107 @@ func testConfig() Config {
 	return Config{
 		UserAgent: "goggo-test/1.0",
 		Timeout:   5 * time.Second,
+	}
+}
+
+// TestDoBytesWithRetrySendsCallerRequestEveryAttempt locks the contract of
+// DoBytesWithRetry: the caller's own request — and therefore its headers — is
+// sent on every attempt, and the request path is not bypassed, so the
+// configured User-Agent still arrives. The Galaxy content endpoints rely on
+// exactly this: a Bearer header of their own, plus the transport's policy.
+func TestDoBytesWithRetrySendsCallerRequestEveryAttempt(t *testing.T) {
+	var calls, lostAuth, lostUA int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&calls, 1)
+		if r.Header.Get("Authorization") != "Bearer tok" {
+			atomic.AddInt32(&lostAuth, 1)
+		}
+		if r.UserAgent() != "goggo-test/1.0" {
+			atomic.AddInt32(&lostUA, 1)
+		}
+		if n < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer srv.Close()
+
+	cfg := testConfig()
+	cfg.RetryPolicy = DefaultPolicy(3, time.Millisecond)
+	c, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer tok")
+
+	body, err := c.DoBytesWithRetry(context.Background(), req)
+	if err != nil {
+		t.Fatalf("DoBytesWithRetry: %v", err)
+	}
+	if string(body) != `{"ok":true}` {
+		t.Errorf("body = %q", body)
+	}
+	if got := atomic.LoadInt32(&calls); got != 3 {
+		t.Errorf("attempts = %d, want 3", got)
+	}
+	if got := atomic.LoadInt32(&lostAuth); got != 0 {
+		t.Errorf("%d attempt(s) lost the caller's Authorization header", got)
+	}
+	if got := atomic.LoadInt32(&lostUA); got != 0 {
+		t.Errorf("%d attempt(s) bypassed the configured User-Agent", got)
+	}
+}
+
+// TestDoBytesWithRetryExhaustedStatus locks the error face: a retryable status
+// that survives the policy becomes a *StatusError naming the request's method
+// and URL, and the error text carries no header value.
+func TestDoBytesWithRetryExhaustedStatus(t *testing.T) {
+	srv, calls := sequenceServer(t, http.StatusInternalServerError)
+
+	cfg := testConfig()
+	cfg.RetryPolicy = DefaultPolicy(2, time.Millisecond)
+	c, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer secret-token")
+
+	_, err = c.DoBytesWithRetry(context.Background(), req)
+	if err == nil {
+		t.Fatal("DoBytesWithRetry must report the exhausted status")
+	}
+	var se *StatusError
+	if !errors.As(err, &se) {
+		t.Fatalf("err = %v, want *StatusError", err)
+	}
+	if se.Code != http.StatusInternalServerError || se.Method != http.MethodGet || se.URL != srv.URL {
+		t.Errorf("StatusError = %+v, want %s %s: HTTP 500", se, http.MethodGet, srv.URL)
+	}
+	if got := atomic.LoadInt32(calls); got != 2 {
+		t.Errorf("attempts = %d, want 2", got)
+	}
+	if strings.Contains(err.Error(), "secret-token") {
+		t.Errorf("err = %q must not carry the Authorization header value", err)
+	}
+}
+
+// TestDoBytesWithRetryNilRequest: a nil request is reported, not a panic.
+func TestDoBytesWithRetryNilRequest(t *testing.T) {
+	c, err := New(testConfig())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := c.DoBytesWithRetry(context.Background(), nil); err == nil {
+		t.Error("a nil request must be an error")
 	}
 }
 func TestDoSendsUserAgent(t *testing.T) {

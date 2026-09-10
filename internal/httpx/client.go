@@ -34,6 +34,18 @@ type Config struct {
 	// the system roots. Empty keeps the system roots.
 	CACertPath string
 
+	// CookieFile enables cookie-file persistence (the C++ COOKIEFILE /
+	// COOKIELIST FLUSH pair) when non-empty: New installs a cookieStore as
+	// the transport's jar and LoadCookies/SaveCookies read and write this
+	// Netscape cookies.txt path. New performs no file I/O itself — loading is
+	// an explicit initialisation step so the caller can order it before
+	// session checks.
+	//
+	// A non-empty CookieFile together with a caller-provided HTTPClient is a
+	// configuration error reported by LoadCookies/SaveCookies
+	// (ErrCookieFileUnsupported): the caller's jar cannot be replaced.
+	CookieFile string
+
 	// HTTPClient optionally overrides the underlying client (useful for
 	// tests and callers that bring their own transport). When nil a client
 	// is built from the other settings.
@@ -56,15 +68,22 @@ type Config struct {
 // lives for the whole Client lifetime, so cookies received by one request
 // (e.g. a login) are sent with later ones.
 //
-// Fields are ordered to minimise padding: RetryPolicy (24B), User-Agent
-// string (16B), then the *http.Client pointer (8B).
+// When Config.CookieFile is set the jar is a *cookieStore, which additionally
+// maintains a reconstructable persistence state; store is nil otherwise (and
+// also when the caller supplied its own HTTPClient).
+//
+// Fields are ordered to minimise padding: RetryPolicy (24B), the strings
+// (16B each), then the pointers (8B each).
 type Client struct {
-	policy RetryPolicy
-	ua     string
-	hc     *http.Client
+	policy     RetryPolicy
+	ua         string
+	cookieFile string
+	hc         *http.Client
+	store      *cookieStore
 }
 
-// New builds a Client from cfg.
+// New builds a Client from cfg. It performs no file I/O: cookie persistence
+// is loaded explicitly through LoadCookies.
 func New(cfg Config) (*Client, error) {
 	policy := cfg.RetryPolicy
 	if policy.MaxAttempts < 1 {
@@ -75,6 +94,7 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	hc := cfg.HTTPClient
+	var store *cookieStore
 	if hc == nil {
 		tlsConfig := &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify} //nolint:gosec // mirrors CURLOPT_SSL_VERIFYPEER
 		if cfg.CACertPath != "" {
@@ -98,15 +118,27 @@ func New(cfg Config) (*Client, error) {
 			transport.DialContext = (&net.Dialer{Timeout: cfg.Timeout}).DialContext
 		}
 
-		jar, err := cookiejar.New(nil)
-		if err != nil {
-			return nil, fmt.Errorf("create cookie jar: %w", err)
-		}
 		// http.Client follows redirects by default (CURLOPT_FOLLOWLOCATION).
-		hc = &http.Client{Transport: transport, Jar: jar}
+		hc = &http.Client{Transport: transport}
+		if cfg.CookieFile != "" {
+			store = newCookieStore()
+			hc.Jar = store
+		} else {
+			jar, err := cookiejar.New(nil)
+			if err != nil {
+				return nil, fmt.Errorf("create cookie jar: %w", err)
+			}
+			hc.Jar = jar
+		}
 	}
 
-	return &Client{policy: policy, ua: cfg.UserAgent, hc: hc}, nil
+	return &Client{
+		policy:     policy,
+		ua:         cfg.UserAgent,
+		cookieFile: cfg.CookieFile,
+		hc:         hc,
+		store:      store,
+	}, nil
 }
 
 // Do performs a single request (no retry). ctx is honored through the

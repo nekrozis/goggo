@@ -78,6 +78,19 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// --logout clears the local login state and stops. It sits after the check
+	// above — a query outranks a mutation, so both flags together answer the
+	// query and remove nothing — and before the session below, because it must
+	// never open one: a Session flushes its cookie jar on Close, which would
+	// write the removed cookie file straight back.
+	if inv.Logout {
+		if err := logout(inv.Config, stdout); err != nil {
+			fmt.Fprintf(stderr, "Error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
 	s, err := Open(ctx, inv.Config, ui, true)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)

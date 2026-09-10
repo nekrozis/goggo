@@ -29,6 +29,7 @@ type Invocation struct {
 	Help             bool
 	Version          bool
 	CheckLoginStatus bool
+	Logout           bool
 	List             bool
 }
 
@@ -83,6 +84,11 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 			inv.Version = true
 		case "check-login-status":
 			inv.CheckLoginStatus = true
+		case "logout":
+			// A goggo extension: upstream has no logout option and no remote
+			// logout API (see dev/audit/S12.2-R5.md). It clears local state
+			// only. The conflicts it refuses are checked after the loop.
+			inv.Logout = true
 		case "login":
 			inv.Config.Login = true
 		case "browser-login":
@@ -265,6 +271,27 @@ func Parse(args []string, cfg config.Config) (Invocation, error) {
 		}
 		inv.Config.DownloadConfig.Include = inc &^ exc
 	}
+
+	// --logout is a mutation that clears the whole local login state, so it is
+	// refused alongside another action: quietly picking one of two contradictory
+	// requests would be a surprise, and the named flag is what tells the user
+	// which pair they actually typed (review ruling Q1/Q5). Only the first
+	// conflict is reported.
+	//
+	// --check-login-status is deliberately NOT in this list: it is a query, and
+	// the dispatcher answers it before any mutation happens (query > mutation),
+	// so the pair is legal and removes nothing. --help/--version are likewise
+	// left to the dispatcher, which already answers them first.
+	if inv.Logout {
+		switch {
+		case inv.Config.ForceBrowserLogin:
+			return inv, fmt.Errorf("--logout cannot be combined with --browser-login")
+		case inv.Config.Login:
+			return inv, fmt.Errorf("--logout cannot be combined with --login")
+		case inv.List:
+			return inv, fmt.Errorf("--logout cannot be combined with --list")
+		}
+	}
 	return inv, nil
 }
 
@@ -286,6 +313,7 @@ Options:
   --login                     Login
   --browser-login             Login (force browser login)
   --check-login-status        Check login status (exit code 0 when logged in)
+  --logout                    Log out (clear local login state)
   --login-email <email>       Login email
   --login-password <pass>     Login password
   --list [format]             List games/tags/wishlist (default: games)

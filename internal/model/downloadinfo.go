@@ -27,13 +27,24 @@ type ProgressInfo struct {
 // shared state between a download worker and the progress renderer, so reads
 // and writes are guarded by a mutex.
 //
-// Difference from the C++ class (intentional): DownloadInfo is used through a
-// pointer returned by NewDownloadInfo; the C++ lock-protected value
-// copy/assignment is replaced by explicit sharing, which is the idiomatic Go
-// approach for a lock-protected state holder.
+// Difference from the C++ class (intentional): the C++ lock-protected value
+// copy/assignment is replaced by explicit sharing, so a DownloadInfo is always
+// used through the pointer returned by NewDownloadInfo. Do not copy it by value
+// once in use: it embeds a sync.Mutex, and Go's sync types must not be copied.
+// That is a Go implementation constraint, not a claim that the C++ class was
+// uncopyable — the original does define a lock-guarded copy constructor and
+// assignment operator.
 //
-// Fields are ordered to minimise padding: progress (32B) first, then filename
-// (16B), the mutex (8B) and finally the 4B status.
+// The lock deliberately stays an exclusive sync.Mutex: the C++ class guards
+// every accessor, getters included, with std::mutex, and progress polling runs
+// at much the same rate as progress updates, so an RWMutex would add cost
+// without a clear benefit. Readers taking the exclusive lock mirrors the
+// original behaviour.
+//
+// Fields are ordered to minimise padding: progress (32B), filename (16B), the
+// mutex (8B) and the 4B status. An RWMutex (24B) would not change the total
+// (80B in either order), another reason the layout is left alone; these sizes
+// are the current amd64 toolchain baseline, not an ABI guarantee.
 type DownloadInfo struct {
 	progress ProgressInfo
 	filename string

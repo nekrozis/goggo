@@ -10,6 +10,8 @@ const (
 	EventMessageWarning
 	EventMessageError
 	EventMessageSuccess
+	EventTaskStart
+	EventTaskFinish
 )
 
 // Event is the only thing transfer emits. The front end turns it into a

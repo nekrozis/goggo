@@ -3,6 +3,8 @@ package webapi
 import (
 	"context"
 	"fmt"
+
+	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // GameDetailsJSON fetches the per-game details document (website.cpp:83-89).
@@ -29,7 +31,7 @@ func (c *Client) OwnedGameIDs(ctx context.Context) ([]string, error) {
 		return ids, nil
 	}
 	for i, el := range owned {
-		s, err := jsonStrLoose(el)
+		s, err := jsonval.Str(el)
 		if err != nil {
 			return nil, fmt.Errorf("webapi: owned[%d]: %w", i, err)
 		}
@@ -56,22 +58,22 @@ func (c *Client) Tags(ctx context.Context) (map[string]string, error) {
 	if !ok || v == nil {
 		return tags, nil
 	}
-	children, err := jsonChildren(v)
+	children, err := jsonval.Children(v)
 	if err != nil {
 		return nil, fmt.Errorf("webapi: tags: %w", err)
 	}
 	for i, child := range children {
-		node, err := jsonObject(child)
+		node, err := jsonval.Object(child)
 		if err != nil {
 			return nil, fmt.Errorf("webapi: tags[%d]: %w", i, err)
 		}
 		// A missing id/name member reads as null in jsoncpp and stringifies to
 		// "", so both are read loosely.
-		id, err := jsonStrLoose(node["id"])
+		id, err := jsonval.Str(node["id"])
 		if err != nil {
 			return nil, fmt.Errorf("webapi: tags[%d].id: %w", i, err)
 		}
-		name, err := jsonStrLoose(node["name"])
+		name, err := jsonval.Str(node["name"])
 		if err != nil {
 			return nil, fmt.Errorf("webapi: tags[%d].name: %w", i, err)
 		}

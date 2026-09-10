@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // ProductQuery is one getFilteredProducts request (website.cpp:113).
@@ -80,7 +82,7 @@ func (c *Client) productPage(ctx context.Context, url string) (ProductPage, erro
 	products := []map[string]any{}
 	if arr, ok := root["products"].([]any); ok {
 		for i, el := range arr {
-			obj, err := jsonObject(el)
+			obj, err := jsonval.Object(el)
 			if err != nil {
 				return ProductPage{}, fmt.Errorf("webapi: %s: products[%d]: %w", url, i, err)
 			}
@@ -96,7 +98,7 @@ func requiredInt(root map[string]any, key, url string) (int, error) {
 	if !ok || v == nil {
 		return 0, fmt.Errorf("webapi: %s: missing %q", url, key)
 	}
-	n, err := jsonIntStrict(v)
+	n, err := jsonval.Int(v)
 	if err != nil {
 		return 0, fmt.Errorf("webapi: %s: %q: %w", url, key, err)
 	}

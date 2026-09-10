@@ -3,9 +3,23 @@ package webapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/nekrozis/goggo/internal/jsonval"
 )
+
+// ErrNotJSON reports that a response body did not form the expected JSON
+// document. It covers the SHAPE of a response only: HTTP failures surface as
+// *httpx.StatusError and field-level problems are wrapped with context, so a
+// caller can map ErrNotJSON onto its own hint — the C++ source prints
+// "Response was not JSON. Cookies have most likely expired. Try --login
+// first." (website.cpp:820).
+//
+// It stays here rather than in internal/jsonval because it describes an HTTP
+// response shape, not a JSON value conversion.
+var ErrNotJSON = errors.New("webapi: response was not JSON")
 
 // getResponse fetches url and returns the body, mirroring
 // Website::getResponse (website.cpp:28-58). The C++ implementation printed
@@ -47,7 +61,7 @@ func decodeJSONObject(body string) (map[string]any, error) {
 	}
 	obj, ok := v.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonKind(v))
+		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonval.Kind(v))
 	}
 	return obj, nil
 }

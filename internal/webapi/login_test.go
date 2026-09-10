@@ -766,3 +766,125 @@ func TestWalkRedirectChainBoundaries(t *testing.T) {
 		})
 	}
 }
+
+// --- R4c: offline negative semantics -----------------------------------------
+//
+// These three lock the branches the field cannot reach reliably (2FA is hard to
+// trigger), and they are the offline substitute for the GATE-A negative items
+// that were handed over to S12.2-R4c (see dev/audit/GATE-A.md §3.2).
+
+// TestContinueLoginRejectsWrongCodeLengthLocally locks the local validation
+// (login.go:217-220): a code of the wrong length is rejected BEFORE any network
+// side effect, and the rejected attempts do not consume the challenge.
+func TestContinueLoginRejectsWrongCodeLengthLocally(t *testing.T) {
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		switch r.URL.Path {
+		case "/auth":
+			fmt.Fprint(w, loginFormPage(false))
+		case "/login_check":
+			http.Redirect(w, r, "/two_step", http.StatusFound)
+		case "/two_step":
+			fmt.Fprint(w, `<html><body><form><input name="second_step_authentication[_token]" value="ch-tok"></form></body></html>`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	cl, _ := newTestClient(t, srv, 0)
+
+	challenge, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if challenge == nil || challenge.Kind != ChallengeTwoFactor || challenge.CodeLength != 4 {
+		t.Fatalf("challenge = %+v, want a 4-character two-factor challenge", challenge)
+	}
+
+	before := requests.Load()
+	for _, bad := range []string{"", "1", "123", "12345"} {
+		err := cl.ContinueLogin(context.Background(), challenge, bad)
+		if err == nil {
+			t.Fatalf("ContinueLogin(%q) must fail", bad)
+		}
+		if got := err.Error(); !strings.Contains(got, "security code must be 4 characters long") {
+			t.Errorf("ContinueLogin(%q) = %q, want the local length error", bad, got)
+		}
+	}
+	if got := requests.Load(); got != before {
+		t.Errorf("requests = %d, want %d: local validation must not touch the network", got, before)
+	}
+
+	// A well-formed submission must still be possible: were the rejected
+	// attempts to have consumed the challenge, this would report
+	// ErrChallengeConsumed.
+	if err := cl.ContinueLogin(context.Background(), challenge, "1234"); errors.Is(err, ErrChallengeConsumed) {
+		t.Error("rejected attempts must not consume the challenge")
+	}
+}
+
+// TestLoginCaptchaMarkerYieldsBrowserChallenge locks the branch order: the
+// reCAPTCHA marker is read from the fetched login page BEFORE the credentials
+// are posted, so a captcha-bearing page produces a browser challenge instead of
+// a password failure. Paired with TestLoginNoCodeAndNoCaptchaFails, the two
+// prove that the browser branch is marker-driven, not "wrong password ⇒ browser
+// login".
+func TestLoginCaptchaMarkerYieldsBrowserChallenge(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth":
+			fmt.Fprint(w, loginFormPage(true)) // carries the reCAPTCHA marker
+		case "/login_check":
+			http.Redirect(w, r, "/cb", http.StatusFound) // no auth code
+		case "/cb":
+			fmt.Fprint(w, "ok")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	cl, _ := newTestClient(t, srv, 0)
+
+	challenge, err := cl.Login(context.Background(), "user@example.com", "wrong-password", LoginOptions{})
+	if err != nil {
+		t.Fatalf("Login: %v (a captcha-bearing page is not a failure)", err)
+	}
+	if challenge == nil || challenge.Kind != ChallengeBrowser {
+		t.Fatalf("challenge = %+v, want ChallengeBrowser", challenge)
+	}
+	if !strings.Contains(challenge.BrowserURL, "/auth?") {
+		t.Errorf("BrowserURL = %q, want the authorize URL", challenge.BrowserURL)
+	}
+}
+
+// TestLoginNoCodeAndNoCaptchaFails is the counterpart: with no auth code and no
+// captcha marker the login fails outright (website.cpp:339-343) instead of
+// falling back to the browser.
+func TestLoginNoCodeAndNoCaptchaFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth":
+			fmt.Fprint(w, loginFormPage(false)) // no marker
+		case "/login_check":
+			http.Redirect(w, r, "/cb", http.StatusFound) // no auth code
+		case "/cb":
+			fmt.Fprint(w, "ok")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	cl, _ := newTestClient(t, srv, 0)
+
+	challenge, err := cl.Login(context.Background(), "user@example.com", "wrong-password", LoginOptions{})
+	if err == nil {
+		t.Fatal("Login must fail without an auth code and without a captcha marker")
+	}
+	if challenge != nil {
+		t.Errorf("challenge = %+v, want nil", challenge)
+	}
+	if got := err.Error(); !strings.Contains(got, "failed to get auth code") {
+		t.Errorf("err = %q, want the missing-auth-code error", got)
+	}
+}

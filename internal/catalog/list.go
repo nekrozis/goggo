@@ -248,6 +248,22 @@ func mapProduct(p map[string]any) (model.GameItem, uint32, error) {
 // stringified. A missing id reads as "" (jsoncpp's asString on null) rather
 // than "0".
 func productID(v any) (string, error) {
+	return intShapedString(v)
+}
+
+// intShapedString renders a value with the `isInt() ? to_string(asInt()) :
+// asString()` rule the C++ source uses for product ids (website.cpp:176) and for
+// the wishlist discount percentage (website.cpp:773).
+//
+// Only integer-shaped values enter the integer branch: a boolean, a string or
+// null must stringify instead, because jsoncpp's isInt() is false for them. Do
+// not widen this gate — jsonval.Int alone would coerce true to "1".
+//
+// Boundary note: jsoncpp's isInt() additionally requires the value to fit in
+// int32, while jsonval.Int accepts the whole int64 range. Only a value beyond
+// 2^31 (or a real whose text form uses an exponent) can differ, which neither a
+// product id nor a percentage reaches.
+func intShapedString(v any) (string, error) {
 	switch v.(type) {
 	case int, int64, uint64, float64:
 		if n, err := jsonval.Int(v); err == nil {
@@ -319,6 +335,19 @@ func productPlatform(worksOn any) (uint32, error) {
 		// indexing a null Json::Value.
 		return util.OptionValue("all", config.Platforms, false), nil
 	}
+	platform, err := platformBits(obj)
+	if err != nil {
+		return 0, err
+	}
+	if platform == 0 {
+		platform = util.OptionValue("all", config.Platforms, false)
+	}
+	return platform, nil
+}
+
+// platformBits maps a worksOn object to its platform mask. The wishlist
+// listing uses it without the all-platforms fallback (website.cpp:725-730).
+func platformBits(worksOn map[string]any) (uint32, error) {
 	var platform uint32
 	for _, entry := range []struct {
 		key  string
@@ -328,16 +357,13 @@ func productPlatform(worksOn any) (uint32, error) {
 		{"Mac", config.PlatformMac},
 		{"Linux", config.PlatformLinux},
 	} {
-		on, err := jsonval.Bool(obj[entry.key])
+		on, err := jsonval.Bool(worksOn[entry.key])
 		if err != nil {
 			return 0, fmt.Errorf("catalog: worksOn.%s: %w", entry.key, err)
 		}
 		if on {
 			platform |= entry.flag
 		}
-	}
-	if platform == 0 {
-		platform = util.OptionValue("all", config.Platforms, false)
 	}
 	return platform, nil
 }

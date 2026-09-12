@@ -31,6 +31,15 @@ func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) err
 	for _, path := range planSFCMemberPaths(res.Plan) {
 		installed[path] = true
 	}
+	// Destinations the plan observed as already up to date are part of the
+	// target installation even though they produce no download task — they
+	// must not be reported as orphans (or deleted), because the installed set
+	// describes which paths are valid for the target installation, not which
+	// paths produced a download task (review RES1, decisions D44). The set is
+	// keyed by the item-relative path, the same form the walk compares.
+	for _, sf := range res.Skipped {
+		installed[sf.Item.Path] = true
+	}
 
 	il, err := blacklist.LoadBlacklist(d.cfg.IgnorelistFilePath)
 	if err != nil {

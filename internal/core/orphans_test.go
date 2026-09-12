@@ -137,3 +137,31 @@ func TestCheckOrphanedFilesIgnorelistReadError(t *testing.T) {
 		t.Fatal("CheckOrphanedFiles = nil, want the ignorelist read error")
 	}
 }
+
+// TestCheckOrphanedFilesSkipped locks the D44 invariant: a destination the
+// plan skipped belongs to the target installation even though it produced no
+// download task — it is neither reported as an orphan nor deleted, with the
+// delete gate on. The installed set describes which paths are valid for the
+// target installation, not which paths produced a transfer.
+func TestCheckOrphanedFilesSkipped(t *testing.T) {
+	f := newOrphansFixture(t)
+	skippedPath := filepath.Join(f.root, "game", "skipped.bin")
+	if err := os.WriteFile(skippedPath, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.res.Skipped = []SkippedFile{{
+		Destination: skippedPath,
+		Item:        model.GalaxyDepotItem{Path: "game/skipped.bin"},
+	}}
+	cfg := planTestConfig(t)
+	cfg.DownloadConfig.DeleteOrphans = true
+	d := newOfflineDownloader(t, noopServer(t), cfg, newFakeConsole())
+
+	if err := d.CheckOrphanedFiles(context.Background(), f.res); err != nil {
+		t.Fatalf("CheckOrphanedFiles: %v", err)
+	}
+	assertFileContent(t, skippedPath, "x")
+	if !strings.Contains(consoleText(t, d), "\t1 orphaned files") {
+		t.Errorf("output = %q, want only the true leftover counted", consoleText(t, d))
+	}
+}

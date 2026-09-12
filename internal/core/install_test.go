@@ -9,11 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/nekrozis/goggo/internal/galaxy"
+	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/transfer"
 )
 
@@ -231,8 +234,8 @@ func TestInstallPublishesProgressThroughTheRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	destination := cfg.Directories.Directory + "W3 GOTY/game/data.bin"
-
 	progress := transfer.NewProgress()
+
 	d := newOfflineDownloaderWith(t, f.Server, cfg, newFakeConsole(), Dependencies{Progress: progress})
 	// The offline downloader builds an empty credential store; give it a fresh
 	// token so the transfer's per-chunk expiry checks pass without a refresh.
@@ -302,5 +305,53 @@ func TestInstallRequestCarriesContext(t *testing.T) {
 	req := NewInstallRequest(cfg, planProductID, "")
 	if err := d.Install(ctx, req); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want the context cancellation", err)
+	}
+}
+
+// TestRevalidateSkipped locks the install-level gate over the plan's skipped
+// set (review RES1 v2 §2, RES1-R1): a destination the plan observed as
+// complete is only a planning-time observation. The helper must pass while
+// the file still matches, fail with the destination and the rerun guidance
+// once the file changed after that observation, and surface an observation
+// failure as an inspection error — never as a mismatch.
+func TestRevalidateSkipped(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.bin")
+	content := []byte("observed complete at plan time")
+	sum := md5.Sum(content)
+	item := model.GalaxyDepotItem{
+		Path:      "game/a.bin",
+		TotalSize: uint64(len(content)),
+		MD5:       hex.EncodeToString(sum[:]),
+	}
+
+	// The original observation: the file matches, so the plan skipped it.
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	skipped := []SkippedFile{{Destination: path, Item: item}}
+	if err := revalidateSkipped(skipped); err != nil {
+		t.Fatalf("revalidateSkipped = %v, want nil while the file still matches", err)
+	}
+
+	// The race RES1-R1 closes: the file changes after the plan observed it.
+	if err := os.WriteFile(path, []byte("externally modified"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := revalidateSkipped(skipped)
+	if err == nil {
+		t.Fatal("revalidateSkipped = nil, want the changed-file failure")
+	}
+	if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "changed during installation") {
+		t.Errorf("err = %v, want the destination and the rerun guidance", err)
+	}
+
+	// An observation failure is an installation error, never folded into a
+	// mismatch: a NUL path makes the stat fail on every platform.
+	broken := []SkippedFile{{Destination: "bad\x00path", Item: item}}
+	if err := revalidateSkipped(broken); err == nil {
+		t.Fatal("revalidateSkipped = nil, want the inspection error")
+	} else if !strings.Contains(err.Error(), "Failed to inspect") {
+		t.Errorf("err = %v, want the inspection error", err)
 	}
 }

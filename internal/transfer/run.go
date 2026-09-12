@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/nekrozis/goggo/internal/httpx"
 	"github.com/nekrozis/goggo/internal/model"
+	"github.com/nekrozis/goggo/internal/reconcile"
 )
 
 // Run executes the plan's tasks: the worker fan-out, the per-chunk fetch and
@@ -90,6 +92,27 @@ func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps R
 		return fail("Failed to create directory: " + err.Error())
 	}
 
+	// The authoritative reconcile: the plan's classification is advisory, the
+	// destination's actual state decides what this task must do — including
+	// skipping a file that was complete when the plan was built but changed
+	// before the run reached it (review RES1 v2 §4, decisions D13/D18/D42).
+	decision, startChunk, err := reconcile.ReconcileExistingFile(task.Item, task.Destination)
+	if err != nil {
+		return fail("Failed to inspect " + task.Destination + ": " + err.Error())
+	}
+	switch decision {
+	case reconcile.DecisionSkip:
+		emit(Event{Path: task.Destination, Text: task.Destination + ": OK", Kind: EventMessageSuccess})
+		emit(Event{Path: task.Destination, Kind: EventTaskFinish})
+		return nil
+	case reconcile.DecisionReplace:
+		emit(Event{Path: task.Destination, Text: "Replacing existing file: " + task.Destination, Kind: EventMessageInfo})
+		if err := os.Remove(task.Destination); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fail("Failed to delete " + task.Destination + ": " + err.Error())
+		}
+		startChunk = 0
+	}
+
 	// An item without chunks is an empty file (downloader.cpp:4644-4650).
 	if len(task.Item.Chunks) == 0 {
 		f, err := os.Create(task.Destination)
@@ -103,7 +126,8 @@ func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps R
 		return nil
 	}
 
-	for j, chunk := range task.Item.Chunks {
+	for j := startChunk; j < len(task.Item.Chunks); j++ {
+		chunk := task.Item.Chunks[j]
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -231,7 +255,7 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 		}
 
 		if err == nil {
-			if err := appendChunk(ctx, task.Destination, body); err != nil {
+			if err := appendChunk(ctx, task.Destination, body, chunk.MD5); err != nil {
 				return err
 			}
 			if !lastModified.IsZero() {
@@ -297,20 +321,39 @@ func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bo
 	return buf.Bytes(), lm, resp.StatusCode, cpErr
 }
 
-// appendChunk decompresses the zlib stream and appends the uncompressed bytes
+// appendChunk decompresses the zlib stream, verifies the decompressed content
+// against the chunk's uncompressed md5, and only then appends the whole chunk
 // to the task's file (downloader.cpp:4756-4775). The file handle has a single
 // owner: the Close whose error is returned is the only one.
-func appendChunk(ctx context.Context, destination string, compressed []byte) error {
+//
+// The verification-before-write order is the chunk transaction invariant
+// (decisions D16/D24): the destination is never touched by a partial or
+// failed decompression, so a chunk on disk is always a complete uncompressed
+// chunk — which is what makes the next run's boundary reconcile reliable. An
+// uncompressed md5 mismatch is not retried: the compressed bytes already
+// passed their hash, so re-fetching the same chunk would produce the same
+// result (review RES1 decision D1).
+func appendChunk(ctx context.Context, destination string, compressed []byte, wantMD5 string) error {
 	zr, err := zlib.NewReader(bytes.NewReader(compressed))
 	if err != nil {
 		return fmt.Errorf("zlib: %w", err)
 	}
 	defer zr.Close()
+	var decompressed bytes.Buffer
+	if _, err := io.Copy(&decompressed, zr); err != nil {
+		return fmt.Errorf("zlib decompress: %w", err)
+	}
+	if wantMD5 != "" {
+		sum := md5.Sum(decompressed.Bytes())
+		if hex.EncodeToString(sum[:]) != wantMD5 {
+			return errors.New("uncompressed content verification failed (md5 mismatch after decompression)")
+		}
+	}
 	f, err := os.OpenFile(destination, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, zr); err != nil {
+	if _, err := f.Write(decompressed.Bytes()); err != nil {
 		f.Close()
 		return err
 	}

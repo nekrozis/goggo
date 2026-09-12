@@ -6,13 +6,27 @@ import (
 	"sync/atomic"
 )
 
-// Progress is the running byte count of the downloads in flight, keyed by the
-// task destination the events already use. transfer publishes into it as bytes
-// arrive from the network and the front end polls it, the way upstream's curl
-// progress callback writes vDownloadInfo and printProgress reads it
-// (downloader.cpp:3445-3499, 3545-3561). It carries no front-end concept of its
-// own: no method calls out to a renderer or an observer, and the counts are
-// maintained whether or not anyone reads them (review S-ETA2).
+// Progress is the running state of one run, in two layers.
+//
+// The queue layer is the run-level fact: the tasks Run was handed and their
+// summed compressed size, published once before the first dispatch and never
+// decremented. The slot layer is the per-task lifecycle state: the bytes a task
+// has downloaded and its total, published as the transfer proceeds and dropped
+// when the task ends. A reader therefore learns what is still *pending* by
+// subtracting what it has seen start from the queue snapshot, and what is
+// *active* from the slots — the pending/active split stays explicit and nothing
+// is counted twice (review S-ETA3).
+//
+// The asymmetry between the two layers is deliberate: Queue keeps answering
+// after Run returns, while Bytes and Total answer false once a task's slot is
+// gone (review S-ETA3).
+//
+// transfer publishes into it as bytes arrive from the network and the front end
+// polls it, the way upstream's curl progress callback writes vDownloadInfo and
+// printProgress reads it (downloader.cpp:3445-3499, 3545-3561). It carries no
+// front-end concept of its own: no method calls out to a renderer or an
+// observer, and the counts are maintained whether or not anyone reads them
+// (review S-ETA2).
 //
 // A nil *Progress is a usable no-op: readers get "no sampling state" and the
 // run loop builds no wrapper around the response bodies, so a run without a
@@ -24,6 +38,17 @@ import (
 type Progress struct {
 	mu    sync.Mutex
 	slots map[string]*progressSlot
+	queue progressQueue
+}
+
+// progressQueue is the run-level queue snapshot: how many tasks the run started
+// with and how many compressed bytes they carry. published says whether a
+// snapshot exists at all, which is what keeps "no snapshot" distinct from "an
+// empty queue" (review S-ETA3).
+type progressQueue struct {
+	bytes     int64
+	tasks     int
+	published bool
 }
 
 // progressSlot is one task's logical progress. value is written by the task's
@@ -68,6 +93,38 @@ func (p *Progress) Total(task string) (int64, bool) {
 	}
 	// Safe without mu: total is only written before the slot is published.
 	return slot.total, true
+}
+
+// Queue returns the run-level queue snapshot: how many tasks the last run was
+// handed and their summed compressed size. ok is false when no run has
+// published a snapshot yet — never "the queue is empty", which is what an empty
+// run publishes instead (review S-ETA3).
+//
+// The snapshot outlives the run: it is a static fact about the queue, while
+// Bytes and Total describe a task's lifecycle and stop answering once the task
+// ends.
+func (p *Progress) Queue() (tasks int, bytes int64, ok bool) {
+	if p == nil {
+		return 0, 0, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.queue.published {
+		return 0, 0, false
+	}
+	return p.queue.tasks, p.queue.bytes, true
+}
+
+// setQueue publishes the queue snapshot. Run calls it once, before the first
+// dispatch, so a reader can compute what is still pending from the tasks it has
+// seen start (review S-ETA3).
+func (p *Progress) setQueue(tasks int, bytes int64) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.queue = progressQueue{tasks: tasks, bytes: bytes, published: true}
+	p.mu.Unlock()
 }
 
 // slot looks a task up. The caller reads the slot outside the lock, which is

@@ -41,11 +41,26 @@ func Run(ctx context.Context, tasks []model.FileTask, opts Options, deps RunDeps
 	if deps.HTTP == nil || deps.URL == nil || deps.Observer == nil {
 		return errors.New("transfer: run needs an http client, a url provider and an observer")
 	}
+	// The queue snapshot is a run-level fact, published once before any task is
+	// dispatched: readers derive what is still pending from the tasks they have
+	// seen start (review S-ETA3). An empty run publishes too, so "no snapshot"
+	// and "empty queue" stay distinguishable.
+	deps.Progress.setQueue(len(tasks), queuedBytes(tasks))
 	return schedule(ctx, tasks, opts.Workers,
 		func(ev Event) { deps.Observer.OnEvent(ev) },
 		func(ctx context.Context, task model.FileTask, emit func(Event)) error {
 			return runChunkTask(ctx, task, opts, deps, emit)
 		})
+}
+
+// queuedBytes sums the compressed size of every task in the run — the same
+// basis the per-task totals and the progress events use (review S-ETA3).
+func queuedBytes(tasks []model.FileTask) int64 {
+	var sum int64
+	for _, task := range tasks {
+		sum += int64(task.Item.TotalCompressedSize)
+	}
+	return sum
 }
 
 // runChunkTask downloads one task: the parent directories, then every chunk in
@@ -54,14 +69,16 @@ func Run(ctx context.Context, tasks []model.FileTask, opts Options, deps RunDeps
 // also emitted as an error event, so the caller's non-nil return only matters
 // for a cancelled context.
 func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps RunDeps, emit func(Event)) error {
-	emit(Event{Path: task.Destination, ChunkCount: len(task.Item.Chunks), Kind: EventTaskStart})
-
-	// The sampling slot lives exactly as long as the task, and it runs
-	// through the deferred finish on every exit path — success, failure and
-	// cancellation alike — so the registry never keeps a count that has
-	// stopped moving (review S-ETA2).
+	// The sampling slot lives exactly as long as the task, and it runs through
+	// the deferred finish on every exit path — success, failure and
+	// cancellation alike — so the registry never keeps a count that has stopped
+	// moving (review S-ETA2). The slot is published before the start event, so
+	// a reader that sees the task start can already read its total (review
+	// S-ETA3).
 	slot := deps.Progress.start(task.Destination, int64(task.Item.TotalCompressedSize))
 	defer deps.Progress.finish(task.Destination)
+
+	emit(Event{Path: task.Destination, ChunkCount: len(task.Item.Chunks), Kind: EventTaskStart})
 
 	fail := func(text string) error {
 		emit(Event{Path: task.Destination, Text: text, Kind: EventMessageError})

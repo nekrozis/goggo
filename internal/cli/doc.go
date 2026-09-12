@@ -67,7 +67,7 @@ func (c *console) attachRenderer(cfg config.Config, source progressSource) {
 		}
 	}
 	c.renderer = newRenderer(c.out, cfg.Unicode, cfg.Color, cfg.UnitFormat,
-		time.Duration(cfg.ProgressInterval)*time.Millisecond, width, source)
+		time.Duration(cfg.ProgressInterval)*time.Millisecond, width, source, cfg.Threads)
 }
 
 // OnEvent hands the transfer event stream to the renderer. The method exists

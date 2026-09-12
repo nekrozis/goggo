@@ -18,10 +18,13 @@ import (
 // is the task's logical download progress — false means "no sampling state",
 // never "zero bytes" — and Total is the same task total the progress events
 // carry, which is what lets a task show an ETA while its first chunk is still
-// arriving (review S-ETA2).
+// arriving. Queue is the run-level snapshot the pending count and the pending
+// bytes are derived from; its false means "no snapshot", never "empty queue"
+// (reviews S-ETA2, S-ETA3).
 type progressSource interface {
 	Bytes(task string) (int64, bool)
 	Total(task string) (int64, bool)
+	Queue() (tasks int, bytes int64, ok bool)
 }
 
 var _ progressSource = (*transfer.Progress)(nil)
@@ -50,6 +53,7 @@ type renderer struct {
 	interval time.Duration
 	width    func() int
 	unit     uint32
+	threads  uint32
 	now      func() time.Time // swappable for tests
 	source   progressSource   // nil: sample from the progress events instead
 
@@ -190,8 +194,10 @@ func (w *rateWindow) rate(now time.Time) float64 {
 // newRenderer wires a renderer over the front end's streams. width supplies
 // the terminal width for line trimming; nil means a fixed 80 columns. source is
 // the sampling surface the repaint loop polls; nil makes the progress events
-// the only sample feed.
-func newRenderer(out io.Writer, useUnicode, useColor bool, unit uint32, interval time.Duration, width func() int, source progressSource) *renderer {
+// the only sample feed. threads is the configured worker count, which decides
+// whether the total line carries its rate — upstream keys that on the thread
+// setting, not on the number of tasks (downloader.cpp:3612).
+func newRenderer(out io.Writer, useUnicode, useColor bool, unit uint32, interval time.Duration, width func() int, source progressSource, threads uint32) *renderer {
 	if width == nil {
 		width = func() int { return 80 }
 	}
@@ -204,6 +210,7 @@ func newRenderer(out io.Writer, useUnicode, useColor bool, unit uint32, interval
 		interval: interval,
 		width:    width,
 		unit:     unit,
+		threads:  threads,
 		now:      time.Now,
 		source:   source,
 		tasks:    map[string]*renderTask{},
@@ -358,18 +365,55 @@ func (r *renderer) paint() {
 			pct+barText+status)
 	}
 
-	if finished < len(r.order) {
-		remaining := len(r.order) - finished
+	// The total line describes the queue, not the active tasks: upstream keeps
+	// the bytes of everything still queued and subtracts an item when a worker
+	// takes it, so pending and active never overlap (downloader.cpp:3596-3620,
+	// 4452). Here the pending side comes from the run's snapshot minus the
+	// tasks this renderer has seen start; the active side is the ETAs above.
+	// A subtract that would go negative is a state disagreement, not a number
+	// worth showing, so it clamps at zero (review S-ETA3).
+	started := len(r.order)
+	startedBytes := int64(0)
+	for _, path := range r.order {
+		if t := r.tasks[path]; t != nil {
+			startedBytes += t.total
+		}
+	}
+	pending := started - finished
+	pendingBytes := int64(0)
+	havePending := false
+	if r.source != nil {
+		if tasks, bytes, ok := r.source.Queue(); ok {
+			pending = max(tasks-started, 0)
+			pendingBytes = max(bytes-startedBytes, 0)
+			havePending = true
+		}
+	}
+
+	// The line prints while anything is pending or running, so a run whose
+	// first tasks have not started yet still reports its queue.
+	if pending > 0 || finished < started {
 		totalLine := ""
 		// The total rate is the sum of the running tasks' rates, the way
 		// upstream's total_rate accumulates its per-thread rates
 		// (downloader.cpp:3562, 3614). Finished tasks dropped out above, as
-		// they do upstream.
-		if len(r.order) > 1 {
+		// they do upstream. Its prefix follows the configured thread count,
+		// not the task count (downloader.cpp:3612).
+		if r.threads > 1 {
 			totalLine += "Total: " + util.RateString(totalRate, r.unit) + " | "
 		}
-		totalLine += fmt.Sprintf("Remaining: %d", remaining)
-		if totalETASecs > 0 {
+		totalLine += fmt.Sprintf("Remaining: %d", pending)
+		switch {
+		case havePending && pendingBytes > 0 && totalRate > 0:
+			// Pending bytes are spread over the aggregate rate, and the running
+			// tasks add their own estimates on top (downloader.cpp:3603-3604).
+			// With no rate at all there is nothing to divide by, so the group
+			// is omitted rather than fed an infinity (Δ, review S-ETA3).
+			eta := totalETASecs + float64(pendingBytes)/totalRate
+			totalLine += fmt.Sprintf(" (%s) ETA: %s",
+				util.SizeString(uint64(pendingBytes), r.unit), util.EtaString(int64(eta)))
+		case !havePending && totalETASecs > 0:
+			// Without a snapshot the running tasks' ETAs are all there is.
 			totalLine += " ETA: " + util.EtaString(int64(totalETASecs))
 		}
 		lines = append(lines, totalLine)

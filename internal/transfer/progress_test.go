@@ -49,6 +49,10 @@ func TestProgressWithoutASlot(t *testing.T) {
 	if slot := nilProgress.start("x", 1); slot != nil {
 		t.Errorf("nil registry start = %v, want nil", slot)
 	}
+	nilProgress.setQueue(2, 8) // must not panic
+	if tasks, bytes, ok := nilProgress.Queue(); ok || tasks != 0 || bytes != 0 {
+		t.Errorf("nil registry Queue = (%d, %d, %v), want (0, 0, false)", tasks, bytes, ok)
+	}
 	var nilSlot *progressSlot
 	nilSlot.store(5) // must not panic
 
@@ -58,6 +62,66 @@ func TestProgressWithoutASlot(t *testing.T) {
 	}
 	if _, ok := p.Total("unknown"); ok {
 		t.Error("unknown task answered with a total")
+	}
+	if _, _, ok := p.Queue(); ok {
+		t.Error("a registry that never ran answered with a queue snapshot")
+	}
+}
+
+// TestProgressQueueSnapshot locks the run-level snapshot: Run publishes the task
+// count and their summed compressed size before dispatching, and the snapshot
+// outlives the run even though the task's own slot does not (review S-ETA3).
+func TestProgressQueueSnapshot(t *testing.T) {
+	cdn := newTestCDN(t)
+	chunk := chunked(t, cdn, "queue snapshot")
+	dest := filepath.Join(t.TempDir(), "file.bin")
+	task := model.FileTask{
+		Item: model.GalaxyDepotItem{
+			Path:                "game/file.bin",
+			TotalCompressedSize: chunk.CompressedSize,
+			Chunks:              []model.GalaxyDepotItemChunk{chunk},
+		},
+		Destination: dest,
+	}
+
+	progress := NewProgress()
+	deps := runDeps(t, cdn, &recordingObserver{})
+	deps.Progress = progress
+	if err := Run(context.Background(), []model.FileTask{task}, Options{}, deps); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if tasks, bytes, ok := progress.Queue(); !ok || tasks != 1 || bytes != int64(chunk.CompressedSize) {
+		t.Errorf("Queue = (%d, %d, %v), want (1, %d, true)", tasks, bytes, ok, chunk.CompressedSize)
+	}
+	// The two layers answer differently on purpose: the task is over, so its
+	// slot is gone, while the queue snapshot is a run-level fact.
+	if _, ok := progress.Bytes(dest); ok {
+		t.Error("Bytes answered after the task finished")
+	}
+	assertFileContent(t, dest, "queue snapshot")
+}
+
+// TestProgressQueueSnapshotEmptyRun locks that an empty run publishes an empty
+// snapshot rather than publishing nothing: "no snapshot" and "empty queue" are
+// different answers (review S-ETA3).
+func TestProgressQueueSnapshotEmptyRun(t *testing.T) {
+	hx, err := httpx.New(httpx.Config{UserAgent: "goggo-test/1.0"})
+	if err != nil {
+		t.Fatalf("httpx.New: %v", err)
+	}
+	progress := NewProgress()
+	deps := RunDeps{
+		HTTP:     hx,
+		URL:      urlByChunk{cdn: newTestCDN(t)},
+		Observer: &recordingObserver{},
+		Progress: progress,
+	}
+	if err := Run(context.Background(), nil, Options{}, deps); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if tasks, bytes, ok := progress.Queue(); !ok || tasks != 0 || bytes != 0 {
+		t.Errorf("Queue = (%d, %d, %v), want (0, 0, true)", tasks, bytes, ok)
 	}
 }
 

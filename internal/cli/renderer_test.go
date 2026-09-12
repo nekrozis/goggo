@@ -15,7 +15,7 @@ import (
 // loop would — without the redraw loop running at all.
 func TestRendererAggregatesAndPaints(t *testing.T) {
 	var out bytes.Buffer
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 120 }, nil)
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 120 }, nil, 2)
 	r.now = func() time.Time { return time.Unix(1_000_000, 0) }
 
 	// The start order is deliberately not alphabetical: the #i numbering
@@ -62,6 +62,10 @@ func TestRendererAggregatesAndPaints(t *testing.T) {
 type fakeProgress struct {
 	bytes map[string]int64
 	total map[string]int64
+
+	queueTasks     int
+	queueBytes     int64
+	queuePublished bool
 }
 
 func newFakeProgress() *fakeProgress {
@@ -71,6 +75,18 @@ func newFakeProgress() *fakeProgress {
 func (f *fakeProgress) set(task string, value, total int64) {
 	f.bytes[task] = value
 	f.total[task] = total
+}
+
+// setQueue publishes the run-level snapshot, the way transfer.Run does.
+func (f *fakeProgress) setQueue(tasks int, bytes int64) {
+	f.queueTasks, f.queueBytes, f.queuePublished = tasks, bytes, true
+}
+
+func (f *fakeProgress) Queue() (int, int64, bool) {
+	if !f.queuePublished {
+		return 0, 0, false
+	}
+	return f.queueTasks, f.queueBytes, true
 }
 
 func (f *fakeProgress) Bytes(task string) (int64, bool) {
@@ -90,7 +106,7 @@ func (f *fakeProgress) Total(task string) (int64, bool) {
 func TestRendererSamplesFromSource(t *testing.T) {
 	var out bytes.Buffer
 	source := newFakeProgress()
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, source)
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, source, 2)
 	base := time.Unix(1_000_000, 0)
 
 	r.now = func() time.Time { return base }
@@ -117,6 +133,104 @@ func TestRendererSamplesFromSource(t *testing.T) {
 	// and the percentage show zero (review S-ETA2).
 	if !strings.Contains(frame, "0.00 B/1000.00 B") || !strings.Contains(frame, "  0% ") {
 		t.Errorf("frame = %q, want event-driven displayed bytes", frame)
+	}
+}
+
+// TestRendererQueueRemainingAndTotalETA locks the S-ETA3 total line: the
+// pending side is the run's queue snapshot minus the tasks that have started,
+// its size is the pending bytes rather than the active remainder, and the rate
+// prefix follows the configured thread count.
+func TestRendererQueueRemainingAndTotalETA(t *testing.T) {
+	var out bytes.Buffer
+	source := newFakeProgress()
+	source.setQueue(4, 4000)
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, source, 4)
+	base := time.Unix(1_000_000, 0)
+
+	r.now = func() time.Time { return base }
+	r.Start()
+	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
+	r.OnEvent(transfer.Event{Path: "/b.bin", Kind: transfer.EventTaskStart})
+	source.set("/a.bin", 100, 1000)
+	source.set("/b.bin", 100, 1000)
+	r.now = func() time.Time { return base.Add(1 * time.Second) }
+	r.paint()
+	r.now = func() time.Time { return base.Add(2 * time.Second) }
+	source.set("/a.bin", 200, 1000)
+	source.set("/b.bin", 200, 1000)
+	out.Reset()
+	r.paint()
+	frame := out.String()
+	r.Stop()
+
+	// Two of the four tasks started (2000 of the 4000 queued bytes), each
+	// running at 100 B/s: 10s to finish the 2000 pending bytes at the 200 B/s
+	// aggregate rate, plus 10s of each running task's own ETA.
+	if !strings.Contains(frame, "Total: 0.20KiB/s | Remaining: 2 (1.95 KiB) ETA: 30s") {
+		t.Errorf("frame = %q, want the queue-derived total line", frame)
+	}
+}
+
+// TestRendererTotalPrefixFollowsThreads locks Δ-ETA1-3: the rate prefix on the
+// total line follows the configured thread count, the way upstream keys it on
+// iThreads, not on how many tasks this renderer happens to have seen.
+func TestRendererTotalPrefixFollowsThreads(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		threads uint32
+		want    bool
+	}{
+		{name: "single thread", threads: 1, want: false},
+		{name: "several threads", threads: 4, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, nil, tc.threads)
+			r.now = func() time.Time { return time.Unix(1_000_000, 0) }
+			r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
+			r.OnEvent(transfer.Event{Path: "/b.bin", Kind: transfer.EventTaskStart})
+			r.paint()
+			frame := out.String()
+
+			if got := strings.Contains(frame, "Total: "); got != tc.want {
+				t.Errorf("frame = %q, want the Total prefix to be %v", frame, tc.want)
+			}
+			if !strings.Contains(frame, "Remaining: 2") {
+				t.Errorf("frame = %q, want the remaining count", frame)
+			}
+		})
+	}
+}
+
+// TestRendererPendingUnderflowClamps locks the review's underflow rule: a queue
+// snapshot smaller than what the started tasks carry is a state disagreement,
+// so the pending numbers clamp at zero instead of feeding a wrapped value into
+// the display (review S-ETA3).
+func TestRendererPendingUnderflowClamps(t *testing.T) {
+	var out bytes.Buffer
+	source := newFakeProgress()
+	source.setQueue(1, 100) // less than the two started tasks already carry
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, source, 4)
+	base := time.Unix(1_000_000, 0)
+
+	r.now = func() time.Time { return base }
+	r.Start()
+	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
+	r.OnEvent(transfer.Event{Path: "/b.bin", Kind: transfer.EventTaskStart})
+	source.set("/a.bin", 100, 1000)
+	source.set("/b.bin", 100, 1000)
+	r.now = func() time.Time { return base.Add(1 * time.Second) }
+	r.paint()
+	out.Reset()
+	r.paint()
+	frame := out.String()
+	r.Stop()
+
+	if !strings.Contains(frame, "Remaining: 0") {
+		t.Errorf("frame = %q, want the clamped remaining count", frame)
+	}
+	if strings.Contains(frame, "(") {
+		t.Errorf("frame = %q, want no pending size group", frame)
 	}
 }
 
@@ -160,7 +274,7 @@ func TestRateWindowResetsOnADecrease(t *testing.T) {
 // print yet.
 func TestRendererFirstFrameHasNoETA(t *testing.T) {
 	var out bytes.Buffer
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 120 }, nil)
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 120 }, nil, 2)
 	r.now = func() time.Time { return time.Unix(1_000_000, 0) }
 
 	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
@@ -203,7 +317,7 @@ func TestRateWindowTrimsByTime(t *testing.T) {
 // that same number, and the total rate is the sum of the running tasks' rates.
 func TestRendererPerTaskRatesAndETAs(t *testing.T) {
 	var out bytes.Buffer
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, nil)
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, nil, 2)
 	base := time.Unix(1_000_000, 0)
 
 	r.now = func() time.Time { return base }
@@ -244,7 +358,7 @@ func TestRendererPerTaskRatesAndETAs(t *testing.T) {
 // rate_avg branch, downloader.cpp:3493-3496).
 func TestRendererTaskRateFallsBackToAverage(t *testing.T) {
 	var out bytes.Buffer
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, nil)
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, nil, 2)
 	base := time.Unix(1_000_000, 0)
 
 	r.now = func() time.Time { return base }

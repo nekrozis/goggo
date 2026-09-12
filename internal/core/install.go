@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/nekrozis/goggo/internal/reconcile"
 	"github.com/nekrozis/goggo/internal/transfer"
 )
 
@@ -48,6 +49,17 @@ func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 		return err
 	}
 
+	// The skipped set was a planning-time observation, so the install closes
+	// the window that observation opened: every destination the plan marked
+	// "already up to date" is re-checked here, after the transfer finished
+	// and before any post-transfer step consumes the installation (review
+	// RES1 v2 §2, RES1-R1). A file that changed meanwhile fails the install —
+	// no task is recreated, nothing is re-downloaded, no file is touched;
+	// rerunning the install reconciles it.
+	if err := revalidateSkipped(res.Skipped); err != nil {
+		return err
+	}
+
 	// The post-transfer steps (downloader.cpp:4265-4343): the small-files
 	// containers unpack and the orphan check. Both print as they go and both
 	// are non-fatal in their per-item failures, the way the C++ source is.
@@ -55,6 +67,23 @@ func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 		return err
 	}
 	return d.CheckOrphanedFiles(ctx, res)
+}
+
+// revalidateSkipped re-observes the plan's skipped destinations and fails on
+// the first one that no longer satisfies its item. An observation failure
+// (an unreadable file) is an installation error too: the install must not
+// report success over a state it could not verify (decisions D43, RES1-R1).
+func revalidateSkipped(skipped []SkippedFile) error {
+	for _, sf := range skipped {
+		complete, err := reconcile.IsComplete(sf.Item, sf.Destination)
+		if err != nil {
+			return fmt.Errorf("Failed to inspect %s: %w", sf.Destination, err)
+		}
+		if !complete {
+			return fmt.Errorf("%s changed during installation; run the install again", sf.Destination)
+		}
+	}
+	return nil
 }
 
 // transferObserver picks the observer for a transfer run. A front end that can

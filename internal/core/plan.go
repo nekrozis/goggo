@@ -16,6 +16,7 @@ import (
 	"github.com/nekrozis/goggo/internal/galaxy"
 	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/model"
+	"github.com/nekrozis/goggo/internal/reconcile"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -36,6 +37,21 @@ type PlanResult struct {
 	Plan        model.DownloadPlan
 	Messages    []Notice
 	InstallPath string
+
+	// Skipped is the planning-time observation report: destinations that
+	// already satisfied their item when the plan was built, so no transfer
+	// task was created for them. It is a report, not the correctness
+	// boundary — Install revalidates the whole set after the transfer
+	// (revalidateSkipped) and fails if anything changed meanwhile
+	// (review RES1 v2 §2, RES1-R1).
+	Skipped []SkippedFile
+}
+
+// SkippedFile is one destination the plan observed as already up to date.
+// Size is available through Item.TotalSize.
+type SkippedFile struct {
+	Destination string
+	Item        model.GalaxyDepotItem
 }
 
 // addMessage appends a non-error display message when it carries text.
@@ -266,21 +282,51 @@ func (d *Downloader) BuildPlan(ctx context.Context, req InstallRequest) (PlanRes
 
 	// The queue summary (downloader.cpp:4198-4212): the verbose listing, then
 	// the title, the file count and the installed size. totalSize sums the
-	// FINAL tasks — after the blacklist and SFC filtering — because that is
-	// what the free-space gate answers for.
+	// FINAL transfer tasks — after the blacklist, SFC and skip filtering —
+	// because that is what the free-space gate answers for: the bytes that
+	// will actually be fetched.
 	tasks := make([]model.FileTask, 0, len(planItems))
 	totalSize := uint64(0)
+	skipped := 0
 	for _, it := range planItems {
 		if d.cfg.MsgLevel >= msgLevelVerbose {
 			res.addMessage(it.Path)
 			res.addMessage(fmt.Sprintf("\tChunks: %d", len(it.Chunks)))
 			res.addMessage(fmt.Sprintf("\tmd5: %s", it.MD5))
 		}
+		destination := installPath + "/" + it.Path
+
+		// The plan-level reconciliation (review RES1 v3 §6.B): a destination
+		// that already satisfies the item — same uncompressed size and
+		// whole-file md5 — leaves the queue here, so the transfer only sees
+		// real work. This classification is an observation and an
+		// optimisation: the transfer re-checks the destination authoritatively
+		// at task start, and the success of the whole install is gated by
+		// revalidating the skipped set at the end (review RES1 v2 §2 — the
+		// window between this classification and the transfer is closed
+		// there). An observation failure fails the plan; it is never turned
+		// into a destructive action (decisions D43).
+		complete, err := reconcile.IsComplete(it, destination)
+		if err != nil {
+			return res, fmt.Errorf("Failed to inspect %s: %w", destination, err)
+		}
+		if complete {
+			skipped++
+			res.addMessage(destination + ": OK")
+			res.Skipped = append(res.Skipped, SkippedFile{Destination: destination, Item: it})
+			continue
+		}
+		// Only real transfer work counts toward the download total: a skipped
+		// file fetches no bytes, so it must not inflate the free-space gate
+		// (review RES1-R1 — the locked semantics for totalSize).
 		totalSize += it.TotalSize
-		tasks = append(tasks, model.FileTask{Item: it, Destination: installPath + "/" + it.Path})
+		tasks = append(tasks, model.FileTask{Item: it, Destination: destination})
 	}
 	res.addMessage(gameTitle)
 	res.addMessage(fmt.Sprintf("Files: %d", len(tasks)))
+	if skipped > 0 {
+		res.addMessage(fmt.Sprintf("Already up to date: %d files", skipped))
+	}
 	res.addMessage("Total size installed: " + util.SizeString(totalSize, d.cfg.UnitFormat))
 
 	// The free-space gate (downloader.cpp:4214-4233), when the option is on:

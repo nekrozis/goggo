@@ -19,9 +19,11 @@ import (
 //
 // It implements transfer.Observer structurally; core hands the whole stream to
 // it through the optional-ability assertion (review D75) and keeps its own
-// message-only path for plain consoles. The rates are the renderer's own
-// estimate — one global sliding window rather than upstream's per-thread
-// TimeAndSize deques (review D76, Δ).
+// message-only path for plain consoles. Every rate is the task's own: the
+// samples a task's progress events feed go into that task's sliding window,
+// the way upstream keeps one TimeAndSize deque per download thread
+// (downloader.cpp:3483). A task's ETA and its displayed rate therefore share
+// one number instead of leaning on the other tasks' traffic (review S-ETA1).
 type renderer struct {
 	out      io.Writer
 	bar      *progress.Bar
@@ -35,20 +37,46 @@ type renderer struct {
 	order []string
 	done  map[string]bool
 
-	startedAt  time.Time
-	startBytes int64
-	window     rateWindow
-
 	stop    chan struct{}
 	stopped chan struct{}
 }
 
-// renderTask is one task's view: its display path and the byte counts of the
-// last progress event.
+// renderTask is one task's view: its display path, the byte counts of the last
+// progress event, and the task's own sample window and origin. The origin is
+// where the task's session average counts from — the moment the renderer first
+// saw the task.
 type renderTask struct {
-	path  string
-	done  int64
-	total int64
+	path   string
+	done   int64
+	total  int64
+	start  time.Time
+	window rateWindow
+}
+
+// newRenderTask registers a task view, with the window defaults the review
+// locked for this display (D76: 10 seconds and at most 100 samples). The
+// window moved from the renderer to the task in S-ETA1, so the defaults move
+// with it — a zero cap would trim every sample away.
+func newRenderTask(path string, now time.Time) *renderTask {
+	return &renderTask{path: path, start: now, window: rateWindow{cap: 100}}
+}
+
+// rate is the task's download rate in bytes per second: the slope of its own
+// window, or its session average when the window holds fewer than two live
+// samples. Upstream switches on the deque size (100 samples ≈ 10 s of 100 ms
+// callbacks, downloader.cpp:3484-3496); the event model here is chunk-grained,
+// so the switch is on the live samples instead (review S-ETA1, Δ). The average
+// keeps the ETA of a task whose chunks are slower than the window — or of a
+// task that has barely started — from vanishing. Callers hold the mutex.
+func (t *renderTask) rate(now time.Time) float64 {
+	if t.window.samples(now) >= 2 {
+		return t.window.rate(now)
+	}
+	elapsed := now.Sub(t.start).Seconds()
+	if elapsed <= 0 {
+		return 0
+	}
+	return float64(t.done) / elapsed
 }
 
 // rateWindow is the sliding byte window behind the instantaneous rate: the
@@ -76,16 +104,30 @@ func (w *rateWindow) add(t time.Time, bytes int64) {
 	}
 }
 
-// rate is the bytes-per-second slope over the last 10 seconds counted from
-// now — the query time, not the newest sample's time. A download that has
-// stalled beyond the window therefore reports zero, and the ETA derived from
-// it does not lean on a stale slope. Callers hold the renderer's mutex.
-func (w *rateWindow) rate(now time.Time) float64 {
+// live returns the window's samples that are still inside the 10 s span at
+// now — the query-time trim the review locked (D76): the samples a stall has
+// aged out must not keep feeding a slope.
+func (w *rateWindow) live(now time.Time) [][2]int64 {
 	cutoff := now.UnixNano() - int64(10*time.Second)
 	live := w.points
 	for len(live) > 0 && live[0][0] < cutoff {
 		live = live[1:]
 	}
+	return live
+}
+
+// samples counts the window's live samples at now, the number the per-task
+// rate switches on.
+func (w *rateWindow) samples(now time.Time) int {
+	return len(w.live(now))
+}
+
+// rate is the bytes-per-second slope over the last 10 seconds counted from
+// now — the query time, not the newest sample's time. A window that holds
+// fewer than two live samples has no slope to report and returns zero. Callers
+// hold the renderer's mutex.
+func (w *rateWindow) rate(now time.Time) float64 {
+	live := w.live(now)
 	if len(live) < 2 {
 		return 0
 	}
@@ -95,17 +137,6 @@ func (w *rateWindow) rate(now time.Time) float64 {
 		return 0
 	}
 	return float64(last[1]-first[1]) / elapsed
-}
-
-// avgRate is the session's average rate: everything installed so far over the
-// time since the run started (review D76). It is the displayed per-task rate;
-// the instantaneous window rate drives the ETA and the total line.
-func (r *renderer) avgRate() float64 {
-	elapsed := r.now().Sub(r.startedAt).Seconds()
-	if elapsed <= 0 {
-		return 0
-	}
-	return float64(r.installedBytes()-r.startBytes) / elapsed
 }
 
 // newRenderer wires a renderer over the front end's streams. width supplies
@@ -126,7 +157,6 @@ func newRenderer(out io.Writer, useUnicode, useColor bool, unit uint32, interval
 		now:      time.Now,
 		tasks:    map[string]*renderTask{},
 		done:     map[string]bool{},
-		window:   rateWindow{cap: 100},
 		stop:     make(chan struct{}),
 		stopped:  make(chan struct{}),
 	}
@@ -134,8 +164,6 @@ func newRenderer(out io.Writer, useUnicode, useColor bool, unit uint32, interval
 
 // Start runs the redraw loop until Stop.
 func (r *renderer) Start() {
-	r.startedAt = r.now()
-	r.startBytes = r.installedBytes()
 	go func() {
 		defer close(r.stopped)
 		ticker := time.NewTicker(r.interval)
@@ -172,19 +200,23 @@ func (r *renderer) OnEvent(ev transfer.Event) {
 	switch ev.Kind {
 	case transfer.EventTaskStart:
 		// TaskStart carries no byte counts (review D79): the total arrives
-		// with the first progress event.
-		r.tasks[ev.Path] = &renderTask{path: ev.Path}
+		// with the first progress event, and the arrival time is where this
+		// task's session average starts counting.
+		r.tasks[ev.Path] = newRenderTask(ev.Path, r.now())
 		r.order = append(r.order, ev.Path)
 	case transfer.EventProgress:
 		t := r.tasks[ev.Path]
 		if t == nil {
-			t = &renderTask{path: ev.Path}
+			t = newRenderTask(ev.Path, r.now())
 			r.tasks[ev.Path] = t
 			r.order = append(r.order, ev.Path)
 		}
 		t.done = ev.Current
 		t.total = ev.Total
-		r.window.add(r.now(), r.installedBytes())
+		// The sample is this task's own cumulative progress, the equivalent
+		// of upstream pushing that thread's dlnow into its deque
+		// (downloader.cpp:3483).
+		t.window.add(r.now(), t.done)
 	case transfer.EventTaskFinish:
 		r.done[ev.Path] = true
 	default:
@@ -192,15 +224,6 @@ func (r *renderer) OnEvent(ev transfer.Event) {
 		// message queue before painting the bars.
 		fmt.Fprintln(r.out, ev.Text)
 	}
-}
-
-// installedBytes sums the task views' progress.
-func (r *renderer) installedBytes() int64 {
-	var sum int64
-	for _, t := range r.tasks {
-		sum += t.done
-	}
-	return sum
 }
 
 // paint repaints the whole block: the clear sequence, then one name and one
@@ -213,13 +236,15 @@ func (r *renderer) paint() {
 
 	width := r.width()
 	var lines []string
+	var totalRate float64
 	var totalETASecs float64
 	finished := 0
 
 	// The #i numbering follows the TaskStart arrival order — the review
-	// locked it as the display order (D75), so r.order is used as kept.
-	avg := r.avgRate()
-	inst := r.window.rate(r.now())
+	// locked it as the display order (D75), so r.order is used as kept. Every
+	// line is measured once, at this frame's instant, so its rate, its ETA
+	// and the totals all describe the same moment.
+	now := r.now()
 	for i, path := range r.order {
 		t := r.tasks[path]
 		if t == nil {
@@ -234,10 +259,15 @@ func (r *renderer) paint() {
 		if t.total > 0 {
 			fraction = float64(t.done) / float64(t.total)
 		}
+		// The rate is this task's own, and the same number feeds the ETA and
+		// the displayed @ rate, so "remaining / rate" is what the line shows
+		// (review S-ETA1, F2/F4).
+		rate := t.rate(now)
 		etaSecs := 0.0
-		if inst > 0 && t.total >= t.done {
-			etaSecs = float64(t.total-t.done) / inst
+		if rate > 0 && t.total >= t.done {
+			etaSecs = float64(t.total-t.done) / rate
 		}
+		totalRate += rate
 		totalETASecs += etaSecs
 		eta := ""
 		if etaSecs > 0 {
@@ -246,7 +276,7 @@ func (r *renderer) paint() {
 		pct := fmt.Sprintf("%3.0f%% ", fraction*100)
 		status := fmt.Sprintf(" %s @ %s%s",
 			util.SizeString(uint64(t.done), r.unit)+"/"+util.SizeString(uint64(t.total), r.unit),
-			util.RateString(avg, r.unit), eta)
+			util.RateString(rate, r.unit), eta)
 		barLen := 26
 		if len(pct)+len(status)+barLen > width {
 			barLen -= len(pct) + len(status) + barLen - width
@@ -263,11 +293,12 @@ func (r *renderer) paint() {
 	if finished < len(r.order) {
 		remaining := len(r.order) - finished
 		totalLine := ""
-		// The total rate sums the instantaneous estimates, the way upstream's
-		// total_rate accumulates per-thread rates (downloader.cpp:3572); with
-		// one global window this is that window's slope (Δ1).
+		// The total rate is the sum of the running tasks' rates, the way
+		// upstream's total_rate accumulates its per-thread rates
+		// (downloader.cpp:3562, 3614). Finished tasks dropped out above, as
+		// they do upstream.
 		if len(r.order) > 1 {
-			totalLine += "Total: " + util.RateString(inst, r.unit) + " | "
+			totalLine += "Total: " + util.RateString(totalRate, r.unit) + " | "
 		}
 		totalLine += fmt.Sprintf("Remaining: %d", remaining)
 		if totalETASecs > 0 {

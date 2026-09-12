@@ -58,8 +58,9 @@ func TestRendererAggregatesAndPaints(t *testing.T) {
 }
 
 // TestRendererFoldAndWindowBehavior is not needed here: the fold lives in
-// transfer; this file keeps the renderer's display semantics only. The window
-// rate starts at zero, so the first frame shows no ETA.
+// transfer; this file keeps the renderer's display semantics only. A task's
+// first frame has no elapsed time behind its average, so no rate and no ETA
+// print yet.
 func TestRendererFirstFrameHasNoETA(t *testing.T) {
 	var out bytes.Buffer
 	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 120 })
@@ -100,34 +101,83 @@ func TestRateWindowTrimsByTime(t *testing.T) {
 	}
 }
 
-// TestRendererSeparatesAvgFromInstantaneous locks the two D76 rates: the
-// displayed @ rate is the session average, while the instantaneous rate stays
-// the window slope the ETA is derived from.
-func TestRendererSeparatesAvgFromInstantaneous(t *testing.T) {
+// TestRendererPerTaskRatesAndETAs locks the S-ETA1 semantics: each task's rate
+// comes from its own window, the ETA and the displayed @ rate on a line are
+// that same number, and the total rate is the sum of the running tasks' rates.
+func TestRendererPerTaskRatesAndETAs(t *testing.T) {
 	var out bytes.Buffer
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 120 })
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 })
 	base := time.Unix(1_000_000, 0)
-	r.now = func() time.Time { return base }
 
-	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
-	if r.avgRate() != 0 {
-		t.Errorf("avg before Start = %v, want 0", r.avgRate())
-	}
+	r.now = func() time.Time { return base }
 	r.Start()
-	// Five seconds in, 50 bytes installed: the session average is 10 B/s,
-	// while the window holds a single point and has no slope yet.
-	r.now = func() time.Time { return base.Add(5 * time.Second) }
-	r.OnEvent(transfer.Event{Path: "/a.bin", Current: 50, Total: 100, Kind: transfer.EventProgress})
-	if got := r.avgRate(); got != 10 {
-		t.Errorf("avg = %v, want 10 B/s", got)
+	// Both tasks start together, then feed their own samples: "/slow" moves
+	// 100 B/s and "/fast" 200 B/s, so the lines must not share a rate.
+	r.OnEvent(transfer.Event{Path: "/slow.bin", Kind: transfer.EventTaskStart})
+	r.OnEvent(transfer.Event{Path: "/fast.bin", Kind: transfer.EventTaskStart})
+
+	r.now = func() time.Time { return base.Add(1 * time.Second) }
+	r.OnEvent(transfer.Event{Path: "/slow.bin", Current: 100, Total: 2000, Kind: transfer.EventProgress})
+	r.OnEvent(transfer.Event{Path: "/fast.bin", Current: 200, Total: 1000, Kind: transfer.EventProgress})
+	r.now = func() time.Time { return base.Add(2 * time.Second) }
+	r.OnEvent(transfer.Event{Path: "/slow.bin", Current: 200, Total: 2000, Kind: transfer.EventProgress})
+	r.OnEvent(transfer.Event{Path: "/fast.bin", Current: 400, Total: 1000, Kind: transfer.EventProgress})
+
+	out.Reset()
+	r.paint()
+	frame := out.String()
+	r.Stop()
+
+	// 1800 B left at 100 B/s and 600 B left at 200 B/s: 18s and 3s, each
+	// derived from the task's own slope and printed next to that slope.
+	for _, want := range []string{
+		"0.10KiB/s ETA: 18s",
+		"0.20KiB/s ETA: 3s",
+		"Total: 0.29KiB/s | Remaining: 2 ETA: 21s",
+	} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("frame missing %q: %q", want, frame)
+		}
 	}
-	if got := r.window.rate(r.now()); got != 0 {
-		t.Errorf("instantaneous = %v, want 0 with a single window point", got)
+}
+
+// TestRendererTaskRateFallsBackToAverage locks the review-approved Δ: a task
+// whose window holds fewer than two live samples reports its session average
+// instead of zero, so the ETA survives chunk-grained progress (upstream's
+// rate_avg branch, downloader.cpp:3493-3496).
+func TestRendererTaskRateFallsBackToAverage(t *testing.T) {
+	var out bytes.Buffer
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 })
+	base := time.Unix(1_000_000, 0)
+
+	r.now = func() time.Time { return base }
+	r.Start()
+	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
+
+	// Ten seconds in, one sample only: 100 B over 10s is 10 B/s, so 200 B
+	// left is a 20s ETA rather than no ETA at all.
+	r.now = func() time.Time { return base.Add(10 * time.Second) }
+	r.OnEvent(transfer.Event{Path: "/a.bin", Current: 100, Total: 300, Kind: transfer.EventProgress})
+
+	out.Reset()
+	r.paint()
+	frame := out.String()
+	if !strings.Contains(frame, "0.01KiB/s ETA: 20s") {
+		t.Errorf("frame = %q, want the average rate and its 20s ETA", frame)
+	}
+
+	// Another 50 seconds with no sample at all: the window is empty, so the
+	// task still falls back to its average (now 100 B over 60s). The ETA
+	// survives — it must not vanish while the task is still running.
+	r.now = func() time.Time { return base.Add(60 * time.Second) }
+	if got := r.tasks["/a.bin"].rate(r.now()); got <= 0 {
+		t.Errorf("rate after the window aged out = %v, want the task average", got)
 	}
 	out.Reset()
 	r.paint()
-	if !strings.Contains(out.String(), "@ 0.01KiB/s") { // 10 B/s as the util formats it
-		t.Errorf("frame = %q, want the session average as the displayed rate", out.String())
-	}
+	frame = out.String()
 	r.Stop()
+	if !strings.Contains(frame, "ETA: ") {
+		t.Errorf("frame = %q, want an ETA from the task average", frame)
+	}
 }

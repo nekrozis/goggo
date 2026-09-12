@@ -50,10 +50,12 @@ func (c *console) ErrOut() io.Writer { return c.errOut }
 // attachRenderer wires the progress renderer over this console's streams. It
 // runs for every install: the C++ printProgress loop paints unconditionally,
 // and a non-terminal destination simply receives the frames on stdout.
+// source is the run's sampling surface, polled once per repaint (review
+// S-ETA2); nil leaves the progress events as the only feed.
 // The terminal width comes from the input descriptor — Util::getTerminalWidth
 // queries the output side, which this console does not keep a descriptor for
 // (Δ, review D75).
-func (c *console) attachRenderer(cfg config.Config) {
+func (c *console) attachRenderer(cfg config.Config, source progressSource) {
 	var width func() int
 	if fd, ok := c.terminalFd(); ok {
 		width = func() int {
@@ -65,7 +67,7 @@ func (c *console) attachRenderer(cfg config.Config) {
 		}
 	}
 	c.renderer = newRenderer(c.out, cfg.Unicode, cfg.Color, cfg.UnitFormat,
-		time.Duration(cfg.ProgressInterval)*time.Millisecond, width)
+		time.Duration(cfg.ProgressInterval)*time.Millisecond, width, source)
 }
 
 // OnEvent hands the transfer event stream to the renderer. The method exists

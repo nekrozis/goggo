@@ -56,6 +56,13 @@ func Run(ctx context.Context, tasks []model.FileTask, opts Options, deps RunDeps
 func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps RunDeps, emit func(Event)) error {
 	emit(Event{Path: task.Destination, ChunkCount: len(task.Item.Chunks), Kind: EventTaskStart})
 
+	// The sampling slot lives exactly as long as the task, and it runs
+	// through the deferred finish on every exit path — success, failure and
+	// cancellation alike — so the registry never keeps a count that has
+	// stopped moving (review S-ETA2).
+	slot := deps.Progress.start(task.Destination, int64(task.Item.TotalCompressedSize))
+	defer deps.Progress.finish(task.Destination)
+
 	fail := func(text string) error {
 		emit(Event{Path: task.Destination, Text: text, Kind: EventMessageError})
 		emit(Event{Path: task.Destination, Kind: EventTaskFinish})
@@ -83,7 +90,7 @@ func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps R
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err := downloadChunk(ctx, task, j, chunk, opts, deps, emit); err != nil {
+		if err := downloadChunk(ctx, task, j, chunk, opts, deps, slot, emit); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -109,7 +116,7 @@ func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps R
 // length, the CURLOPT_RESUME_FROM_LARGE equivalent), while a hash mismatch
 // empties the buffer so the retry starts the chunk from scratch — a corrupt
 // prefix must not take part in the next hash.
-func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk model.GalaxyDepotItemChunk, opts Options, deps RunDeps, emit func(Event)) error {
+func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk model.GalaxyDepotItemChunk, opts Options, deps RunDeps, slot *progressSlot, emit func(Event)) error {
 	label := fmt.Sprintf("%s (chunk %d/%d)", task.Destination, index+1, len(task.Item.Chunks))
 
 	url, err := deps.URL.URL(ctx, task, chunk)
@@ -137,7 +144,16 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 		}
 
 		resume := len(body) > 0
-		data, lm, code, err := fetchChunkBody(ctx, deps.HTTP, url, resume, len(body))
+		// The attempt's logical starting point: the chunk's offset plus
+		// whatever a previous attempt already buffered, bounded by the chunk's
+		// own end. Publishing the start is also what turns a hash-mismatch
+		// retry into a decrease — the buffer is empty again, so the value drops
+		// back to the chunk's offset and the consumer restarts its window there
+		// (review S-ETA2).
+		base := int64(chunk.CompressedOffset) + int64(len(body))
+		slot.store(base)
+		data, lm, code, err := fetchChunkBody(ctx, deps.HTTP, url, resume, len(body),
+			progressSink{slot: slot, base: base, end: int64(chunk.CompressedOffset + chunk.CompressedSize)})
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -229,7 +245,11 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 // curl_easy_perform does upstream. When resumeLen is positive the request
 // carries a Range header from that offset; the code is returned so the caller
 // can fold a 200 answer to a ranged request.
-func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bool, resumeLen int) ([]byte, time.Time, int, error) {
+//
+// sink is where the bytes report themselves as they arrive, the equivalent of
+// curl's progress callback publishing dlnow during the transfer; its zero
+// value reports nothing, which is what a run without a Progress uses.
+func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bool, resumeLen int, sink progressSink) ([]byte, time.Time, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, time.Time{}, 0, err
@@ -251,8 +271,12 @@ func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bo
 	// mid-transfer leaves the bytes already received in the buffer, which is
 	// what the caller resumes from — the chunk.memory model
 	// (downloader.cpp:4677-4680).
+	var src io.Reader = resp.Body
+	if sink.slot != nil {
+		src = &progressReader{r: resp.Body, slot: sink.slot, base: sink.base, end: sink.end}
+	}
 	var buf bytes.Buffer
-	_, cpErr := io.Copy(&buf, resp.Body)
+	_, cpErr := io.Copy(&buf, src)
 	return buf.Bytes(), lm, resp.StatusCode, cpErr
 }
 

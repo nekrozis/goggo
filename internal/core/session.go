@@ -53,7 +53,7 @@ func OpenWith(ctx context.Context, cfg config.Config, ui Console, allowLogin boo
 		return nil, err
 	}
 
-	d := &Downloader{cfg: cfg, ui: ui, http: hx, web: web, galaxy: gx, token: galaxyStore}
+	d := &Downloader{cfg: cfg, ui: ui, http: hx, web: web, galaxy: gx, progress: deps.Progress, token: galaxyStore}
 	if err := hx.LoadCookies(); err != nil {
 		return nil, err
 	}

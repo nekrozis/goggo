@@ -43,6 +43,7 @@ func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 		HTTP:     d.http,
 		URL:      d.chunkURLProvider(),
 		Observer: d.transferObserver(),
+		Progress: d.progress,
 	}); err != nil {
 		return err
 	}

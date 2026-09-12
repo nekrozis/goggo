@@ -9,6 +9,7 @@ import (
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/galaxy"
 	"github.com/nekrozis/goggo/internal/httpx"
+	"github.com/nekrozis/goggo/internal/transfer"
 	"github.com/nekrozis/goggo/internal/webapi"
 )
 
@@ -30,6 +31,12 @@ type Downloader struct {
 	http   *httpx.Client
 	web    *webapi.Client
 	galaxy *galaxy.Client
+
+	// progress is the optional sampling surface an install run publishes into.
+	// It is handed in through Dependencies and belongs to whoever polls it
+	// (review S-ETA2); nil means the run reports no samples, as it did before
+	// the surface existed.
+	progress *transfer.Progress
 
 	token *config.GalaxyConfig
 

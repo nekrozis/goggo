@@ -148,6 +148,14 @@ func loginTestServer(t *testing.T, mode string) *httptest.Server {
 // TestInitRefreshesAndSavesExpiredToken.
 func newOfflineDownloader(t *testing.T, srv *httptest.Server, cfg config.Config, ui Console) *Downloader {
 	t.Helper()
+	return newOfflineDownloaderWith(t, srv, cfg, ui, Dependencies{})
+}
+
+// newOfflineDownloaderWith is newOfflineDownloader with the injection seam the
+// front end uses: the progress registry travels the same route, from
+// Dependencies into the downloader and on into the transfer run.
+func newOfflineDownloaderWith(t *testing.T, srv *httptest.Server, cfg config.Config, ui Console, deps Dependencies) *Downloader {
+	t.Helper()
 	target, err := url.Parse(srv.URL)
 	if err != nil {
 		t.Fatalf("parse server URL: %v", err)
@@ -166,7 +174,7 @@ func newOfflineDownloader(t *testing.T, srv *httptest.Server, cfg config.Config,
 		t.Fatalf("galaxy.New: %v", err)
 	}
 	store.SetFilepath(TokenPath(cfg))
-	return &Downloader{cfg: cfg, ui: ui, http: hx, web: web, galaxy: gx, token: store}
+	return &Downloader{cfg: cfg, ui: ui, http: hx, web: web, galaxy: gx, progress: deps.Progress, token: store}
 }
 
 // TestTransportOwnedByCallerPersistsCookies locks the S12-R ownership rule: the

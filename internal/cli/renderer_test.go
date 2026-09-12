@@ -15,7 +15,7 @@ import (
 // loop would — without the redraw loop running at all.
 func TestRendererAggregatesAndPaints(t *testing.T) {
 	var out bytes.Buffer
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 120 })
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 120 }, nil)
 	r.now = func() time.Time { return time.Unix(1_000_000, 0) }
 
 	// The start order is deliberately not alphabetical: the #i numbering
@@ -57,13 +57,110 @@ func TestRendererAggregatesAndPaints(t *testing.T) {
 	}
 }
 
+// fakeProgress is a progressSource a test drives by hand: the renderer polls
+// it, exactly as it polls the run's transfer.Progress.
+type fakeProgress struct {
+	bytes map[string]int64
+	total map[string]int64
+}
+
+func newFakeProgress() *fakeProgress {
+	return &fakeProgress{bytes: map[string]int64{}, total: map[string]int64{}}
+}
+
+func (f *fakeProgress) set(task string, value, total int64) {
+	f.bytes[task] = value
+	f.total[task] = total
+}
+
+func (f *fakeProgress) Bytes(task string) (int64, bool) {
+	v, ok := f.bytes[task]
+	return v, ok
+}
+
+func (f *fakeProgress) Total(task string) (int64, bool) {
+	v, ok := f.total[task]
+	return v, ok
+}
+
+// TestRendererSamplesFromSource locks the S-ETA2 wiring: the repaint loop polls
+// the source for the sample and the total, so a task whose first chunk is still
+// arriving already has a rate and an ETA. The displayed bytes keep coming from
+// the progress events, which is the split the review approved.
+func TestRendererSamplesFromSource(t *testing.T) {
+	var out bytes.Buffer
+	source := newFakeProgress()
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, source)
+	base := time.Unix(1_000_000, 0)
+
+	r.now = func() time.Time { return base }
+	r.Start()
+	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
+
+	// No progress event at all: only the sampler moves. Two ticks inside the
+	// window give it a slope, and the total the ETA needs comes from the same
+	// surface — the events carry a total only once a chunk has landed.
+	r.now = func() time.Time { return base.Add(1 * time.Second) }
+	source.set("/a.bin", 100, 1000)
+	r.paint()
+	r.now = func() time.Time { return base.Add(2 * time.Second) }
+	source.set("/a.bin", 200, 1000)
+	out.Reset()
+	r.paint()
+	frame := out.String()
+	r.Stop()
+
+	if !strings.Contains(frame, "0.10KiB/s ETA: 10s") {
+		t.Errorf("frame = %q, want the sampled rate and its 10s ETA", frame)
+	}
+	// The display still follows the events: none has arrived, so the bytes
+	// and the percentage show zero (review S-ETA2).
+	if !strings.Contains(frame, "0.00 B/1000.00 B") || !strings.Contains(frame, "  0% ") {
+		t.Errorf("frame = %q, want event-driven displayed bytes", frame)
+	}
+}
+
+// TestRateWindowResetsOnADecrease locks the reviewed answer to a backwards
+// sample: drop the old window and start again from the new value, never a
+// negative slope and never a clamp.
+func TestRateWindowResetsOnADecrease(t *testing.T) {
+	var w rateWindow
+	w.cap = 100
+	t0 := time.Unix(1_000_000, 0)
+
+	w.addSample(t0, 100)
+	w.addSample(t0.Add(1*time.Second), 200)
+	w.addSample(t0.Add(2*time.Second), 300)
+	if got := w.rate(t0.Add(2 * time.Second)); got != 100 {
+		t.Fatalf("rate = %v, want the 100 B/s slope", got)
+	}
+
+	// A hash mismatch emptied the chunk buffer: the task went backwards.
+	w.addSample(t0.Add(3*time.Second), 50)
+	if len(w.points) != 1 || w.points[0][1] != 50 {
+		t.Fatalf("window = %v, want the single post-reset sample", w.points)
+	}
+	if got := w.rate(t0.Add(3 * time.Second)); got != 0 {
+		t.Errorf("rate right after the reset = %v, want 0", got)
+	}
+
+	w.addSample(t0.Add(4*time.Second), 150)
+	if got := w.rate(t0.Add(4 * time.Second)); got != 100 {
+		t.Errorf("rate after the reset = %v, want the post-reset slope (100 B/s)", got)
+	}
+	w.reset()
+	if len(w.points) != 0 {
+		t.Errorf("points after reset = %d, want none", len(w.points))
+	}
+}
+
 // TestRendererFoldAndWindowBehavior is not needed here: the fold lives in
 // transfer; this file keeps the renderer's display semantics only. A task's
 // first frame has no elapsed time behind its average, so no rate and no ETA
 // print yet.
 func TestRendererFirstFrameHasNoETA(t *testing.T) {
 	var out bytes.Buffer
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 120 })
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 120 }, nil)
 	r.now = func() time.Time { return time.Unix(1_000_000, 0) }
 
 	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
@@ -106,7 +203,7 @@ func TestRateWindowTrimsByTime(t *testing.T) {
 // that same number, and the total rate is the sum of the running tasks' rates.
 func TestRendererPerTaskRatesAndETAs(t *testing.T) {
 	var out bytes.Buffer
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 })
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, nil)
 	base := time.Unix(1_000_000, 0)
 
 	r.now = func() time.Time { return base }
@@ -147,7 +244,7 @@ func TestRendererPerTaskRatesAndETAs(t *testing.T) {
 // rate_avg branch, downloader.cpp:3493-3496).
 func TestRendererTaskRateFallsBackToAverage(t *testing.T) {
 	var out bytes.Buffer
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 })
+	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, nil)
 	base := time.Unix(1_000_000, 0)
 
 	r.now = func() time.Time { return base }

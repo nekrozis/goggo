@@ -43,18 +43,38 @@ type planFixture struct {
 	mu       sync.Mutex
 	requests []string
 	bodies   map[string]string
+	holds    map[string]heldBody
+}
+
+// heldBody is a response the fixture serves in two halves, waiting for the
+// test between them. It gives a test a deterministic window in which a
+// transfer is provably in flight (review S-ETA2).
+type heldBody struct {
+	body    string
+	release <-chan struct{}
 }
 
 func newPlanFixture(t *testing.T) *planFixture {
 	t.Helper()
-	f := &planFixture{bodies: map[string]string{}}
+	f := &planFixture{bodies: map[string]string{}, holds: map[string]heldBody{}}
 
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.requests = append(f.requests, r.URL.Path)
+		held, isHeld := f.holds[r.URL.Path]
 		body, ok := f.bodies[r.URL.Path]
 		f.mu.Unlock()
 
+		if isHeld {
+			half := len(held.body) / 2
+			fmt.Fprint(w, held.body[:half])
+			if fl, isFlusher := w.(http.Flusher); isFlusher {
+				fl.Flush()
+			}
+			<-held.release
+			fmt.Fprint(w, held.body[half:])
+			return
+		}
 		if !ok {
 			http.NotFound(w, r)
 			return
@@ -63,6 +83,14 @@ func newPlanFixture(t *testing.T) *planFixture {
 	}))
 	t.Cleanup(f.Close)
 	return f
+}
+
+// hold makes the fixture serve path in two halves, releasing the second one
+// when the test closes the channel.
+func (f *planFixture) hold(path, body string, release <-chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.holds[path] = heldBody{body: body, release: release}
 }
 
 func (f *planFixture) set(path, body string) {

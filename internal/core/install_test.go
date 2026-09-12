@@ -7,10 +7,14 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/nekrozis/goggo/internal/galaxy"
+	"github.com/nekrozis/goggo/internal/transfer"
 )
 
 // chunkPayload is one chunk's fixture: the content the CDN serves compressed
@@ -185,6 +189,86 @@ func TestInstallEndToEnd(t *testing.T) {
 		}
 	}
 	assertFileContent(t, installPath+"/goggame-"+planProductID+".info", `{"buildId":"b-old"}`)
+}
+
+// TestInstallPublishesProgressThroughTheRun locks the injection chain the front
+// end relies on: the registry handed in through Dependencies reaches the
+// transfer run, which publishes into it while a chunk is still arriving and
+// clears the slot once the task is done. The fixture holds the second half of
+// the only chunk until the test has looked, so the partial reading is a
+// controlled moment rather than a race (review S-ETA2).
+func TestInstallPublishesProgressThroughTheRun(t *testing.T) {
+	f := newPlanFixture(t)
+	payload := planChunkPayload(t, "progress through the install run")
+	v2New := galaxy.HashToGalaxyPath(planBuildHashNew)
+
+	f.set("/products/"+planProductID+"/os/windows/builds",
+		`{"items":[{"build_id":"b-new","version_name":"1.0.2","date_published":"2024-03-02","generation":2,`+
+			`"link":"https://cdn.gog.com/content-system/v2/meta/`+v2New+`"}]}`)
+	f.set("/content-system/v2/meta/"+v2New,
+		`{"baseProductId":"`+planProductID+`","installDirectory":"W3 GOTY","version":2,`+
+			`"products":[{"name":"The Witcher 3: Wild Hunt"}],`+
+			`"depots":[{"productId":"`+planProductID+`","languages":["en-US"],"osBitness":["64"],`+
+			`"manifest":"`+planDepotHashLang+`"}]}`)
+	// The chunk declares its real compressed size, so the task's logical total
+	// is the size the registry must report as Total.
+	f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(planDepotHashLang),
+		`{"depot":{"items":[{"path":"game/data.bin","md5":"base-item-md5","chunks":[`+
+			`{"compressedMd5":"`+payload.md5+`","compressedSize":`+fmt.Sprint(len(payload.compressed))+`,`+
+			`"size":`+fmt.Sprint(len(payload.content))+`}]}]}}`)
+	f.set("/products/"+planProductID+"/secure_link",
+		`{"urls":[{"endpoint_name":"cdnMain","url_format":"https://cdn.gog.com/chunks{path}",`+
+			`"parameters":{"path":""}}]}`)
+
+	release := make(chan struct{})
+	var once sync.Once
+	f.hold("/chunks/"+galaxy.HashToGalaxyPath(payload.md5), payload.compressed, release)
+	defer once.Do(func() { close(release) })
+
+	cfg := planTestConfig(t)
+	cfg.DownloadConfig.GalaxyCDNPriority = []string{"cdnMain"}
+	if err := os.MkdirAll(cfg.ConfigDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	destination := cfg.Directories.Directory + "W3 GOTY/game/data.bin"
+
+	progress := transfer.NewProgress()
+	d := newOfflineDownloaderWith(t, f.Server, cfg, newFakeConsole(), Dependencies{Progress: progress})
+	// The offline downloader builds an empty credential store; give it a fresh
+	// token so the transfer's per-chunk expiry checks pass without a refresh.
+	d.token.SetJSON(map[string]any{
+		"access_token": "at", "refresh_token": "rt", "expires_in": 3600, "user_id": "u1",
+	})
+
+	done := make(chan error, 1)
+	go func() { done <- d.Install(context.Background(), NewInstallRequest(cfg, planProductID, "")) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if v, ok := progress.Bytes(destination); ok && v > 0 && v < int64(len(payload.compressed)) {
+			break
+		}
+		if time.Now().After(deadline) {
+			v, ok := progress.Bytes(destination)
+			t.Fatalf("no in-flight sample for %s: Bytes = (%d, %v)", destination, v, ok)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if v, ok := progress.Total(destination); !ok || v != int64(len(payload.compressed)) {
+		t.Errorf("Total while in flight = (%d, %v), want (%d, true)", v, ok, len(payload.compressed))
+	}
+
+	once.Do(func() { close(release) })
+	if err := <-done; err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if _, ok := progress.Bytes(destination); ok {
+		t.Error("slot survived the finished install")
+	}
+	if _, ok := progress.Total(destination); ok {
+		t.Error("total survived the finished install")
+	}
+	assertFileContent(t, destination, payload.content)
 }
 
 func assertFileContent(t *testing.T, path, want string) {

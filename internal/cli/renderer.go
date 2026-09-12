@@ -12,6 +12,20 @@ import (
 	"github.com/nekrozis/goggo/internal/util"
 )
 
+// progressSource is the sampling surface the renderer polls, declared here
+// because this is where it is consumed: transfer's *Progress satisfies it
+// structurally, so the front end never depends on a transfer interface. Bytes
+// is the task's logical download progress — false means "no sampling state",
+// never "zero bytes" — and Total is the same task total the progress events
+// carry, which is what lets a task show an ETA while its first chunk is still
+// arriving (review S-ETA2).
+type progressSource interface {
+	Bytes(task string) (int64, bool)
+	Total(task string) (int64, bool)
+}
+
+var _ progressSource = (*transfer.Progress)(nil)
+
 // renderer consumes the full transfer event stream the way the C++
 // printProgress loop renders it (downloader.cpp:3505-3630): messages print as
 // they arrive, progress updates fold into a per-task view, and a redraw loop
@@ -20,10 +34,16 @@ import (
 // It implements transfer.Observer structurally; core hands the whole stream to
 // it through the optional-ability assertion (review D75) and keeps its own
 // message-only path for plain consoles. Every rate is the task's own: the
-// samples a task's progress events feed go into that task's sliding window,
-// the way upstream keeps one TimeAndSize deque per download thread
-// (downloader.cpp:3483). A task's ETA and its displayed rate therefore share
-// one number instead of leaning on the other tasks' traffic (review S-ETA1).
+// samples go into that task's sliding window, the way upstream keeps one
+// TimeAndSize deque per download thread (downloader.cpp:3483). A task's ETA
+// and its displayed rate therefore share one number instead of leaning on the
+// other tasks' traffic (review S-ETA1).
+//
+// The samples come from two places. A source — the run's transfer.Progress —
+// is polled once per repaint, which is the equivalent of upstream's progress
+// callback feeding vDownloadInfo while printProgress reads it; without a
+// source the progress events are the only feed, which is what the renderer's
+// own tests and a plain console use (review S-ETA2).
 type renderer struct {
 	out      io.Writer
 	bar      *progress.Bar
@@ -31,6 +51,7 @@ type renderer struct {
 	width    func() int
 	unit     uint32
 	now      func() time.Time // swappable for tests
+	source   progressSource   // nil: sample from the progress events instead
 
 	mu    sync.Mutex
 	tasks map[string]*renderTask
@@ -122,6 +143,33 @@ func (w *rateWindow) samples(now time.Time) int {
 	return len(w.live(now))
 }
 
+// newest returns the window's most recent sample value, whether or not it has
+// aged out: it is the value a new sample is compared against.
+func (w *rateWindow) newest() (int64, bool) {
+	if len(w.points) == 0 {
+		return 0, false
+	}
+	return w.points[len(w.points)-1][1], true
+}
+
+// reset drops every sample, so the window starts over from the next add.
+func (w *rateWindow) reset() {
+	w.points = nil
+}
+
+// addSample feeds one sampled value into the window. A value below the newest
+// sample means the task went backwards — a failed hash discards the chunk
+// buffer and the next attempt starts from the chunk's offset again — and the
+// review locked the answer: drop the old samples and start again from this
+// one. Never a negative slope, never a sample clamped back to its predecessor
+// (review S-ETA2).
+func (w *rateWindow) addSample(now time.Time, value int64) {
+	if newest, ok := w.newest(); ok && value < newest {
+		w.reset()
+	}
+	w.add(now, value)
+}
+
 // rate is the bytes-per-second slope over the last 10 seconds counted from
 // now — the query time, not the newest sample's time. A window that holds
 // fewer than two live samples has no slope to report and returns zero. Callers
@@ -140,8 +188,10 @@ func (w *rateWindow) rate(now time.Time) float64 {
 }
 
 // newRenderer wires a renderer over the front end's streams. width supplies
-// the terminal width for line trimming; nil means a fixed 80 columns.
-func newRenderer(out io.Writer, useUnicode, useColor bool, unit uint32, interval time.Duration, width func() int) *renderer {
+// the terminal width for line trimming; nil means a fixed 80 columns. source is
+// the sampling surface the repaint loop polls; nil makes the progress events
+// the only sample feed.
+func newRenderer(out io.Writer, useUnicode, useColor bool, unit uint32, interval time.Duration, width func() int, source progressSource) *renderer {
 	if width == nil {
 		width = func() int { return 80 }
 	}
@@ -155,6 +205,7 @@ func newRenderer(out io.Writer, useUnicode, useColor bool, unit uint32, interval
 		width:    width,
 		unit:     unit,
 		now:      time.Now,
+		source:   source,
 		tasks:    map[string]*renderTask{},
 		done:     map[string]bool{},
 		stop:     make(chan struct{}),
@@ -213,10 +264,13 @@ func (r *renderer) OnEvent(ev transfer.Event) {
 		}
 		t.done = ev.Current
 		t.total = ev.Total
-		// The sample is this task's own cumulative progress, the equivalent
-		// of upstream pushing that thread's dlnow into its deque
-		// (downloader.cpp:3483).
-		t.window.add(r.now(), t.done)
+		// Without a source the events carry the only samples there are, the
+		// way this display worked before the sampling surface existed. With
+		// one, the repaint loop polls that instead and the events stay what
+		// they are: lifecycle, not a sampling clock (review S-ETA2).
+		if r.source == nil {
+			t.window.add(r.now(), t.done)
+		}
 	case transfer.EventTaskFinish:
 		r.done[ev.Path] = true
 	default:
@@ -254,6 +308,20 @@ func (r *renderer) paint() {
 			finished++
 			lines = append(lines, fmt.Sprintf("#%d: Finished", i))
 			continue
+		}
+		// One poll per repaint, the cadence upstream's printProgress loop
+		// reads vDownloadInfo at (downloader.cpp:3523): the sample and the
+		// rate it produces describe this frame. The total comes from the same
+		// surface so a task whose first chunk is still arriving can show an
+		// ETA — the events only carry a total once a chunk has landed
+		// (review S-ETA2).
+		if r.source != nil {
+			if total, ok := r.source.Total(path); ok {
+				t.total = total
+			}
+			if value, ok := r.source.Bytes(path); ok {
+				t.window.addSample(now, value)
+			}
 		}
 		fraction := 0.0
 		if t.total > 0 {

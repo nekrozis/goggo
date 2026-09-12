@@ -7,6 +7,7 @@ import (
 
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/core"
+	"github.com/nekrozis/goggo/internal/transfer"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -118,7 +119,16 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	d, err := core.Open(ctx, inv.Config, ui, true)
+	// The sampling surface belongs to the one command that polls it: an install
+	// run publishes its per-task byte counts into this registry and the
+	// renderer reads it back. Every other command opens without one, which is
+	// the nil case transfer skips entirely (review S-ETA2).
+	var progress *transfer.Progress
+	if inv.GalaxyInstall != "" {
+		progress = transfer.NewProgress()
+	}
+
+	d, err := core.OpenWith(ctx, inv.Config, ui, true, core.Dependencies{Progress: progress})
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
 		return 1
@@ -186,7 +196,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// command rather than growing an exit code of their own (review D65a).
 	if inv.GalaxyInstall != "" {
 		req := core.NewInstallRequest(inv.Config, installProduct, installBuild)
-		ui.attachRenderer(inv.Config)
+		ui.attachRenderer(inv.Config, progress)
 		ui.renderer.Start()
 		err := d.Install(ctx, req)
 		ui.renderer.Stop()

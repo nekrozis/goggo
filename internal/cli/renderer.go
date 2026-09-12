@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,13 +13,12 @@ import (
 
 // progressSource is the sampling surface the renderer polls, declared here
 // because this is where it is consumed: transfer's *Progress satisfies it
-// structurally, so the front end never depends on a transfer interface. Bytes
-// is the task's logical download progress — false means "no sampling state",
-// never "zero bytes" — and Total is the same task total the progress events
-// carry, which is what lets a task show an ETA while its first chunk is still
-// arriving. Queue is the run-level snapshot the pending count and the pending
-// bytes are derived from; its false means "no snapshot", never "empty queue"
-// (reviews S-ETA2, S-ETA3).
+// structurally, so the front end never depends on a transfer interface. It is
+// the ONLY numeric progress authority of the display (review UI1 v3 §6.A):
+// the bytes, the totals, the percentages and the pending side all come from
+// here, never from the progress events. Queue is the run-level snapshot the
+// pending side derives from; its false means "no snapshot", never "empty
+// queue" (reviews S-ETA2, S-ETA3).
 type progressSource interface {
 	Bytes(task string) (int64, bool)
 	Total(task string) (int64, bool)
@@ -29,79 +27,119 @@ type progressSource interface {
 
 var _ progressSource = (*transfer.Progress)(nil)
 
-// renderer consumes the full transfer event stream the way the C++
-// printProgress loop renders it (downloader.cpp:3505-3630): messages print as
-// they arrive, progress updates fold into a per-task view, and a redraw loop
-// repaints the task lines and the total line once per progress interval.
-//
-// It implements transfer.Observer structurally; core hands the whole stream to
-// it through the optional-ability assertion (review D75) and keeps its own
-// message-only path for plain consoles. Every rate is the task's own: the
-// samples go into that task's sliding window, the way upstream keeps one
-// TimeAndSize deque per download thread (downloader.cpp:3483). A task's ETA
-// and its displayed rate therefore share one number instead of leaning on the
-// other tasks' traffic (review S-ETA1).
-//
-// The samples come from two places. A source — the run's transfer.Progress —
-// is polled once per repaint, which is the equivalent of upstream's progress
-// callback feeding vDownloadInfo while printProgress reads it; without a
-// source the progress events are the only feed, which is what the renderer's
-// own tests and a plain console use (review S-ETA2).
-type renderer struct {
-	out      io.Writer
-	bar      *progress.Bar
-	interval time.Duration
-	width    func() int
-	unit     uint32
-	threads  uint32
-	now      func() time.Time // swappable for tests
-	source   progressSource   // nil: sample from the progress events instead
+// stopReason is the terminal state an install run ended in. It is the single
+// result value the exit code maps from (review UI1 v3 §6.E: one owner of the
+// reason→code mapping, in run.go).
+type stopReason uint8
 
-	mu    sync.Mutex
-	tasks map[string]*renderTask
-	order []string
-	done  map[string]bool
+const (
+	stopCompleted stopReason = iota
+	stopCanceled
+	stopFailed
+)
 
-	stop    chan struct{}
-	stopped chan struct{}
+// finalLines are the terminal's closing state for each reason. A canceled run
+// never shows a completion count: its active tasks were interrupted, not
+// finished (review UI1 v2 §E).
+func finalLines(reason stopReason, completed int) []string {
+	switch reason {
+	case stopCompleted:
+		return []string{fmt.Sprintf("%d files completed", completed)}
+	case stopCanceled:
+		return []string{"Interrupted. Partial files kept for resume."}
+	default:
+		return []string{"Installation failed."}
+	}
 }
 
-// renderTask is one task's view: its display path, the byte counts of the last
-// progress event, and the task's own sample window and origin. The origin is
-// where the task's session average counts from — the moment the renderer first
-// saw the task.
+// sink is the rendering back end. The renderer owns the state and the view
+// model; the sink only puts bytes on a stream. Every method is called with
+// the renderer's mutex held — the event deliverer and the repaint loop are
+// the only callers, so a sink needs no lock of its own.
+type sink interface {
+	// info renders a short-lived informational line. TTY: it becomes the
+	// frame's transient message row on the next repaint; log: stdout now.
+	info(text string)
+	// diagnostic renders a warning or error. TTY: a Diagnostic transaction —
+	// the frame comes down, the line lands on stderr, the frame goes back up.
+	// Log: stderr now.
+	diagnostic(text string)
+	// taskStart / taskFinish render lifecycle lines. Log: one line each.
+	// TTY: no-ops — the next frame already reflects the state.
+	taskStart(index int, path string)
+	taskFinish(index int, path string)
+	// tick is called once per interval. TTY: draw the frame. Log: emit the
+	// summary when the cadence asks for it.
+	tick(vm viewModel)
+	// finalize renders the run's terminal state and ends all output.
+	finalize(reason stopReason, completed int)
+}
+
+// renderer turns the transfer event stream plus the Progress sampling surface
+// into a derived view model, and hands frames to a sink. It holds state, not
+// terminal: it never writes directly (review UI1 v3 — renderer produces
+// Frames, the coordinator owns the terminal).
+//
+// Progress is the numeric authority; the events are lifecycle and messages
+// only. EventProgress carries no display state anymore — the renderer does
+// not read its Current at all (review UI1 v3 §6.A; the field stays in the
+// event contract, transfer keeps emitting it, only the consumption is gone).
+type renderer struct {
+	bar      *progress.Bar
+	interval time.Duration
+	unit     uint32
+	now      func() time.Time // swappable for tests
+	source   progressSource   // the numeric authority; never nil in production
+	sink     sink
+
+	mu            sync.Mutex
+	activeTasks   map[string]*renderTask
+	order         []string
+	finishedCount int
+	startedBytes  int64  // Σ started tasks' totals, accumulated at TaskStart
+	message       string // the latest transient info/success line
+
+	stop     chan struct{}
+	stopped  chan struct{}
+	finalize bool // Stop ran; further Stops are no-ops
+	started  bool // Start ran; Stop waits for the loop only when it did
+}
+
+// renderTask is one active task's view: its path, when the renderer first saw
+// it (the session average counts from there) and its sample window. The byte
+// counts are NOT stored — they are read from Progress at view-model build
+// time, so there is exactly one numeric source (review UI1 v3 §6.A/§20).
 type renderTask struct {
 	path   string
-	done   int64
-	total  int64
 	start  time.Time
 	window rateWindow
 }
 
-// newRenderTask registers a task view, with the window defaults the review
-// locked for this display (D76: 10 seconds and at most 100 samples). The
-// window moved from the renderer to the task in S-ETA1, so the defaults move
-// with it — a zero cap would trim every sample away.
 func newRenderTask(path string, now time.Time) *renderTask {
 	return &renderTask{path: path, start: now, window: rateWindow{cap: 100}}
 }
 
-// rate is the task's download rate in bytes per second: the slope of its own
-// window, or its session average when the window holds fewer than two live
-// samples. Upstream switches on the deque size (100 samples ≈ 10 s of 100 ms
-// callbacks, downloader.cpp:3484-3496); the event model here is chunk-grained,
-// so the switch is on the live samples instead (review S-ETA1, Δ). The average
-// keeps the ETA of a task whose chunks are slower than the window — or of a
-// task that has barely started — from vanishing. Callers hold the mutex.
-func (t *renderTask) rate(now time.Time) float64 {
-	if t.window.samples(now) >= 2 {
-		return t.window.rate(now)
-	}
-	elapsed := now.Sub(t.start).Seconds()
-	if elapsed <= 0 {
-		return 0
-	}
-	return float64(t.done) / elapsed
+// viewModel is the derived presentation state: everything the frame or the
+// log summary shows, computed at one instant.
+type viewModel struct {
+	active    int // running tasks
+	queued    int // not yet started (snapshot − started)
+	rate      float64
+	remaining int64
+	etaSecs   float64
+	etaValid  bool
+	message   string
+	tasks     []taskRow
+}
+
+// taskRow is one active task's derived numbers.
+type taskRow struct {
+	index int // 1-based, TaskStart arrival order, stable across frames
+	path  string
+	pct   float64
+	done  int64
+	total int64
+	rate  float64
 }
 
 // rateWindow is the sliding byte window behind the instantaneous rate: the
@@ -176,8 +214,9 @@ func (w *rateWindow) addSample(now time.Time, value int64) {
 
 // rate is the bytes-per-second slope over the last 10 seconds counted from
 // now — the query time, not the newest sample's time. A window that holds
-// fewer than two live samples has no slope to report and returns zero. Callers
-// hold the renderer's mutex.
+// fewer than two live samples has no slope to report and returns zero; the
+// task falls back to its session average (review S-ETA1). Callers hold the
+// renderer's mutex.
 func (w *rateWindow) rate(now time.Time) float64 {
 	live := w.live(now)
 	if len(live) < 2 {
@@ -191,37 +230,54 @@ func (w *rateWindow) rate(now time.Time) float64 {
 	return float64(last[1]-first[1]) / elapsed
 }
 
-// newRenderer wires a renderer over the front end's streams. width supplies
-// the terminal width for line trimming; nil means a fixed 80 columns. source is
-// the sampling surface the repaint loop polls; nil makes the progress events
-// the only sample feed. threads is the configured worker count, which decides
-// whether the total line carries its rate — upstream keys that on the thread
-// setting, not on the number of tasks (downloader.cpp:3612).
-func newRenderer(out io.Writer, useUnicode, useColor bool, unit uint32, interval time.Duration, width func() int, source progressSource, threads uint32) *renderer {
-	if width == nil {
-		width = func() int { return 80 }
+// rate is the task's download rate in bytes per second: the slope of its own
+// window, or its session average when the window holds fewer than two live
+// samples (review S-ETA1). done is the task's current sampled byte count,
+// read from Progress by the caller. Callers hold the mutex.
+func (t *renderTask) rate(now time.Time, done int64) float64 {
+	if t.window.samples(now) >= 2 {
+		return t.window.rate(now)
 	}
+	elapsed := now.Sub(t.start).Seconds()
+	if elapsed <= 0 {
+		return 0
+	}
+	return float64(done) / elapsed
+}
+
+// newRenderer wires a renderer over a sink. source is the numeric authority
+// and is required: the display has exactly one numeric feed (review UI1 v3
+// §6.A).
+func newRenderer(sink sink, bar *progress.Bar, interval time.Duration, source progressSource) *renderer {
 	if interval <= 0 {
 		interval = 100 * time.Millisecond
 	}
 	return &renderer{
-		out:      out,
-		bar:      progress.NewBar(useUnicode, useColor),
-		interval: interval,
-		width:    width,
-		unit:     unit,
-		threads:  threads,
-		now:      time.Now,
-		source:   source,
-		tasks:    map[string]*renderTask{},
-		done:     map[string]bool{},
-		stop:     make(chan struct{}),
-		stopped:  make(chan struct{}),
+		bar:         bar,
+		interval:    interval,
+		now:         time.Now,
+		source:      source,
+		sink:        sink,
+		activeTasks: map[string]*renderTask{},
+		stop:        make(chan struct{}),
+		stopped:     make(chan struct{}),
 	}
 }
 
-// Start runs the redraw loop until Stop.
+// Start runs the repaint loop until Stop. A second Start is a no-op, and so
+// is a Start after Stop: the run is finalized, its terminal state is on
+// screen, and a ticker launched then would never see a stop signal again —
+// every later Stop refuses itself on the finalize flag (review UI1-R1: the
+// Stop-before-Start → Start-after-Stop sequence left exactly such a
+// goroutine behind).
 func (r *renderer) Start() {
+	r.mu.Lock()
+	if r.started || r.finalize {
+		r.mu.Unlock()
+		return
+	}
+	r.started = true
+	r.mu.Unlock()
 	go func() {
 		defer close(r.stopped)
 		ticker := time.NewTicker(r.interval)
@@ -231,204 +287,235 @@ func (r *renderer) Start() {
 			case <-r.stop:
 				return
 			case <-ticker.C:
-				r.paint()
+				r.tick()
 			}
 		}
 	}()
 }
 
-// Stop ends the redraw loop and paints one final frame, so the lines the next
-// output writes do not overlay a stale progress block.
-func (r *renderer) Stop() {
-	select {
-	case <-r.stop:
-	default:
-		close(r.stop)
+// Stop ends the repaint loop and emits the run's terminal state. It covers
+// every exit path — success, error, cancellation and panic (the caller's
+// defer reaches it with whatever reason was current) — but it never swallows
+// anything: a panic propagates after the cleanup, exactly as Go would
+// (review UI1 v3, constraint 7). A second Stop is a no-op, and a Stop without
+// a Start (nothing to wait for) finalizes synchronously instead of blocking
+// on the loop that never ran — the deadlock a test binary caught on the first
+// cut.
+func (r *renderer) Stop(reason stopReason) {
+	r.mu.Lock()
+	if r.finalize {
+		r.mu.Unlock()
+		return
 	}
-	<-r.stopped
-	r.paint()
+	r.finalize = true
+	wasStarted := r.started
+	r.mu.Unlock()
+
+	if wasStarted {
+		close(r.stop)
+		<-r.stopped
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sink.finalize(reason, r.finishedCount)
 }
 
 // OnEvent implements transfer.Observer. The call is serial — transfer delivers
-// through one goroutine (review D59) — while the redraw loop reads the same
-// state, hence the mutex.
+// through one goroutine (review D59) — while the repaint loop reads the same
+// state, hence the mutex. Progress events are lifecycle noise here: the
+// numeric authority is Progress, so they are dropped (review UI1 v3 §6.A).
 func (r *renderer) OnEvent(ev transfer.Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch ev.Kind {
 	case transfer.EventTaskStart:
-		// TaskStart carries no byte counts (review D79): the total arrives
-		// with the first progress event, and the arrival time is where this
-		// task's session average starts counting.
-		r.tasks[ev.Path] = newRenderTask(ev.Path, r.now())
+		// RES1 publishes the task's total before emitting TaskStart, so the
+		// pending-byde side can accumulate it here and stays correct after
+		// finished tasks leave the active model.
+		r.activeTasks[ev.Path] = newRenderTask(ev.Path, r.now())
 		r.order = append(r.order, ev.Path)
-	case transfer.EventProgress:
-		t := r.tasks[ev.Path]
-		if t == nil {
-			t = newRenderTask(ev.Path, r.now())
-			r.tasks[ev.Path] = t
-			r.order = append(r.order, ev.Path)
+		if total, ok := r.source.Total(ev.Path); ok {
+			r.startedBytes += total
 		}
-		t.done = ev.Current
-		t.total = ev.Total
-		// Without a source the events carry the only samples there are, the
-		// way this display worked before the sampling surface existed. With
-		// one, the repaint loop polls that instead and the events stay what
-		// they are: lifecycle, not a sampling clock (review S-ETA2).
-		if r.source == nil {
-			t.window.add(r.now(), t.done)
-		}
+		r.sink.taskStart(len(r.order), ev.Path)
 	case transfer.EventTaskFinish:
-		r.done[ev.Path] = true
+		// The task leaves the active model; the row numbering is stable
+		// because r.order keeps every started path.
+		delete(r.activeTasks, ev.Path)
+		r.finishedCount++
+		r.sink.taskFinish(r.indexOf(ev.Path), ev.Path)
+	case transfer.EventMessageInfo, transfer.EventMessageSuccess:
+		r.message = ev.Text
+		r.sink.info(ev.Text)
+	case transfer.EventMessageWarning, transfer.EventMessageError:
+		r.sink.diagnostic(ev.Text)
 	default:
-		// Message kinds print immediately, the way the C++ loop drains the
-		// message queue before painting the bars.
-		fmt.Fprintln(r.out, ev.Text)
+		// EventProgress and anything else: lifecycle noise, no display state.
 	}
 }
 
-// paint repaints the whole block: the clear sequence, then one name and one
-// status line per task, then the total line (downloader.cpp:3545-3615).
-func (r *renderer) paint() {
+// indexOf is a path's 1-based display row: its position in the TaskStart
+// arrival order. Callers hold the mutex.
+func (r *renderer) indexOf(path string) int {
+	for i, p := range r.order {
+		if p == path {
+			return i + 1
+		}
+	}
+	return len(r.order)
+}
+
+// tick is one repaint: build the view model at a single instant, hand it to
+// the sink. After Stop the run's terminal state is on screen, so a repaint
+// would smear it — the tick refuses, the same contract the coordinator's
+// stopped flag enforces one layer down.
+func (r *renderer) tick() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	fmt.Fprint(r.out, "\033[J\r")
-
-	width := r.width()
-	var lines []string
-	var totalRate float64
-	var totalETASecs float64
-	finished := 0
-
-	// The #i numbering follows the TaskStart arrival order — the review
-	// locked it as the display order (D75), so r.order is used as kept. Every
-	// line is measured once, at this frame's instant, so its rate, its ETA
-	// and the totals all describe the same moment.
-	now := r.now()
-	for i, path := range r.order {
-		t := r.tasks[path]
-		if t == nil {
-			continue
-		}
-		if r.done[path] {
-			finished++
-			lines = append(lines, fmt.Sprintf("#%d: Finished", i))
-			continue
-		}
-		// One poll per repaint, the cadence upstream's printProgress loop
-		// reads vDownloadInfo at (downloader.cpp:3523): the sample and the
-		// rate it produces describe this frame. The total comes from the same
-		// surface so a task whose first chunk is still arriving can show an
-		// ETA — the events only carry a total once a chunk has landed
-		// (review S-ETA2).
-		if r.source != nil {
-			if total, ok := r.source.Total(path); ok {
-				t.total = total
-			}
-			if value, ok := r.source.Bytes(path); ok {
-				t.window.addSample(now, value)
-			}
-		}
-		fraction := 0.0
-		if t.total > 0 {
-			fraction = float64(t.done) / float64(t.total)
-		}
-		// The rate is this task's own, and the same number feeds the ETA and
-		// the displayed @ rate, so "remaining / rate" is what the line shows
-		// (review S-ETA1, F2/F4).
-		rate := t.rate(now)
-		etaSecs := 0.0
-		if rate > 0 && t.total >= t.done {
-			etaSecs = float64(t.total-t.done) / rate
-		}
-		totalRate += rate
-		totalETASecs += etaSecs
-		eta := ""
-		if etaSecs > 0 {
-			eta = " ETA: " + util.EtaString(int64(etaSecs))
-		}
-		pct := fmt.Sprintf("%3.0f%% ", fraction*100)
-		status := fmt.Sprintf(" %s @ %s%s",
-			util.SizeString(uint64(t.done), r.unit)+"/"+util.SizeString(uint64(t.total), r.unit),
-			util.RateString(rate, r.unit), eta)
-		barLen := 26
-		if len(pct)+len(status)+barLen > width {
-			barLen -= len(pct) + len(status) + barLen - width
-		}
-		barText := ""
-		if barLen >= 5 {
-			barText = r.bar.Create(barLen, fraction)
-		}
-		lines = append(lines,
-			fmt.Sprintf("#%d %s", i, t.path),
-			pct+barText+status)
+	if r.finalize {
+		return
 	}
-
-	// The total line describes the queue, not the active tasks: upstream keeps
-	// the bytes of everything still queued and subtracts an item when a worker
-	// takes it, so pending and active never overlap (downloader.cpp:3596-3620,
-	// 4452). Here the pending side comes from the run's snapshot minus the
-	// tasks this renderer has seen start; the active side is the ETAs above.
-	// A subtract that would go negative is a state disagreement, not a number
-	// worth showing, so it clamps at zero (review S-ETA3).
-	started := len(r.order)
-	startedBytes := int64(0)
-	for _, path := range r.order {
-		if t := r.tasks[path]; t != nil {
-			startedBytes += t.total
-		}
-	}
-	pending := started - finished
-	pendingBytes := int64(0)
-	havePending := false
-	if r.source != nil {
-		if tasks, bytes, ok := r.source.Queue(); ok {
-			pending = max(tasks-started, 0)
-			pendingBytes = max(bytes-startedBytes, 0)
-			havePending = true
-		}
-	}
-
-	// The line prints while anything is pending or running, so a run whose
-	// first tasks have not started yet still reports its queue.
-	if pending > 0 || finished < started {
-		totalLine := ""
-		// The total rate is the sum of the running tasks' rates, the way
-		// upstream's total_rate accumulates its per-thread rates
-		// (downloader.cpp:3562, 3614). Finished tasks dropped out above, as
-		// they do upstream. Its prefix follows the configured thread count,
-		// not the task count (downloader.cpp:3612).
-		if r.threads > 1 {
-			totalLine += "Total: " + util.RateString(totalRate, r.unit) + " | "
-		}
-		totalLine += fmt.Sprintf("Remaining: %d", pending)
-		switch {
-		case havePending && pendingBytes > 0 && totalRate > 0:
-			// Pending bytes are spread over the aggregate rate, and the running
-			// tasks add their own estimates on top (downloader.cpp:3603-3604).
-			// With no rate at all there is nothing to divide by, so the group
-			// is omitted rather than fed an infinity (Δ, review S-ETA3).
-			eta := totalETASecs + float64(pendingBytes)/totalRate
-			totalLine += fmt.Sprintf(" (%s) ETA: %s",
-				util.SizeString(uint64(pendingBytes), r.unit), util.EtaString(int64(eta)))
-		case !havePending && totalETASecs > 0:
-			// Without a snapshot the running tasks' ETAs are all there is.
-			totalLine += " ETA: " + util.EtaString(int64(totalETASecs))
-		}
-		lines = append(lines, totalLine)
-	}
-
-	for _, line := range lines {
-		fmt.Fprintln(r.out, trimToWidth(line, width))
-	}
+	r.sink.tick(r.buildVM(r.now()))
 }
 
-// trimToWidth shortens a line to the terminal width, the way
-// Util::shortenStringToTerminalWidth guards the display.
-func trimToWidth(line string, width int) string {
-	if width <= 0 || len(line) <= width {
-		return line
+// buildVM derives the view model. Callers hold the mutex.
+//
+// The ETA is the wall-clock estimate for the whole task set (review UI1 v3
+// §5): remaining = pendingBytes + Σ(active total − sampled bytes), divided by
+// the aggregate rate — with remaining==0 taking priority over the rate==0
+// omission, so a finished run shows 0s rather than nothing.
+func (r *renderer) buildVM(now time.Time) viewModel {
+	vm := viewModel{message: r.message}
+	var activeRemaining int64
+	for i, path := range r.order {
+		t := r.activeTasks[path]
+		if t == nil {
+			continue // finished: left the active model, numbering stays stable
+		}
+		var done, total int64
+		if v, ok := r.source.Bytes(path); ok {
+			done = v
+		}
+		if v, ok := r.source.Total(path); ok {
+			total = v
+		}
+		// Display-layer defensive clamps (review UI1 v3 §5): the sampled
+		// counter never leaves [0, total].
+		if done < 0 {
+			done = 0
+		}
+		if total > 0 && done > total {
+			done = total
+		}
+		t.window.addSample(now, done)
+		rate := t.rate(now, done)
+		vm.rate += rate
+		vm.active++
+		activeRemaining += max(total-done, 0)
+		pct := 0.0
+		if total > 0 {
+			pct = float64(done) / float64(total)
+		}
+		vm.tasks = append(vm.tasks, taskRow{
+			index: i + 1, path: path, pct: pct, done: done, total: total, rate: rate,
+		})
 	}
-	return strings.TrimSpace(line[:width])
+
+	// The pending side comes from the run's snapshot minus what this renderer
+	// has seen start; a subtract that would go negative is a state
+	// disagreement, not a number worth showing, so it clamps at zero
+	// (review S-ETA3). startedBytes was accumulated at TaskStart, so finished
+	// tasks leaving the active model do not corrupt it.
+	vm.queued = 0
+	pendingBytes := int64(0)
+	if tasks, bytes, ok := r.source.Queue(); ok {
+		vm.queued = max(tasks-len(r.order), 0)
+		pendingBytes = max(bytes-r.startedBytes, 0)
+	}
+	vm.remaining = pendingBytes + activeRemaining
+
+	switch {
+	case vm.remaining == 0:
+		vm.etaSecs, vm.etaValid = 0, true
+	case vm.rate == 0:
+		vm.etaValid = false
+	default:
+		vm.etaSecs, vm.etaValid = float64(vm.remaining)/vm.rate, true
+	}
+	return vm
+}
+
+// ttySink renders frames through the terminal coordinator. The coordinator is
+// the only terminal writer; this sink only composes frames.
+type ttySink struct {
+	coord  *terminalCoordinator
+	bar    func(cells int, fraction float64) string
+	width  func() int
+	height func() int
+	unit   uint32
+}
+
+func (s *ttySink) info(string)            {} // the frame's message row shows it
+func (s *ttySink) taskStart(int, string)  {} // the next frame reflects it
+func (s *ttySink) taskFinish(int, string) {}
+func (s *ttySink) diagnostic(text string) { s.coord.writeErr(text) }
+
+func (s *ttySink) tick(vm viewModel) {
+	lines := layoutFrame(vm, s.width(), s.height(), s.bar, s.unit)
+	s.coord.drawFrame(lines)
+}
+
+func (s *ttySink) finalize(reason stopReason, completed int) {
+	s.coord.finalize(finalLines(reason, completed))
+}
+
+// logSink is the non-TTY back end: append-only stable lines, no ANSI, no
+// cursor sequences, no progress frames (review UI1 v3 §6.C). Progress events
+// never become lines; only lifecycle and message events do.
+type logSink struct {
+	out    io.Writer
+	errOut io.Writer
+	unit   uint32
+	now    func() time.Time
+
+	lastSummary   time.Time
+	finishedSince int
+}
+
+func (s *logSink) info(text string)             { fmt.Fprintln(s.out, text) }
+func (s *logSink) diagnostic(text string)       { fmt.Fprintln(s.errOut, text) }
+func (s *logSink) taskStart(i int, path string) { fmt.Fprintf(s.out, "#%d %s\n", i, path) }
+func (s *logSink) taskFinish(i int, path string) {
+	fmt.Fprintf(s.out, "#%d %s: Finished\n", i, path)
+	s.finishedSince++
+}
+
+// tick emits the summary when the cadence asks for it: at least 10 seconds
+// since the last summary OR at least 10 finishes since it — whichever comes
+// first — and both thresholds reset on every emit (review UI1 v3 §6.C). The
+// 10-task count is a maximum increment, not a fixed rhythm.
+func (s *logSink) tick(vm viewModel) {
+	now := s.now()
+	if now.Sub(s.lastSummary) < 10*time.Second && s.finishedSince < 10 {
+		return
+	}
+	line := "Rate " + util.RateString(vm.rate, s.unit) +
+		" · " + util.SizeString(uint64(vm.remaining), s.unit) + " remaining"
+	if vm.etaValid {
+		line += " · ETA " + util.EtaString(int64(vm.etaSecs))
+	}
+	fmt.Fprintf(s.out, "%d active · %d queued · %s\n", vm.active, vm.queued, line)
+	s.lastSummary = now
+	s.finishedSince = 0
+}
+
+func (s *logSink) finalize(reason stopReason, completed int) {
+	for _, line := range finalLines(reason, completed) {
+		if reason == stopCompleted {
+			fmt.Fprintln(s.out, line)
+		} else {
+			fmt.Fprintln(s.errOut, line)
+		}
+	}
 }

@@ -1,71 +1,49 @@
 package cli
 
 import (
-	"bytes"
+	"context"
+	"errors"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/nekrozis/goggo/internal/transfer"
+	"github.com/nekrozis/goggo/internal/ui/progress"
 )
 
-// TestRendererAggregatesAndPaints locks the D75/D79 renderer semantics: task
-// starts register, progress updates fold into the view, finishes retire the
-// line, messages print immediately, and a paint produces the frame the C++
-// loop would — without the redraw loop running at all.
-func TestRendererAggregatesAndPaints(t *testing.T) {
-	var out bytes.Buffer
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 120 }, nil, 2)
-	r.now = func() time.Time { return time.Unix(1_000_000, 0) }
-
-	// The start order is deliberately not alphabetical: the #i numbering
-	// follows the TaskStart arrival order (review D75), not a sorted view.
-	r.OnEvent(transfer.Event{Path: "/b.bin", Kind: transfer.EventTaskStart})
-	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
-	r.OnEvent(transfer.Event{Path: "/a.bin", Text: "some message", Kind: transfer.EventMessageInfo})
-	r.OnEvent(transfer.Event{Path: "/a.bin", Current: 50, Total: 100, Kind: transfer.EventProgress})
-	r.OnEvent(transfer.Event{Path: "/b.bin", Current: 10, Total: 100, Kind: transfer.EventProgress})
-
-	// The message printed immediately; no progress frame yet.
-	if !strings.Contains(out.String(), "some message\n") {
-		t.Errorf("output = %q, want the message before any paint", out.String())
-	}
-
-	r.paint()
-	frame := out.String()
-	for _, want := range []string{"#0 /b.bin", "#1 /a.bin", "50.00 B/100.00 B", "Remaining: 2"} {
-		if !strings.Contains(frame, want) {
-			t.Errorf("frame missing %q: %q", want, frame)
-		}
-	}
-
-	// Finishing one task retires its line and drops the remaining count.
-	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskFinish})
-	out.Reset()
-	r.paint()
-	frame = out.String()
-	if !strings.Contains(frame, "#1: Finished") || !strings.Contains(frame, "Remaining: 1") {
-		t.Errorf("frame = %q, want the finished line and the lower count", frame)
-	}
-
-	// When every task has finished, no total line prints.
-	r.OnEvent(transfer.Event{Path: "/b.bin", Kind: transfer.EventTaskFinish})
-	out.Reset()
-	r.paint()
-	if strings.Contains(out.String(), "Remaining:") {
-		t.Errorf("frame = %q, want no remaining line on a fully finished run", out.String())
-	}
+// fakeSink records everything a renderer hands over, so the view-model tests
+// can assert on the derived state instead of scraping formatted strings.
+type fakeSink struct {
+	frames    [][]string
+	infos     []string
+	diags     []string
+	starts    []int
+	finishes  []int
+	ticks     []viewModel
+	reasons   []stopReason
+	completed []int
 }
+
+func (s *fakeSink) info(text string)           { s.infos = append(s.infos, text) }
+func (s *fakeSink) diagnostic(text string)     { s.diags = append(s.diags, text) }
+func (s *fakeSink) taskStart(i int, _ string)  { s.starts = append(s.starts, i) }
+func (s *fakeSink) taskFinish(i int, _ string) { s.finishes = append(s.finishes, i) }
+func (s *fakeSink) tick(vm viewModel)          { s.ticks = append(s.ticks, vm) }
+func (s *fakeSink) finalize(r stopReason, c int) {
+	s.reasons = append(s.reasons, r)
+	s.completed = append(s.completed, c)
+}
+
+var _ sink = (*fakeSink)(nil)
 
 // fakeProgress is a progressSource a test drives by hand: the renderer polls
 // it, exactly as it polls the run's transfer.Progress.
 type fakeProgress struct {
-	bytes map[string]int64
-	total map[string]int64
-
-	queueTasks     int
-	queueBytes     int64
-	queuePublished bool
+	bytes  map[string]int64
+	total  map[string]int64
+	tasks  int
+	qbytes int64
 }
 
 func newFakeProgress() *fakeProgress {
@@ -77,166 +55,370 @@ func (f *fakeProgress) set(task string, value, total int64) {
 	f.total[task] = total
 }
 
-// setQueue publishes the run-level snapshot, the way transfer.Run does.
-func (f *fakeProgress) setQueue(tasks int, bytes int64) {
-	f.queueTasks, f.queueBytes, f.queuePublished = tasks, bytes, true
+func (f *fakeProgress) setQueue(tasks int, bytes int64) { f.tasks, f.qbytes = tasks, bytes }
+func (f *fakeProgress) Queue() (int, int64, bool)       { return f.tasks, f.qbytes, true }
+func (f *fakeProgress) Bytes(task string) (int64, bool) { v, ok := f.bytes[task]; return v, ok }
+func (f *fakeProgress) Total(task string) (int64, bool) { v, ok := f.total[task]; return v, ok }
+
+var _ progressSource = (*fakeProgress)(nil)
+
+// newTestRenderer wires a renderer over a fake sink with a swappable clock.
+// The interval is an hour, so the goroutine ticker never fires inside a test:
+// ticks happen when the test calls r.tick().
+func newTestRenderer(src progressSource, now *time.Time) (*renderer, *fakeSink) {
+	s := &fakeSink{}
+	r := newRenderer(s, progress.NewBar(false, false), time.Hour, src)
+	r.now = func() time.Time { return *now }
+	return r, s
 }
 
-func (f *fakeProgress) Queue() (int, int64, bool) {
-	if !f.queuePublished {
-		return 0, 0, false
+// TestViewModelReadsProgressOnly locks the single numeric authority (review
+// UI1 v3 §6.A): the view model's done/total come from Progress.Bytes/Total,
+// and a progress event's Current is never consumed — a lying event must not
+// move the display.
+func TestViewModelReadsProgressOnly(t *testing.T) {
+	src := newFakeProgress()
+	src.set("/a.bin", 600, 1000)
+	now := time.Unix(1_000_000, 0)
+	r, s := newTestRenderer(src, &now)
+
+	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
+	// The event claims 100 bytes; Progress says 600. Progress wins.
+	r.OnEvent(transfer.Event{Path: "/a.bin", Current: 100, Total: 1000, Kind: transfer.EventProgress})
+
+	vm := r.buildVM(now)
+	if len(vm.tasks) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(vm.tasks))
 	}
-	return f.queueTasks, f.queueBytes, true
+	if vm.tasks[0].done != 600 || vm.tasks[0].total != 1000 {
+		t.Errorf("done/total = %d/%d, want 600/1000 from Progress", vm.tasks[0].done, vm.tasks[0].total)
+	}
+	if vm.active != 1 {
+		t.Errorf("active = %d, want 1", vm.active)
+	}
+	_ = s
 }
 
-func (f *fakeProgress) Bytes(task string) (int64, bool) {
-	v, ok := f.bytes[task]
-	return v, ok
+// TestViewModelClamps locks the display-layer defensive clamps (review UI1 v3
+// §5): a negative sample reads as zero, a sample past the total reads as the
+// total, and a pending side that would go negative clamps at zero.
+func TestViewModelClamps(t *testing.T) {
+	src := newFakeProgress()
+	src.set("/neg.bin", -5, 100)
+	src.set("/past.bin", 150, 100)
+	now := time.Unix(1_000_000, 0)
+	r, _ := newTestRenderer(src, &now)
+	r.OnEvent(transfer.Event{Path: "/neg.bin", Kind: transfer.EventTaskStart})
+	r.OnEvent(transfer.Event{Path: "/past.bin", Kind: transfer.EventTaskStart})
+
+	vm := r.buildVM(now)
+	if vm.tasks[0].done != 0 {
+		t.Errorf("negative sample = %d, want 0", vm.tasks[0].done)
+	}
+	if vm.tasks[1].done != 100 {
+		t.Errorf("overshooting sample = %d, want the total 100", vm.tasks[1].done)
+	}
+
+	// The snapshot lies low: the pending side clamps at zero instead of
+	// feeding a negative into the remaining bytes.
+	src.setQueue(1, 50)
+	vm = r.buildVM(now)
+	if vm.queued != 0 || vm.remaining != 100 {
+		t.Errorf("queued/remaining = %d/%d, want 0/100 (startedBytes 200 > snapshot 50)", vm.queued, vm.remaining)
+	}
 }
 
-func (f *fakeProgress) Total(task string) (int64, bool) {
-	v, ok := f.total[task]
-	return v, ok
-}
-
-// TestRendererSamplesFromSource locks the S-ETA2 wiring: the repaint loop polls
-// the source for the sample and the total, so a task whose first chunk is still
-// arriving already has a rate and an ETA. The displayed bytes keep coming from
-// the progress events, which is the split the review approved.
-func TestRendererSamplesFromSource(t *testing.T) {
-	var out bytes.Buffer
-	source := newFakeProgress()
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, source, 2)
-	base := time.Unix(1_000_000, 0)
-
-	r.now = func() time.Time { return base }
-	r.Start()
+// TestETAPriority locks the boundary order (review UI1 v3 §5, constraint 3):
+// remaining==0 wins over rate==0, so a finished run shows 0s rather than
+// losing the ETA to the zero-rate omission.
+func TestETAPriority(t *testing.T) {
+	src := newFakeProgress()
+	src.set("/a.bin", 1000, 1000)
+	src.setQueue(1, 1000)
+	now := time.Unix(1_000_000, 0)
+	r, _ := newTestRenderer(src, &now)
 	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
 
-	// No progress event at all: only the sampler moves. Two ticks inside the
-	// window give it a slope, and the total the ETA needs comes from the same
-	// surface — the events carry a total only once a chunk has landed.
-	r.now = func() time.Time { return base.Add(1 * time.Second) }
-	source.set("/a.bin", 100, 1000)
-	r.paint()
-	r.now = func() time.Time { return base.Add(2 * time.Second) }
-	source.set("/a.bin", 200, 1000)
-	out.Reset()
-	r.paint()
-	frame := out.String()
-	r.Stop()
-
-	if !strings.Contains(frame, "0.10KiB/s ETA: 10s") {
-		t.Errorf("frame = %q, want the sampled rate and its 10s ETA", frame)
+	// Everything done, no rate at all: remaining==0 ⇒ ETA 0, valid.
+	vm := r.buildVM(now)
+	if vm.remaining != 0 || !vm.etaValid || vm.etaSecs != 0 {
+		t.Errorf("remaining/eta = %d/%v/%v, want 0/valid/0", vm.remaining, vm.etaValid, vm.etaSecs)
 	}
-	// The display still follows the events: none has arrived, so the bytes
-	// and the percentage show zero (review S-ETA2).
-	if !strings.Contains(frame, "0.00 B/1000.00 B") || !strings.Contains(frame, "  0% ") {
-		t.Errorf("frame = %q, want event-driven displayed bytes", frame)
+
+	// Something left but no rate anywhere: the ETA group is omitted.
+	src.set("/b.bin", 0, 500)
+	src.setQueue(2, 1500)
+	r.OnEvent(transfer.Event{Path: "/b.bin", Kind: transfer.EventTaskStart})
+	vm = r.buildVM(now)
+	if vm.remaining != 500 {
+		t.Fatalf("remaining = %d, want 500", vm.remaining)
+	}
+	if vm.etaValid {
+		t.Errorf("eta = %v valid at rate 0, want omitted", vm.etaSecs)
 	}
 }
 
-// TestRendererQueueRemainingAndTotalETA locks the S-ETA3 total line: the
-// pending side is the run's queue snapshot minus the tasks that have started,
-// its size is the pending bytes rather than the active remainder, and the rate
-// prefix follows the configured thread count.
-func TestRendererQueueRemainingAndTotalETA(t *testing.T) {
-	var out bytes.Buffer
-	source := newFakeProgress()
-	source.setQueue(4, 4000)
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, source, 4)
-	base := time.Unix(1_000_000, 0)
+// TestTaskFinishLeavesActiveModel locks the lifecycle split (review UI1 v3
+// §6.A): a finished task leaves the active model, the finished count grows,
+// the row numbering stays stable and the pending side keeps the finished
+// task's bytes because they were accumulated at TaskStart.
+func TestTaskFinishLeavesActiveModel(t *testing.T) {
+	src := newFakeProgress()
+	src.set("/a.bin", 1000, 1000)
+	src.set("/b.bin", 0, 500)
+	src.setQueue(3, 3000) // 3000 snapshot − 1500 started = 1500 pending
+	now := time.Unix(1_000_000, 0)
+	r, s := newTestRenderer(src, &now)
 
-	r.now = func() time.Time { return base }
-	r.Start()
 	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
 	r.OnEvent(transfer.Event{Path: "/b.bin", Kind: transfer.EventTaskStart})
-	source.set("/a.bin", 100, 1000)
-	source.set("/b.bin", 100, 1000)
-	r.now = func() time.Time { return base.Add(1 * time.Second) }
-	r.paint()
-	r.now = func() time.Time { return base.Add(2 * time.Second) }
-	source.set("/a.bin", 200, 1000)
-	source.set("/b.bin", 200, 1000)
-	out.Reset()
-	r.paint()
-	frame := out.String()
-	r.Stop()
+	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskFinish})
 
-	// Two of the four tasks started (2000 of the 4000 queued bytes), each
-	// running at 100 B/s: 10s to finish the 2000 pending bytes at the 200 B/s
-	// aggregate rate, plus 10s of each running task's own ETA.
-	if !strings.Contains(frame, "Total: 0.20KiB/s | Remaining: 2 (1.95 KiB) ETA: 30s") {
-		t.Errorf("frame = %q, want the queue-derived total line", frame)
+	vm := r.buildVM(now)
+	if vm.active != 1 {
+		t.Errorf("active = %d, want 1 after the finish", vm.active)
+	}
+	if r.finishedCount != 1 {
+		t.Errorf("finishedCount = %d, want 1", r.finishedCount)
+	}
+	// /b is still row #2 — the numbering does not shift.
+	if len(vm.tasks) != 1 || vm.tasks[0].index != 2 || vm.tasks[0].path != "/b.bin" {
+		t.Errorf("tasks = %+v, want only /b.bin at index 2", vm.tasks)
+	}
+	// pendingBytes = 3000 − (1000+500) = 1500; activeRemaining = 500.
+	if vm.remaining != 2000 {
+		t.Errorf("remaining = %d, want 2000 (1500 pending + 500 active)", vm.remaining)
+	}
+	if len(s.finishes) != 1 || s.finishes[0] != 1 {
+		t.Errorf("finish indices = %v, want [1]", s.finishes)
 	}
 }
 
-// TestRendererTotalPrefixFollowsThreads locks Δ-ETA1-3: the rate prefix on the
-// total line follows the configured thread count, the way upstream keys it on
-// iThreads, not on how many tasks this renderer happens to have seen.
-func TestRendererTotalPrefixFollowsThreads(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		threads uint32
-		want    bool
-	}{
-		{name: "single thread", threads: 1, want: false},
-		{name: "several threads", threads: 4, want: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var out bytes.Buffer
-			r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, nil, tc.threads)
-			r.now = func() time.Time { return time.Unix(1_000_000, 0) }
-			r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
-			r.OnEvent(transfer.Event{Path: "/b.bin", Kind: transfer.EventTaskStart})
-			r.paint()
-			frame := out.String()
-
-			if got := strings.Contains(frame, "Total: "); got != tc.want {
-				t.Errorf("frame = %q, want the Total prefix to be %v", frame, tc.want)
-			}
-			if !strings.Contains(frame, "Remaining: 2") {
-				t.Errorf("frame = %q, want the remaining count", frame)
-			}
-		})
-	}
-}
-
-// TestRendererPendingUnderflowClamps locks the review's underflow rule: a queue
-// snapshot smaller than what the started tasks carry is a state disagreement,
-// so the pending numbers clamp at zero instead of feeding a wrapped value into
-// the display (review S-ETA3).
-func TestRendererPendingUnderflowClamps(t *testing.T) {
-	var out bytes.Buffer
-	source := newFakeProgress()
-	source.setQueue(1, 100) // less than the two started tasks already carry
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, source, 4)
+// TestPerTaskRatesRemain locks the migrated S-ETA1 semantics: each task's rate
+// comes from its own window, and the aggregate is the sum of the running
+// tasks' rates.
+func TestPerTaskRatesRemain(t *testing.T) {
+	src := newFakeProgress()
+	src.set("/slow.bin", 100, 2000)
+	src.set("/fast.bin", 200, 1000)
 	base := time.Unix(1_000_000, 0)
+	now := base
+	r, _ := newTestRenderer(src, &now)
+	r.OnEvent(transfer.Event{Path: "/slow.bin", Kind: transfer.EventTaskStart})
+	r.OnEvent(transfer.Event{Path: "/fast.bin", Kind: transfer.EventTaskStart})
 
-	r.now = func() time.Time { return base }
-	r.Start()
-	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
-	r.OnEvent(transfer.Event{Path: "/b.bin", Kind: transfer.EventTaskStart})
-	source.set("/a.bin", 100, 1000)
-	source.set("/b.bin", 100, 1000)
-	r.now = func() time.Time { return base.Add(1 * time.Second) }
-	r.paint()
-	out.Reset()
-	r.paint()
-	frame := out.String()
-	r.Stop()
+	now = base.Add(1 * time.Second)
+	src.set("/slow.bin", 200, 2000)
+	src.set("/fast.bin", 400, 1000)
+	r.buildVM(now) // the 1s repaint samples the window at that instant
+	now = base.Add(2 * time.Second)
+	src.set("/slow.bin", 300, 2000)
+	src.set("/fast.bin", 600, 1000)
 
-	if !strings.Contains(frame, "Remaining: 0") {
-		t.Errorf("frame = %q, want the clamped remaining count", frame)
+	vm := r.buildVM(now)
+	if got := vm.tasks[0].rate; got != 100 {
+		t.Errorf("slow rate = %v, want 100 B/s", got)
 	}
-	if strings.Contains(frame, "(") {
-		t.Errorf("frame = %q, want no pending size group", frame)
+	if got := vm.tasks[1].rate; got != 200 {
+		t.Errorf("fast rate = %v, want 200 B/s", got)
+	}
+	if got := vm.rate; got != 300 {
+		t.Errorf("aggregate rate = %v, want 300 B/s", got)
+	}
+}
+
+// TestTaskRateFallsBackToAverage locks the migrated S-ETA1 delta: with fewer
+// than two live samples the task reports its session average, and the average
+// survives a stalled window.
+func TestTaskRateFallsBackToAverage(t *testing.T) {
+	src := newFakeProgress()
+	src.set("/a.bin", 100, 300)
+	base := time.Unix(1_000_000, 0)
+	now := base
+	r, _ := newTestRenderer(src, &now)
+	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
+
+	// Ten seconds in, one sample only: 100 B over 10 s is 10 B/s.
+	now = base.Add(10 * time.Second)
+	src.set("/a.bin", 100, 300)
+	vm := r.buildVM(now)
+	if got := vm.tasks[0].rate; got != 10 {
+		t.Errorf("rate = %v, want the 10 B/s session average", got)
+	}
+
+	// Sixty seconds with no new sample: the window aged out, the average is
+	// still there (100 B over 60 s).
+	now = base.Add(60 * time.Second)
+	vm = r.buildVM(now)
+	if got := vm.tasks[0].rate; got <= 0 {
+		t.Errorf("rate after the window aged out = %v, want the task average", got)
+	}
+}
+
+// TestStopFinalizesOnce locks the Stop lifecycle (review UI1 v3 §6.E): the
+// first Stop emits the terminal state exactly once and ends the repaint loop;
+// further Stops are no-ops.
+func TestStopFinalizesOnce(t *testing.T) {
+	src := newFakeProgress()
+	src.set("/a.bin", 0, 100)
+	now := time.Unix(1_000_000, 0)
+	r, s := newTestRenderer(src, &now)
+	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
+	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskFinish})
+
+	r.Stop(stopCompleted)
+	r.Stop(stopCompleted) // no-op
+
+	if len(s.reasons) != 1 || s.reasons[0] != stopCompleted || s.completed[0] != 1 {
+		t.Errorf("finalize calls = %v/%v, want one (completed, 1)", s.reasons, s.completed)
+	}
+	// The repaint loop is over: ticks after Stop change nothing.
+	before := len(s.ticks)
+	r.tick()
+	if len(s.ticks) != before {
+		t.Error("tick after Stop produced output")
+	}
+}
+
+// TestFinalLines locks the three terminal states (review UI1 v3 §6.E): only
+// the completed state carries the completion count — a canceled run's active
+// tasks were interrupted, not finished.
+func TestFinalLines(t *testing.T) {
+	if got := finalLines(stopCompleted, 3); len(got) != 1 || !strings.Contains(got[0], "3") {
+		t.Errorf("completed = %q, want the count", got)
+	}
+	cancel := finalLines(stopCanceled, 3)
+	if len(cancel) != 1 || strings.Contains(cancel[0], "3") || !strings.Contains(cancel[0], "resume") {
+		t.Errorf("canceled = %q, want the resume guidance without a count", cancel)
+	}
+	if got := finalLines(stopFailed, 3); len(got) != 1 {
+		t.Errorf("failed = %q, want one state line", got)
+	}
+}
+
+// TestExitCodeAuthority locks the single reason→code mapping (review UI1 v3,
+// constraint 8): 0/130/1 and nothing else.
+func TestExitCodeAuthority(t *testing.T) {
+	cases := map[stopReason]int{
+		stopCompleted: 0,
+		stopCanceled:  130,
+		stopFailed:    1,
+	}
+	for reason, want := range cases {
+		if got := exitCodeFor(reason); got != want {
+			t.Errorf("exitCodeFor(%d) = %d, want %d", reason, got, want)
+		}
+	}
+}
+
+// TestClassifyInstallResult locks the outcome classification: cancellation is
+// recognized from the error chain or the live context, everything else that
+// failed is failed.
+func TestClassifyInstallResult(t *testing.T) {
+	if got := classifyInstallResult(nil, context.Background()); got != stopCompleted {
+		t.Errorf("nil error = %d, want completed", got)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := classifyInstallResult(ctx.Err(), ctx); got != stopCanceled {
+		t.Errorf("context.Canceled = %d, want canceled", got)
+	}
+	wrapped := fmtWrapped{context.Canceled}
+	if got := classifyInstallResult(wrapped, context.Background()); got != stopCanceled {
+		t.Errorf("wrapped cancel = %d, want canceled", got)
+	}
+	if got := classifyInstallResult(errors.New("boom"), context.Background()); got != stopFailed {
+		t.Errorf("plain error = %d, want failed", got)
+	}
+}
+
+type fmtWrapped struct{ err error }
+
+func (w fmtWrapped) Error() string { return "install: " + w.err.Error() }
+func (w fmtWrapped) Unwrap() error { return w.err }
+
+// TestLogSinkNeverEmitsProgress locks the non-TTY contract (review UI1 v3
+// §6.C): lifecycle and message events become lines, progress events never do.
+func TestLogSinkNeverEmitsProgress(t *testing.T) {
+	var out, errOut strings.Builder
+	s := &logSink{out: &out, errOut: &errOut, unit: 0, now: time.Now, lastSummary: time.Now()}
+	src := newFakeProgress()
+	src.set("/a.bin", 0, 100)
+	now := time.Unix(1_000_000, 0)
+	r := newRenderer(s, progress.NewBar(false, false), time.Hour, src)
+	r.now = func() time.Time { return now }
+
+	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
+	for i := 0; i < 50; i++ {
+		r.OnEvent(transfer.Event{Path: "/a.bin", Current: int64(i), Total: 100, Kind: transfer.EventProgress})
+	}
+	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskFinish})
+
+	if got := out.String(); strings.Count(got, "\n") != 2 {
+		t.Errorf("stdout = %q, want exactly the start and the finish lines", got)
+	}
+	if strings.Contains(out.String(), "\x1b") {
+		t.Error("the log sink emitted an ANSI escape")
+	}
+}
+
+// TestLogSinkCadence locks the summary rhythm (review UI1 v3 §6.C): 10s since
+// the last summary OR 10 finishes, whichever comes first, both reset on emit.
+func TestLogSinkCadence(t *testing.T) {
+	var out, errOut strings.Builder
+	base := time.Unix(1_000_000, 0)
+	now := base
+	s := &logSink{out: &out, errOut: &errOut, unit: 0, now: func() time.Time { return now }, lastSummary: base}
+
+	vm := viewModel{active: 1, remaining: 100, etaValid: true, etaSecs: 5}
+	// Nine finishes inside the window: below both thresholds.
+	for i := 0; i < 9; i++ {
+		s.taskFinish(i, "x")
+		s.tick(vm)
+	}
+	if strings.Contains(out.String(), "active ·") {
+		t.Fatalf("summary emitted below both thresholds: %q", out.String())
+	}
+	// The tenth finish crosses the increment threshold.
+	s.taskFinish(9, "x")
+	s.tick(vm)
+	if !strings.Contains(out.String(), "active ·") {
+		t.Errorf("no summary at the 10-finish threshold: %q", out.String())
+	}
+	// Both thresholds reset: nine more finishes stay quiet.
+	out.Reset()
+	for i := 0; i < 9; i++ {
+		s.taskFinish(i, "x")
+		s.tick(vm)
+	}
+	if strings.Contains(out.String(), "active ·") {
+		t.Errorf("thresholds did not reset: %q", out.String())
+	}
+	// The clock crossing 10s emits regardless of the finish count.
+	now = base.Add(11 * time.Second)
+	s.tick(vm)
+	if !strings.Contains(out.String(), "active ·") {
+		t.Errorf("no summary at the 10s threshold: %q", out.String())
+	}
+}
+
+// TestLogSinkFinalizeStreams locks the terminal-state streams: completed
+// lands on stdout, canceled and failed on stderr.
+func TestLogSinkFinalizeStreams(t *testing.T) {
+	var out, errOut strings.Builder
+	s := &logSink{out: &out, errOut: &errOut, unit: 0, now: time.Now, lastSummary: time.Now()}
+	s.finalize(stopCompleted, 2)
+	s.finalize(stopCanceled, 2)
+	if strings.Count(out.String(), "\n") != 1 || !strings.Contains(out.String(), "2") {
+		t.Errorf("stdout = %q, want only the completed count", out.String())
+	}
+	if strings.Count(errOut.String(), "\n") != 1 || !strings.Contains(errOut.String(), "resume") {
+		t.Errorf("stderr = %q, want only the interrupted line", errOut.String())
 	}
 }
 
 // TestRateWindowResetsOnADecrease locks the reviewed answer to a backwards
-// sample: drop the old window and start again from the new value, never a
-// negative slope and never a clamp.
+// sample: the window resets and restarts from the new value (review S-ETA2).
 func TestRateWindowResetsOnADecrease(t *testing.T) {
 	var w rateWindow
 	w.cap = 100
@@ -268,23 +450,6 @@ func TestRateWindowResetsOnADecrease(t *testing.T) {
 	}
 }
 
-// TestRendererFoldAndWindowBehavior is not needed here: the fold lives in
-// transfer; this file keeps the renderer's display semantics only. A task's
-// first frame has no elapsed time behind its average, so no rate and no ETA
-// print yet.
-func TestRendererFirstFrameHasNoETA(t *testing.T) {
-	var out bytes.Buffer
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 120 }, nil, 2)
-	r.now = func() time.Time { return time.Unix(1_000_000, 0) }
-
-	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
-	r.OnEvent(transfer.Event{Path: "/a.bin", Current: 5, Total: 100, Kind: transfer.EventProgress})
-	r.paint()
-	if strings.Contains(out.String(), "ETA:") {
-		t.Errorf("frame = %q, want no ETA before the window has a slope", out.String())
-	}
-}
-
 // TestRateWindowTrimsByTime locks the D76 window's two trim conditions: the
 // slope spans at most the last 10 seconds and at most 100 points.
 func TestRateWindowTrimsByTime(t *testing.T) {
@@ -312,83 +477,30 @@ func TestRateWindowTrimsByTime(t *testing.T) {
 	}
 }
 
-// TestRendererPerTaskRatesAndETAs locks the S-ETA1 semantics: each task's rate
-// comes from its own window, the ETA and the displayed @ rate on a line are
-// that same number, and the total rate is the sum of the running tasks' rates.
-func TestRendererPerTaskRatesAndETAs(t *testing.T) {
-	var out bytes.Buffer
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, nil, 2)
-	base := time.Unix(1_000_000, 0)
+// TestStopBeforeStartThenStart is the UI1-R1 lifecycle regression: Stop with
+// no Start finalizes synchronously, a later Start must be a no-op — the
+// finalize flag bars a ticker that would never see a stop signal again — and
+// a second Stop stays silent. No goroutine residue, no output, no block.
+func TestStopBeforeStartThenStart(t *testing.T) {
+	src := newFakeProgress()
+	src.set("/a.bin", 0, 100)
+	now := time.Unix(1_000_000, 0)
+	r, s := newTestRenderer(src, &now)
 
-	r.now = func() time.Time { return base }
+	before := runtime.NumGoroutine()
+	r.Stop(stopFailed)
 	r.Start()
-	// Both tasks start together, then feed their own samples: "/slow" moves
-	// 100 B/s and "/fast" 200 B/s, so the lines must not share a rate.
-	r.OnEvent(transfer.Event{Path: "/slow.bin", Kind: transfer.EventTaskStart})
-	r.OnEvent(transfer.Event{Path: "/fast.bin", Kind: transfer.EventTaskStart})
+	r.Stop(stopCanceled)
 
-	r.now = func() time.Time { return base.Add(1 * time.Second) }
-	r.OnEvent(transfer.Event{Path: "/slow.bin", Current: 100, Total: 2000, Kind: transfer.EventProgress})
-	r.OnEvent(transfer.Event{Path: "/fast.bin", Current: 200, Total: 1000, Kind: transfer.EventProgress})
-	r.now = func() time.Time { return base.Add(2 * time.Second) }
-	r.OnEvent(transfer.Event{Path: "/slow.bin", Current: 200, Total: 2000, Kind: transfer.EventProgress})
-	r.OnEvent(transfer.Event{Path: "/fast.bin", Current: 400, Total: 1000, Kind: transfer.EventProgress})
-
-	out.Reset()
-	r.paint()
-	frame := out.String()
-	r.Stop()
-
-	// 1800 B left at 100 B/s and 600 B left at 200 B/s: 18s and 3s, each
-	// derived from the task's own slope and printed next to that slope.
-	for _, want := range []string{
-		"0.10KiB/s ETA: 18s",
-		"0.20KiB/s ETA: 3s",
-		"Total: 0.29KiB/s | Remaining: 2 ETA: 21s",
-	} {
-		if !strings.Contains(frame, want) {
-			t.Errorf("frame missing %q: %q", want, frame)
-		}
+	if len(s.reasons) != 1 || s.reasons[0] != stopFailed {
+		t.Errorf("finalize calls = %v, want exactly the first Stop's failed", s.reasons)
 	}
-}
-
-// TestRendererTaskRateFallsBackToAverage locks the review-approved Δ: a task
-// whose window holds fewer than two live samples reports its session average
-// instead of zero, so the ETA survives chunk-grained progress (upstream's
-// rate_avg branch, downloader.cpp:3493-3496).
-func TestRendererTaskRateFallsBackToAverage(t *testing.T) {
-	var out bytes.Buffer
-	r := newRenderer(&out, false, false, 0, time.Hour, func() int { return 200 }, nil, 2)
-	base := time.Unix(1_000_000, 0)
-
-	r.now = func() time.Time { return base }
-	r.Start()
-	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
-
-	// Ten seconds in, one sample only: 100 B over 10s is 10 B/s, so 200 B
-	// left is a 20s ETA rather than no ETA at all.
-	r.now = func() time.Time { return base.Add(10 * time.Second) }
-	r.OnEvent(transfer.Event{Path: "/a.bin", Current: 100, Total: 300, Kind: transfer.EventProgress})
-
-	out.Reset()
-	r.paint()
-	frame := out.String()
-	if !strings.Contains(frame, "0.01KiB/s ETA: 20s") {
-		t.Errorf("frame = %q, want the average rate and its 20s ETA", frame)
+	// The frame is final: ticks refuse, nothing renders, nothing blocks.
+	r.tick()
+	if len(s.ticks) != 0 {
+		t.Errorf("ticks = %d, want none after finalize", len(s.ticks))
 	}
-
-	// Another 50 seconds with no sample at all: the window is empty, so the
-	// task still falls back to its average (now 100 B over 60s). The ETA
-	// survives — it must not vanish while the task is still running.
-	r.now = func() time.Time { return base.Add(60 * time.Second) }
-	if got := r.tasks["/a.bin"].rate(r.now()); got <= 0 {
-		t.Errorf("rate after the window aged out = %v, want the task average", got)
-	}
-	out.Reset()
-	r.paint()
-	frame = out.String()
-	r.Stop()
-	if !strings.Contains(frame, "ETA: ") {
-		t.Errorf("frame = %q, want an ETA from the task average", frame)
+	if after := runtime.NumGoroutine(); after > before {
+		t.Errorf("goroutines before/after = %d/%d, want no ticker residue", before, after)
 	}
 }

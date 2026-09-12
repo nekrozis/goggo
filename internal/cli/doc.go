@@ -15,12 +15,14 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/transfer"
+	"github.com/nekrozis/goggo/internal/ui/progress"
 	"golang.org/x/term"
 )
 
@@ -37,6 +39,7 @@ type console struct {
 	out      io.Writer
 	errOut   io.Writer
 	renderer *renderer
+	coord    *terminalCoordinator // non-nil only during an install's TTY lifetime
 }
 
 func newConsole(in io.Reader, out, errOut io.Writer) *console {
@@ -44,31 +47,75 @@ func newConsole(in io.Reader, out, errOut io.Writer) *console {
 }
 
 // Out and ErrOut expose the two streams; see core.Console for the stream policy.
-func (c *console) Out() io.Writer    { return c.out }
-func (c *console) ErrOut() io.Writer { return c.errOut }
+//
+// During an install's TTY lifetime both route through the terminal
+// coordinator, so every core write — plan notices, deletions, SFC extraction —
+// lands as a coordinator transaction and can never interleave with the live
+// frame (review UI1 v3 §6.C: the coordinator is the install lifetime's single
+// terminal-visible writer, and the console is the only seam core writes
+// through). Outside that lifetime — login prompts, list/builds output,
+// usage — the streams are handed out directly.
+func (c *console) Out() io.Writer {
+	if c.coord != nil {
+		return c.coord.writer(false)
+	}
+	return c.out
+}
 
-// attachRenderer wires the progress renderer over this console's streams. It
-// runs for every install: the C++ printProgress loop paints unconditionally,
-// and a non-terminal destination simply receives the frames on stdout.
-// source is the run's sampling surface, polled once per repaint (review
-// S-ETA2); nil leaves the progress events as the only feed.
-// The terminal width comes from the input descriptor — Util::getTerminalWidth
-// queries the output side, which this console does not keep a descriptor for
-// (Δ, review D75).
-func (c *console) attachRenderer(cfg config.Config, source progressSource) {
-	var width func() int
-	if fd, ok := c.terminalFd(); ok {
-		width = func() int {
+func (c *console) ErrOut() io.Writer {
+	if c.coord != nil {
+		return c.coord.writer(true)
+	}
+	return c.errOut
+}
+
+// attachInstallUI wires the install's rendering: the sink is chosen by the
+// OUTPUT side — stdout is a terminal ⇒ live TTY frames through a coordinator;
+// otherwise the append-only log sink (review UI1 v3 §6.C, D8). The width and
+// height come from the stdout descriptor, the side actually being drawn on —
+// not stdin, which stays reserved for the prompts (review UI1 v3 §6.B).
+func (c *console) attachInstallUI(cfg config.Config, source progressSource) {
+	bar := progress.NewBar(cfg.Unicode, cfg.Color)
+	interval := time.Duration(cfg.ProgressInterval) * time.Millisecond
+
+	if out, ok := c.out.(*os.File); ok && term.IsTerminal(int(out.Fd())) {
+		fd := int(out.Fd())
+		width := func() int {
 			w, _, err := term.GetSize(fd)
 			if err != nil || w <= 0 {
 				return 80
 			}
 			return w
 		}
+		height := func() int {
+			_, h, err := term.GetSize(fd)
+			if err != nil || h <= 0 {
+				return 24
+			}
+			return h
+		}
+		c.coord = newTerminalCoordinator(c.out, c.errOut)
+		c.renderer = newRenderer(&ttySink{
+			coord:  c.coord,
+			bar:    bar.Create,
+			width:  width,
+			height: height,
+			unit:   cfg.UnitFormat,
+		}, bar, interval, source)
+		return
 	}
-	c.renderer = newRenderer(c.out, cfg.Unicode, cfg.Color, cfg.UnitFormat,
-		time.Duration(cfg.ProgressInterval)*time.Millisecond, width, source, cfg.Threads)
+	c.renderer = newRenderer(&logSink{
+		out:         c.out,
+		errOut:      c.errOut,
+		unit:        cfg.UnitFormat,
+		now:         time.Now,
+		lastSummary: time.Now(),
+	}, bar, interval, source)
 }
+
+// endInstallScope tears the coordinator routing down: the frame is finalized
+// by renderer.Stop first, so afterwards both streams are plain again.
+func (c *console) endInstallScope() { c.coord = nil }
 
 // OnEvent hands the transfer event stream to the renderer. The method exists
 // so core's optional-ability assertion finds the console capable (review

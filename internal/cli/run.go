@@ -2,8 +2,11 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/core"
@@ -191,23 +194,77 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	// --galaxy-install (main.cpp:886). The renderer paints the progress the
-	// way printProgress does; failures take the same error path as every other
-	// command rather than growing an exit code of their own (review D65a).
+	// --galaxy-install (main.cpp:886). The lifecycle has one owner and one
+	// order (review UI1 v3 §6.E): signal context → renderer start → the
+	// install with Stop deferred → signal restore. Stop covers every exit
+	// path — error, cancellation and panic (its reason is whatever the result
+	// variable holds when the defer runs) — but never swallows: a panic
+	// propagates after the cleanup, as Go would.
 	if inv.GalaxyInstall != "" {
 		req := core.NewInstallRequest(inv.Config, installProduct, installBuild)
-		ui.attachRenderer(inv.Config, progress)
-		ui.renderer.Start()
-		err := d.Install(ctx, req)
-		ui.renderer.Stop()
-		if err != nil {
-			fmt.Fprintf(stderr, "Error: %v\n", err)
-			return 1
-		}
-		return 0
+		return exitCodeFor(ui.runInstall(ctx, d, req, inv.Config, progress))
 	}
 
 	return 0
+}
+
+// runInstall drives one install operation and returns its result. The reason
+// is fixed BEFORE the deferred Stop reads it, so a panic or an early return
+// finalizes with the right state (review UI1 v3, constraint 6): the result
+// variable starts at failed, so an unwound panic finalizes as failed and then
+// propagates — Stop cleans up, nothing is swallowed.
+func (c *console) runInstall(ctx context.Context, d *core.Downloader, req core.InstallRequest, cfg config.Config, progress *transfer.Progress) stopReason {
+	ctx, stopSignal := signal.NotifyContext(ctx, os.Interrupt)
+	c.attachInstallUI(cfg, progress)
+
+	result := stopFailed
+	var installErr error
+	c.renderer.Start()
+	func() {
+		defer func() { c.renderer.Stop(result) }()
+		installErr = d.Install(ctx, req)
+		result = classifyInstallResult(installErr, ctx)
+	}()
+	// The rendering is finalized; only now does SIGINT regain its default
+	// behavior, so a second Ctrl+C during any remaining cleanup force-kills
+	// instead of being swallowed by the context (review UI1 v3, decision 4).
+	stopSignal()
+	c.endInstallScope()
+
+	// The failure detail goes to stderr after the frame is gone; cancellation
+	// already announced itself through the terminal state.
+	if installErr != nil && result == stopFailed {
+		fmt.Fprintf(c.errOut, "Error: %v\n", installErr)
+	}
+	return result
+}
+
+// classifyInstallResult maps an Install outcome onto the run's terminal
+// state. Cancellation is recognized from the error chain or the context —
+// both are the same "the run was interrupted" fact.
+func classifyInstallResult(err error, ctx context.Context) stopReason {
+	if err == nil {
+		return stopCompleted
+	}
+	if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+		return stopCanceled
+	}
+	return stopFailed
+}
+
+// exitCodeFor is the single authority for the reason→exit-code mapping
+// (review UI1 v3, constraint 8): completed→0, canceled→130, failed→1. No
+// other code path may derive an install exit code, so ctx.Err() can never
+// produce a second exit-1 route.
+func exitCodeFor(reason stopReason) int {
+	switch reason {
+	case stopCompleted:
+		return 0
+	case stopCanceled:
+		return 130
+	default:
+		return 1
+	}
 }
 
 // galaxyCommandArgument splits the "<product id or gamename>[/<build id or

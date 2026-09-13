@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nekrozis/goggo/internal/auth"
 	"github.com/nekrozis/goggo/internal/config"
@@ -895,5 +896,103 @@ func TestOpenWithInjectedTransportRunsTheFullLogin(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("%q was not written: %v", path, err)
 		}
+	}
+}
+
+// TestRetryWaitIsMilliseconds locks the conversion BUG-1 fixed. The CLI's
+// --wait counts MILLISECONDS (main.cpp:292, multiplied by 1000 before usleep at
+// main.cpp:516-517), so the website backoff must be built from milliseconds;
+// the earlier microsecond reading made every retry wait 1000x shorter than the
+// option asked for.
+func TestRetryWaitIsMilliseconds(t *testing.T) {
+	for _, tc := range []struct {
+		wait int
+		want time.Duration
+	}{
+		{0, 0},
+		{1, time.Millisecond},
+		{500, 500 * time.Millisecond},
+		{2000, 2 * time.Second},
+	} {
+		cfg := config.Config{}
+		cfg.Wait = tc.wait
+		if got := retryWait(cfg); got != tc.want {
+			t.Errorf("retryWait(--wait %d) = %v, want %v", tc.wait, got, tc.want)
+		}
+	}
+	cfg := config.Config{}
+	cfg.Wait = 500
+	if got := retryWait(cfg); got == 500*time.Microsecond {
+		t.Error("retryWait still reads --wait as microseconds")
+	}
+}
+
+// TestSessionRetryWaitReachesTheWire locks the wiring with real timing, not
+// just the conversion: the http client core builds (httpxCfg, the same call
+// OpenWith makes) must sleep the configured wait between website retries. The
+// account endpoints go through getResponse -> GetBytesWithRetry, so a server
+// that fails once and then answers makes one retry happen; with --wait 200 the
+// elapsed time is ~200ms, while the old microsecond reading elapsed ~0.
+func TestSessionRetryWaitReachesTheWire(t *testing.T) {
+	// The construction point itself: the policy core hands to httpx.
+	cfg := config.Config{}
+	cfg.Wait = 200
+	cfg.Retries = 3
+	built := httpxCfg(cfg, Dependencies{})
+	if built.RetryPolicy.Wait != 200*time.Millisecond {
+		t.Fatalf("httpxCfg policy wait = %v, want 200ms", built.RetryPolicy.Wait)
+	}
+	if built.RetryPolicy.MaxAttempts != 4 {
+		t.Errorf("httpxCfg attempts = %d, want min(3,retries)+1 = 4", built.RetryPolicy.MaxAttempts)
+	}
+
+	var mu sync.Mutex
+	hits := 0
+	wrote := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		first := !wrote
+		wrote = true
+		mu.Unlock()
+		if first {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, "{}")
+	}))
+	defer srv.Close()
+
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg2 := config.Config{}
+	cfg2.Wait = 200
+	cfg2.Retries = 3
+	hx, err := httpx.New(httpxCfg(cfg2, Dependencies{HTTPTransport: &gogHostTransport{target: target}}))
+	if err != nil {
+		t.Fatalf("httpx.New: %v", err)
+	}
+	web, err := webapi.New(hx, config.NewGalaxyConfig())
+	if err != nil {
+		t.Fatalf("webapi.New: %v", err)
+	}
+
+	start := time.Now()
+	if _, err := web.GameDetailsJSON(context.Background(), "1"); err != nil {
+		t.Fatalf("GameDetailsJSON: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	mu.Lock()
+	attempts := hits
+	mu.Unlock()
+	if attempts < 2 {
+		t.Fatalf("requests = %d, want the retry to have run", attempts)
+	}
+	if elapsed < 190*time.Millisecond {
+		t.Errorf("elapsed = %v, want at least the configured 200ms wait (a microsecond reading would elapse ~0)", elapsed)
 	}
 }

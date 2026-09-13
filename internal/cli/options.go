@@ -540,7 +540,7 @@ Options:
   --ignore-dlc-count [regex]  Ignore DLC count information (default: .*)
   --unit-format <IEC|SI>      Unit format (default: IEC)
   --retries <n>               Maximum number of retries (default: 3)
-  --wait <microseconds>       Time to wait between requests
+  --wait <milliseconds>       Time to wait between requests
   --threads <n>               Number of download threads (default: 4)
   --progress-interval <ms>    Interval for progress bar updates (default: 100)
   --galaxy-builds-sort <s>    Sorting order for Galaxy builds (date|score|none, default: score)

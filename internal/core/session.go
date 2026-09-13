@@ -98,15 +98,29 @@ func httpxCfg(cfg config.Config, deps Dependencies) httpx.Config {
 		InsecureSkipVerify: !cfg.Curl.VerifyPeer,
 		Timeout:            time.Duration(cfg.Curl.Timeout) * time.Second,
 		// The website retry rule (min(3, retries) additional attempts) stays a
-		// webapi concern; Wait keeps the C++ unit, microseconds — see the audit
-		// note on --wait.
-		RetryPolicy: webapi.RetryPolicyFor(cfg.Retries, time.Duration(cfg.Wait)*time.Microsecond),
+		// webapi concern; the wait between attempts comes from retryWait.
+		RetryPolicy: webapi.RetryPolicyFor(cfg.Retries, retryWait(cfg)),
 		// The transfer guard mirrors --lowspeed-timeout / --lowspeed-rate; the
 		// C++ field names cross over: LowSpeedTimeout is the duration in
 		// seconds, LowSpeedTimeoutRate the rate in bytes per second.
 		LowSpeedLimit: cfg.Curl.LowSpeedTimeoutRate,
 		LowSpeedTime:  time.Duration(cfg.Curl.LowSpeedTimeout) * time.Second,
 	}
+}
+
+// retryWait is the single place the website retry wait is built from the
+// configuration: the unit exposed by the CLI is milliseconds, and this is
+// where it becomes a time.Duration.
+//
+// The CLI's --wait is a count of MILLISECONDS (main.cpp:292 help text, and the
+// value is multiplied by 1000 once before every usleep — main.cpp:516-517 —
+// precisely to reach microseconds). This port keeps the option's raw value and
+// converts here, exactly as the transfer path does (install.go's Options.Wait).
+// The earlier microsecond reading came from looking at usleep alone and missing
+// the *1000; it made the website backoff 1000x shorter than the option asked
+// for (review CLI1/BUG-1).
+func retryWait(cfg config.Config) time.Duration {
+	return time.Duration(cfg.Wait) * time.Millisecond
 }
 
 // TokenPath is the Galaxy token store location (main.cpp:81). It is exported

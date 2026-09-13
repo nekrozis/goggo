@@ -14,6 +14,12 @@
 // that boundary matches its uncompressed md5. Anything else is replaced.
 // Correctness for the whole file is backstopped by the final Item.MD5 check on
 // the next reconcile; no full-prefix rehash is performed.
+//
+// ClassifyExistingFile is the same observation answering a different question:
+// not "what must an install do" but "what IS there" (OK/ND/MD5/FS), which is
+// what a read-only verification reports (review CLI1 §13③). It shares the size
+// and hash primitives with the decision path and returns a fact, never an
+// action.
 package reconcile
 
 import (
@@ -26,6 +32,58 @@ import (
 
 	"github.com/nekrozis/goggo/internal/model"
 )
+
+// FileStatus is the FACT a read-only observation finds about one destination:
+// not an action (that is Decision), just what is there. It exists because the
+// two questions are different — DecisionReplace covers both "the hash differs"
+// and "the size differs", while a verification has to report which one it saw
+// (review CLI1 §13③, S5).
+//
+// The four reported codes are the ones the upstream --status help defines. The
+// zero value is deliberately NOT StatusOK: a value that was never observed must
+// not read as a healthy file (the same rule the CLI's session class follows).
+type FileStatus uint8
+
+const (
+	// StatusUnset is what an unobserved file has. ClassifyExistingFile never
+	// returns it; it is the zero value so that a fact built without an
+	// observation cannot pass for OK.
+	StatusUnset FileStatus = iota
+
+	// StatusOK: the size and the whole-file hash both match the item.
+	StatusOK
+
+	// StatusND: the expected regular file is not there — upstream's
+	// "ND - File is not downloaded". A path that exists in another shape (a
+	// directory) takes this answer too, which is what upstream's
+	// is_regular_file test folds together (review S5).
+	StatusND
+
+	// StatusMD5: the size matches but the content hash does not — a different
+	// version of the same asset. Upstream: "MD5 - MD5 mismatch, different
+	// version".
+	StatusMD5
+
+	// StatusFS: the size does not match, in either direction — a download
+	// that did not finish. Upstream: "FS - File size mismatch, incomplete
+	// download".
+	StatusFS
+)
+
+// String is the code a report prints (the upstream vocabulary).
+func (s FileStatus) String() string {
+	switch s {
+	case StatusOK:
+		return "OK"
+	case StatusND:
+		return "ND"
+	case StatusMD5:
+		return "MD5"
+	case StatusFS:
+		return "FS"
+	}
+	return "UNSET"
+}
 
 // Decision is the authoritative action an install must take for one
 // destination, derived from the observed filesystem state.
@@ -153,6 +211,51 @@ func ReconcileExistingFile(item model.GalaxyDepotItem, path string) (Decision, i
 		return DecisionReplace, 0, nil
 	}
 	return DecisionReplace, 0, nil
+}
+
+// ClassifyExistingFile reports the observed fact about the destination against
+// the item, without modifying anything. It answers the question a verification
+// asks, which is not the question ReconcileExistingFile answers: the latter
+// decides what an install must DO (and folds "hash differs" and "size differs"
+// into DecisionReplace), this one reports WHAT IS THERE.
+//
+// The order of the checks gives the four codes their upstream meaning:
+//
+//	absent (or not a regular file) → StatusND
+//	size differs                   → StatusFS     (a size mismatch outranks a
+//	                                               hash mismatch: the compare
+//	                                               never reads the file)
+//	hash differs                   → StatusMD5
+//	otherwise                      → StatusOK
+//
+// A zero-size item needs no special case: it is OK when an empty file is there,
+// ND when the path is absent, and FS when something non-empty occupies it —
+// exactly the size comparison upstream's --status makes (review S5). An
+// observation failure (stat/open/read) comes back as a non-nil error and never
+// as a status: "the file could not be read" is not a fact about its content
+// (decisions D43).
+func ClassifyExistingFile(item model.GalaxyDepotItem, path string) (FileStatus, error) {
+	fi, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return StatusND, nil
+	}
+	if err != nil {
+		return StatusUnset, err
+	}
+	if !fi.Mode().IsRegular() {
+		return StatusND, nil
+	}
+	if fi.Size() != int64(item.TotalSize) {
+		return StatusFS, nil
+	}
+	got, err := fileMD5(path)
+	if err != nil {
+		return StatusUnset, err
+	}
+	if got != item.MD5 {
+		return StatusMD5, nil
+	}
+	return StatusOK, nil
 }
 
 // fileMD5 reports whether the file's whole content hashes to want. The size is

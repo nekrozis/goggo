@@ -45,6 +45,29 @@ type PlanResult struct {
 	// (revalidateSkipped) and fails if anything changed meanwhile
 	// (review RES1 v2 §2, RES1-R1).
 	Skipped []SkippedFile
+
+	// Expected is the set of destinations the target installation is expected
+	// to have once it is installed, in path order, and it is the ONLY file-set
+	// a read-only consumer may work from (review S5): a verification must not
+	// rebuild the set from Tasks and Skipped, or the two would drift.
+	//
+	// It differs from the transfer tasks in both directions: a skipped
+	// destination is in it without a task, and the small-files containers are
+	// NOT in it — they are unpacked into their members and deleted while the
+	// install runs (see ExtractSmallFilesContainers), so they are not part of
+	// the finished installation. Like the orphan check's ledger it describes
+	// which paths the installation owns (review RES1, decision D44), and it is
+	// independent of the container decision: whether a member arrives inside a
+	// container or on its own, the finished tree has the same files.
+	Expected []InstalledFile
+}
+
+// InstalledFile is one destination the finished installation is expected to
+// have: the depot item and where it lives. Size and hash are available through
+// Item.
+type InstalledFile struct {
+	Destination string
+	Item        model.GalaxyDepotItem
 }
 
 // SkippedFile is one destination the plan observed as already up to date.
@@ -61,6 +84,29 @@ func (r *PlanResult) addMessage(text string) {
 	}
 }
 
+// planMode says what a plan is built for.
+//
+// The two modes share everything that defines WHICH files the installation
+// owns — the product and build resolution, the depot expansion, the include
+// mask, the dependency handling, the blacklist filter, the small-files
+// container decision and the install root. They differ only in the parts that
+// exist for the install's own display and pre-flight, which a read-only
+// verification neither wants nor should pay for (review S5).
+type planMode uint8
+
+const (
+	// planForInstall is the plan an install runs: it also carries the
+	// previous build's diff, the summary block the install prints and the
+	// free-space gate.
+	planForInstall planMode = iota
+
+	// planForVerify is the plan a verification observes: the same file set
+	// and the same root, without the install-shaped display, without a second
+	// manifest fetch for the old build and without a free-space answer (a
+	// verification downloads nothing).
+	planForVerify
+)
+
 // BuildPlan resolves one install request into a download plan, without
 // downloading anything and without writing to the install directory: the
 // filesystem is only read (the small-files container probes and the
@@ -70,6 +116,12 @@ func (r *PlanResult) addMessage(text string) {
 // (downloader.cpp:4032-4253). The engine that would consume the plan is not
 // wired to Install yet, so nothing can reach the transfer layer from here.
 func (d *Downloader) BuildPlan(ctx context.Context, req InstallRequest) (PlanResult, error) {
+	return d.buildPlan(ctx, req, planForInstall)
+}
+
+// buildPlan is BuildPlan with the mode supplied; see planMode for what the two
+// modes share and what planForInstall adds.
+func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode planMode) (PlanResult, error) {
 	var res PlanResult
 
 	// Product resolution (main.cpp:886 -> galaxyInstallGame ->
@@ -232,53 +284,90 @@ func (d *Downloader) BuildPlan(ctx context.Context, req InstallRequest) (PlanRes
 	// (downloader.cpp:4134-4196). The comparison runs after the SFC decision,
 	// so a file that moved into the container counts as deleted — upstream as
 	// written (review D55).
+	//
+	// Only an install uses this: those paths are what it removes, and finding
+	// them costs a second manifest fetch plus a second depot expansion. A
+	// verification has no use for either (review S5). It stays a closure so the
+	// skipped work reads as one guarded block instead of a second code path.
+	previousBuildDeletes := func() ([]string, error) {
+		var deletes []string
+		infoPath := installPath + "/goggame-" + id + ".info"
+		if _, err := os.Stat(infoPath); err == nil {
+			oldBuildID, err := readInfoBuildID(infoPath)
+			if err != nil {
+				return nil, err
+			}
+			if oldBuildID != "" {
+				oldIndex, err := buildIndexFor(items, oldBuildID)
+				if err != nil {
+					return nil, err
+				}
+				// The current index must differ for there to be a diff at all; the
+				// same build is never compared against itself.
+				if oldIndex >= 0 && oldIndex != index {
+					oldLink, err := buildLink(items, oldIndex)
+					if err != nil {
+						return nil, err
+					}
+					oldHash := oldLink[strings.LastIndexByte(oldLink, '/')+1:]
+					oldManifest, err := d.galaxy.ManifestV2(ctx, oldHash, false)
+					if err != nil {
+						return nil, err
+					}
+					oldItems, err := d.resolveDepotItems(ctx, oldManifest, req)
+					if err != nil {
+						return nil, err
+					}
+					current := map[string]bool{}
+					for _, it := range planItems {
+						current[it.Path] = true
+					}
+					for _, old := range oldItems {
+						if current[old.Path] {
+							continue
+						}
+						// The C++ source prints before it tests for existence, so
+						// a path that is not on disk still gets its line (D57).
+						filepath := installPath + "/" + old.Path
+						deletes = append(deletes, filepath)
+						res.addMessage("Deleting " + filepath)
+					}
+				}
+			}
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		return deletes, nil
+	}
 	var deletes []string
-	infoPath := installPath + "/goggame-" + id + ".info"
-	if _, err := os.Stat(infoPath); err == nil {
-		oldBuildID, err := readInfoBuildID(infoPath)
-		if err != nil {
+	if mode == planForInstall {
+		if deletes, err = previousBuildDeletes(); err != nil {
 			return res, err
 		}
-		if oldBuildID != "" {
-			oldIndex, err := buildIndexFor(items, oldBuildID)
-			if err != nil {
-				return res, err
-			}
-			// The current index must differ for there to be a diff at all; the
-			// same build is never compared against itself.
-			if oldIndex >= 0 && oldIndex != index {
-				oldLink, err := buildLink(items, oldIndex)
-				if err != nil {
-					return res, err
-				}
-				oldHash := oldLink[strings.LastIndexByte(oldLink, '/')+1:]
-				oldManifest, err := d.galaxy.ManifestV2(ctx, oldHash, false)
-				if err != nil {
-					return res, err
-				}
-				oldItems, err := d.resolveDepotItems(ctx, oldManifest, req)
-				if err != nil {
-					return res, err
-				}
-				current := map[string]bool{}
-				for _, it := range planItems {
-					current[it.Path] = true
-				}
-				for _, old := range oldItems {
-					if current[old.Path] {
-						continue
-					}
-					// The C++ source prints before it tests for existence, so
-					// a path that is not on disk still gets its line (D57).
-					filepath := installPath + "/" + old.Path
-					deletes = append(deletes, filepath)
-					res.addMessage("Deleting " + filepath)
-				}
-			}
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return res, err
 	}
+
+	// The expected file set (review S5): what the finished installation must
+	// have, whatever route the bytes take. A small-files container is
+	// transport-only in every shape — it is unpacked into its members and then
+	// removed — so it never belongs to the set, while its members do: they come
+	// from the container side of the split when the container is used and from
+	// the ordinary side when it is not. Fixed order, by path, so the order a
+	// consumer reports in is part of the plan rather than a renderer's choice.
+	expected := make([]model.GalaxyDepotItem, 0, len(planItems)+len(sfcItems))
+	expected = append(expected, planItems...)
+	expected = append(expected, sfcItems...)
+	for _, it := range expected {
+		if it.IsSmallFilesContainer {
+			continue
+		}
+		res.Expected = append(res.Expected, InstalledFile{
+			Destination: installPath + "/" + it.Path,
+			Item:        it,
+		})
+	}
+	sort.Slice(res.Expected, func(i, j int) bool {
+		return res.Expected[i].Item.Path < res.Expected[j].Item.Path
+	})
 
 	// The queue summary (downloader.cpp:4198-4212): the verbose listing, then
 	// the title, the file count and the installed size. totalSize sums the
@@ -328,29 +417,35 @@ func (d *Downloader) BuildPlan(ctx context.Context, req InstallRequest) (PlanRes
 		totalSize += it.TotalSize
 		tasks = append(tasks, model.FileTask{Item: it, Destination: destination})
 	}
-	res.addMessage(gameTitle)
-	// The header carries the shared context once (review UI1-R2 §6.B): the
-	// task rows are installPath-relative, so the root belongs here, not on
-	// every line.
-	res.addMessage("Installing → " + installPath)
-	res.addMessage(fmt.Sprintf("Files: %d", len(tasks)))
-	if skipped > 0 {
-		res.addMessage(fmt.Sprintf("Already up to date: %d files", skipped))
-		if len(tasks) == 0 {
-			// The zero-transfer fast path as a final state (review UI1-R2,
-			// decision 2): nothing enters the live UI because transfer.Run
-			// has no tasks, and the lines say exactly that.
-			res.addMessage("Nothing to download.")
+	// The install-shaped summary block belongs to the install's display: it
+	// says what it is about to do and what it will fetch. A read-only consumer
+	// shows its own summary instead of printing "Installing →" (review S5).
+	if mode == planForInstall {
+		res.addMessage(gameTitle)
+		// The header carries the shared context once (review UI1-R2 §6.B): the
+		// task rows are installPath-relative, so the root belongs here, not on
+		// every line.
+		res.addMessage("Installing → " + installPath)
+		res.addMessage(fmt.Sprintf("Files: %d", len(tasks)))
+		if skipped > 0 {
+			res.addMessage(fmt.Sprintf("Already up to date: %d files", skipped))
+			if len(tasks) == 0 {
+				// The zero-transfer fast path as a final state (review UI1-R2,
+				// decision 2): nothing enters the live UI because transfer.Run
+				// has no tasks, and the lines say exactly that.
+				res.addMessage("Nothing to download.")
+			}
 		}
+		res.addMessage("Total size installed: " + util.SizeString(totalSize, d.cfg.UnitFormat))
 	}
-	res.addMessage("Total size installed: " + util.SizeString(totalSize, d.cfg.UnitFormat))
 
 	// The free-space gate (downloader.cpp:4214-4233), when the option is on:
 	// the space of the nearest existing ancestor of the install path — the
 	// install directory itself may not exist yet — is compared against the
 	// uncompressed total. Failure is an error for the front end to report, not
-	// a process exit.
-	if d.cfg.DownloadConfig.FreeSpaceCheck {
+	// a process exit. A verification transfers nothing, so the answer is not
+	// its business (review S5).
+	if mode == planForInstall && d.cfg.DownloadConfig.FreeSpaceCheck {
 		if volume, ok := nearestExistingDir(installPath); ok {
 			available, err := freeSpaceAvailable(volume)
 			if err != nil {

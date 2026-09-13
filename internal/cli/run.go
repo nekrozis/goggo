@@ -187,14 +187,14 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome
 		inv.cfg.Login = true
 	}
 
-	// The commands whose capability arrives in a later step of CLI1 (S5/S6).
+	// The commands whose capability arrives in a later step of CLI1 (S6).
 	// They are registered so their names are stable and their help exists, but
 	// they must not pretend to have done something. Their session class is
 	// already declared on the tree, so replacing the stub with the real
 	// capability needs no new wiring here: it falls through to the one
 	// OpenWith below (review S4).
 	switch inv.cmd {
-	case cmdVerify, cmdOrphansCheck, cmdOrphansRemove:
+	case cmdOrphansCheck, cmdOrphansRemove:
 		return reportError(stderr, usagef("%s is not implemented yet", inv.cmd.path()))
 	}
 
@@ -268,6 +268,23 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome
 			return reportError(stderr, err)
 		}
 		return outcomeOK
+
+	case cmdVerify:
+		// A verification reads the same installation an install writes, so it
+		// resolves its target exactly like one (review §13⑤) — and then only
+		// observes: the plan is built in verify mode (no destructive work, no
+		// free-space answer) and every expected file is classified. The plan's
+		// own messages are rendered first, the way an install emits them as it
+		// goes; on a plan failure that is all there is to show (review S5).
+		req := core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build)
+		res, err := d.Verify(ctx, req)
+		for _, notice := range res.Notices {
+			renderNotice(stdout, stderr, notice)
+		}
+		if err != nil {
+			return reportError(stderr, err)
+		}
+		return renderVerify(stdout, stderr, res)
 
 	case cmdInstall:
 		// The lifecycle has one owner and one order (review UI1 v3 §6.E):

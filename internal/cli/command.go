@@ -275,6 +275,13 @@ var commandTree = []commandNode{
 		id:      cmdVerify,
 		session: sessionRequired,
 		options: joinOptions(installTargetOptions, verifyOptions),
+		// The report's vocabulary is the upstream status codes, so the topic has
+		// to define them; and a verification never repairs, which a reader has
+		// to know before relying on it (review S5).
+		notes: []string{
+			"Status codes: OK (matches), ND (not downloaded), MD5 (content differs),",
+			"FS (size differs). Nothing is repaired: a mismatch is reported, never fixed.",
+		},
 	},
 	{
 		name:    "orphans",

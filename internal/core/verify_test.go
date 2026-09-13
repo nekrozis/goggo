@@ -306,7 +306,7 @@ func TestVerifyFileSetIgnoresTheContainerRoute(t *testing.T) {
 
 	// The container route: nothing of the member is on disk, so the container
 	// downloads and the member is extracted from it.
-	insideContainer := expectedPaths(t, planForVerify)
+	insideContainer := expectedPaths(t, planForReadOnly)
 	if len(insideContainer) != 3 {
 		t.Fatalf("expected = %v, want the three files", insideContainer)
 	}
@@ -317,7 +317,7 @@ func TestVerifyFileSetIgnoresTheContainerRoute(t *testing.T) {
 	// The ordinary route: a member already on disk drops the container, and the
 	// same three files are expected.
 	f.place(t, "game/small1.txt", verifyMember)
-	if got := expectedPaths(t, planForVerify); strings.Join(got, ",") != strings.Join(insideContainer, ",") {
+	if got := expectedPaths(t, planForReadOnly); strings.Join(got, ",") != strings.Join(insideContainer, ",") {
 		t.Errorf("expected after the container was dropped = %v, want %v", got, insideContainer)
 	}
 

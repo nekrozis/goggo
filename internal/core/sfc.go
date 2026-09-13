@@ -59,7 +59,9 @@ func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanRe
 			}
 			extracted++
 		}
-		fmt.Fprintln(d.ui.Out(), fmt.Sprintf("Extracting small files container %s (%d files)", container, extracted))
+		// One write with the newline inside the format string: the same line,
+		// without the intermediate formatted string (staticcheck S1038).
+		fmt.Fprintf(d.ui.Out(), "Extracting small files container %s (%d files)\n", container, extracted)
 
 		fmt.Fprintln(d.ui.Out(), "Deleting small files container "+container)
 		if err := os.Remove(container); err != nil {

@@ -11,50 +11,96 @@ import (
 	"github.com/nekrozis/goggo/internal/blacklist"
 )
 
-// CheckOrphanedFiles reports — and, when deletion is configured, removes —
-// files under the install root that no depot item accounts for
-// (downloader.cpp:4312-4343). It runs inline at the tail of an install, after
-// the small-files containers have been unpacked; the members count as installed
-// files, which is why they are added back to the set (downloader.cpp:4303-4306).
+// OrphansResult is what one orphan walk observed: the files under the install
+// root that no expected path accounts for, plus the diagnostics the walk and the
+// plan produced.
 //
-// The count always prints; the deletion happens only under --delete-orphans,
-// the way bDeleteOrphans gates it upstream. The walk consults both filter
-// files, ignorelist first then blacklist, the way the C++ source does
-// (downloader.cpp:4326-4336).
+// Files is the whole contract of the walk (review S6): a caller lists it, shows
+// it, and — when the user authorizes it — hands exactly this value back for
+// deletion. Nothing re-derives the set afterwards, so what was shown is what is
+// removed.
+type OrphansResult struct {
+	// InstallPath is the root the walk covered and the base Relative uses.
+	InstallPath string
+
+	// Files are the orphaned paths in walk order, absolute.
+	Files []string
+
+	// Notices are the diagnostics: the plan's own lines (the verbose item
+	// listing, the blacklist report) followed by the walk's (the verbose lines
+	// for the paths the filter files excluded).
+	Notices []Notice
+}
+
+// Relative is the install-root-relative form of a path the walk produced; a path
+// outside the root keeps its absolute form (it cannot be made relative). It is
+// the one implementation of that rule, shared by the install tail and the front
+// end.
+func (r OrphansResult) Relative(path string) string { return orphanDisplayPath(r.InstallPath, path) }
+
+// CheckOrphans builds the read-only plan for one install request, walks the
+// installation and reports the files no expected path accounts for.
+//
+// The walk is the one the install tail has always run — every entry under the
+// install root, the ignorelist and then the blacklist consulted before the
+// ledger, directories never orphans, symlinks never followed, no special case
+// for the install metadata file. Only the ledger's SOURCE changed (review S6):
+// it is the plan's Expected set, the same one a verification reads, instead of a
+// set rebuilt from the tasks, the containers and the skipped destinations.
+//
+// A consequence is deliberate: a small-files container that outlived its
+// extraction is now reported as an orphan. It is not part of the finished
+// installation, so a leftover copy is exactly the kind of unexplained file this
+// command is for.
+func (d *Downloader) CheckOrphans(ctx context.Context, req InstallRequest) (OrphansResult, error) {
+	res, err := d.buildPlan(ctx, req, planForReadOnly)
+	out := OrphansResult{InstallPath: res.InstallPath, Notices: res.Messages}
+	if err != nil {
+		return out, err
+	}
+	files, notices, err := d.walkOrphans(res.InstallPath, res.Expected)
+	out.Files = files
+	out.Notices = append(out.Notices, notices...)
+	return out, err
+}
+
+// DeletionAttempt is one deletion of one orphaned file. Err is nil when the file
+// was removed; anything else is that file's own failure, reported while the rest
+// of the batch goes on — upstream reports a failed delete per file too
+// (downloader.cpp:4329-4332).
+type DeletionAttempt struct {
+	Path string
+	Err  error
+}
+
+// RemoveOrphans deletes exactly the files an OrphansResult lists, in order, and
+// reports the outcome of each attempt. It never re-derives the set: the contract
+// is "the caller showed this list and the user authorized it" (review S6).
+//
+// A cancelled context stops the loop; the attempts made so far come back with
+// the error, because a destructive operation has to be auditable even when it
+// was interrupted (review D33, D20).
+func (d *Downloader) RemoveOrphans(ctx context.Context, res OrphansResult) ([]DeletionAttempt, error) {
+	return d.deleteOrphans(ctx, res.Files)
+}
+
+// CheckOrphanedFiles reports — and, when the legacy configuration gate is on,
+// removes — the files under the install root that no expected path accounts for
+// (downloader.cpp:4312-4343). It runs inline at the tail of an install.
+//
+// Under this CLI the gate is unreachable: --delete-orphans is gone and the
+// destructive path is the `orphans remove` command. The field and the branch stay
+// because they mirror the upstream configuration, which S24's option table may
+// carry again (review S6, ruling 6).
 func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) error {
 	fmt.Fprintln(d.ui.Out(), "Checking for orphaned files")
 
-	installed := map[string]bool{}
-	for _, task := range res.Plan.Tasks {
-		installed[task.Item.Path] = true
-	}
-	for _, path := range planSFCMemberPaths(res.Plan) {
-		installed[path] = true
-	}
-	// Destinations the plan observed as already up to date are part of the
-	// target installation even though they produce no download task — they
-	// must not be reported as orphans (or deleted), because the installed set
-	// describes which paths are valid for the target installation, not which
-	// paths produced a download task (review RES1, decisions D44). The set is
-	// keyed by the item-relative path, the same form the walk compares.
-	for _, sf := range res.Skipped {
-		installed[sf.Item.Path] = true
-	}
-
-	il, err := blacklist.LoadBlacklist(d.cfg.IgnorelistFilePath)
+	files, notices, err := d.walkOrphans(res.InstallPath, res.Expected)
+	d.emitNotices(notices)
 	if err != nil {
 		return err
 	}
-	bl, err := blacklist.LoadBlacklist(d.cfg.BlacklistFilePath)
-	if err != nil {
-		return err
-	}
-
-	orphans, err := d.orphanedFiles(res, il, bl, installed)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(d.ui.Out(), "\t%d orphaned files\n", len(orphans))
+	fmt.Fprintf(d.ui.Out(), "\t%d orphaned files\n", len(files))
 
 	if !d.cfg.DownloadConfig.DeleteOrphans {
 		return nil
@@ -66,43 +112,53 @@ func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) err
 	// are relative to the install root; a failed delete stays its own
 	// diagnostic. The header only appears when there is something to delete:
 	// the count line above already said "0 orphaned files".
-	if len(orphans) > 0 {
-		fmt.Fprintf(d.ui.Out(), "Deleting %d orphaned files\n", len(orphans))
+	if len(files) > 0 {
+		fmt.Fprintf(d.ui.Out(), "Deleting %d orphaned files\n", len(files))
 	}
-	for _, path := range orphans {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err := os.Remove(path); err != nil {
-			fmt.Fprintln(d.ui.ErrOut(), "Failed to delete "+path)
+	attempts, err := d.deleteOrphans(ctx, files)
+	for _, attempt := range attempts {
+		if attempt.Err != nil {
+			fmt.Fprintln(d.ui.ErrOut(), "Failed to delete "+attempt.Path)
 			continue
 		}
-		fmt.Fprintf(d.ui.Out(), "  %s\n", orphanDisplayPath(res.InstallPath, path))
+		fmt.Fprintf(d.ui.Out(), "  %s\n", orphanDisplayPath(res.InstallPath, attempt.Path))
 	}
-	return nil
+	return err
 }
 
-// orphanDisplayPath is the install-root-relative form of a walk path; a path
-// outside the root keeps its absolute form (it cannot be made relative).
-func orphanDisplayPath(root, path string) string {
-	rel, err := filepath.Rel(root, path)
+// walkOrphans is the walk itself, and it takes exactly what it reads: the root
+// and the set of paths the installation owns. Nothing here can reach back into
+// the plan's tasks or containers, which is what keeps the ledger single (review
+// S6).
+//
+// The filter files are consulted with the same absolute-path matching the plan
+// builder uses, ignorelist first: a path they exclude is neither reported nor
+// deleted, and the verbose notice lands on the error stream.
+//
+// It takes no context on purpose: this step replaces the ledger and nothing
+// else, and an install's orphan walk has never been interruptible. Cancellation
+// stops the deletion loop below, which is where an interruption has something to
+// preserve (review S6).
+func (d *Downloader) walkOrphans(root string, expected []InstalledFile) ([]string, []Notice, error) {
+	installed := make(map[string]bool, len(expected))
+	for _, file := range expected {
+		installed[file.Item.Path] = true
+	}
+
+	il, err := blacklist.LoadBlacklist(d.cfg.IgnorelistFilePath)
 	if err != nil {
-		return path
+		return nil, nil, err
 	}
-	return filepath.ToSlash(rel)
-}
+	bl, err := blacklist.LoadBlacklist(d.cfg.BlacklistFilePath)
+	if err != nil {
+		return nil, nil, err
+	}
 
-// orphanedFiles walks the install root and collects the files whose full path
-// no depot item carries. Directories are never orphans, and both filter files
-// are consulted with the same absolute-path matching the plan builder uses —
-// ignorelist first, then blacklist, the way the C++ source orders them
-// (downloader.cpp:4326-4336). There is no special case for the install
-// metadata file: upstream has none either, so a goggame-*.info from a previous
-// installation counts as an orphan there as it does here.
-func (d *Downloader) orphanedFiles(res PlanResult, il, bl *blacklist.Blacklist, installed map[string]bool) ([]string, error) {
-	var orphans []string
-	root := res.InstallPath
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	var (
+		orphans []string
+		notices []Notice
+	)
+	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -111,13 +167,13 @@ func (d *Downloader) orphanedFiles(res PlanResult, il, bl *blacklist.Blacklist, 
 		}
 		if il.IsBlacklisted(path) {
 			if d.cfg.MsgLevel >= msgLevelVerbose {
-				fmt.Fprintln(d.ui.ErrOut(), "skipped ignorelisted file "+path)
+				notices = append(notices, Notice{Text: "skipped ignorelisted file " + path, Err: true})
 			}
 			return nil
 		}
 		if bl.IsBlacklisted(path) {
 			if d.cfg.MsgLevel >= msgLevelVerbose {
-				fmt.Fprintln(d.ui.ErrOut(), "skipped blacklisted file "+path)
+				notices = append(notices, Notice{Text: "skipped blacklisted file " + path, Err: true})
 			}
 			return nil
 		}
@@ -132,5 +188,33 @@ func (d *Downloader) orphanedFiles(res PlanResult, il, bl *blacklist.Blacklist, 
 		orphans = append(orphans, path)
 		return nil
 	})
-	return orphans, err
+	if err != nil {
+		return orphans, notices, err
+	}
+	return orphans, notices, nil
+}
+
+// deleteOrphans removes the files one by one, in the order given, collecting an
+// attempt per file instead of stopping at the first failure: a batch delete that
+// abandons the rest because one path was refused leaves the installation in a
+// state nobody chose.
+func (d *Downloader) deleteOrphans(ctx context.Context, files []string) ([]DeletionAttempt, error) {
+	attempts := make([]DeletionAttempt, 0, len(files))
+	for _, path := range files {
+		if ctx.Err() != nil {
+			return attempts, ctx.Err()
+		}
+		attempts = append(attempts, DeletionAttempt{Path: path, Err: os.Remove(path)})
+	}
+	return attempts, nil
+}
+
+// orphanDisplayPath is the install-root-relative form of a walk path; a path
+// outside the root keeps its absolute form (it cannot be made relative).
+func orphanDisplayPath(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return path
+	}
+	return filepath.ToSlash(rel)
 }

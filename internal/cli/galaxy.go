@@ -65,3 +65,13 @@ func renderNotice(stdout, stderr io.Writer, n core.Notice) {
 	}
 	fmt.Fprintln(stdout, n.Text)
 }
+
+// renderNotices writes a whole message list in order. The read-only commands
+// (verify, orphans) receive the plan's diagnostics as data and show them the way
+// an install streams them: the error notices on the error stream, everything else
+// on the output stream.
+func renderNotices(stdout, stderr io.Writer, notices []core.Notice) {
+	for _, notice := range notices {
+		renderNotice(stdout, stderr, notice)
+	}
+}

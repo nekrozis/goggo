@@ -21,6 +21,27 @@ const totpCodeLength = 6
 // website.cpp:519,524,614-617). stdout therefore carries program output only,
 // which is what makes `goggo --list games > file` usable.
 
+// confirm asks a yes/no question on the error stream and reads one line.
+//
+// Only "y"/"Y"/"yes" — trimmed, case-insensitive — is a yes. A destructive run
+// must not be authorized by a stray keystroke or an empty line, which is what the
+// [y/N] default in the question says, and an answer that cannot be read at all is
+// a no for the same reason: when the front end cannot tell what the user meant,
+// the safe reading is "do not delete" (review S6, ruling 4). That is also why this
+// returns no error: there is nothing to report that changes the outcome.
+func (c *console) confirm(question string) bool {
+	fmt.Fprint(c.errOut, question)
+	answer, err := c.readLine()
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return true
+	}
+	return false
+}
+
 // PromptEmail asks for the account e-mail on the injected streams.
 func (c *console) PromptEmail() (string, error) {
 	fmt.Fprint(c.errOut, "Email: ")

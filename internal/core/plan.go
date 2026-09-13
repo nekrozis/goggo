@@ -100,11 +100,13 @@ const (
 	// free-space gate.
 	planForInstall planMode = iota
 
-	// planForVerify is the plan a verification observes: the same file set
-	// and the same root, without the install-shaped display, without a second
-	// manifest fetch for the old build and without a free-space answer (a
-	// verification downloads nothing).
-	planForVerify
+	// planForReadOnly is the plan a read-only consumer observes: the same file
+	// set and the same root, without the install-shaped display, without a
+	// second manifest fetch for the old build and without a free-space answer
+	// (nothing is downloaded). A verification and an orphan walk both read it,
+	// which is why it is named for what it is rather than for one of them
+	// (review S5, S6).
+	planForReadOnly
 )
 
 // BuildPlan resolves one install request into a download plan, without

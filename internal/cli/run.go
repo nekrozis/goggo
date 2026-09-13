@@ -187,15 +187,18 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome
 		inv.cfg.Login = true
 	}
 
-	// The commands whose capability arrives in a later step of CLI1 (S6).
-	// They are registered so their names are stable and their help exists, but
-	// they must not pretend to have done something. Their session class is
-	// already declared on the tree, so replacing the stub with the real
-	// capability needs no new wiring here: it falls through to the one
-	// OpenWith below (review S4).
-	switch inv.cmd {
-	case cmdOrphansCheck, cmdOrphansRemove:
-		return reportError(stderr, usagef("%s is not implemented yet", inv.cmd.path()))
+	// The commands whose capability arrives in a later step of CLI1. They are
+	// registered so their names are stable and their help exists, but they must
+	// not pretend to have done something.
+	// (Nothing is stubbed any more: S6 wired the last two, orphans check and
+	// orphans remove.)
+	// The destructive commands must not run without a way to authorize them: a
+	// removal with no terminal to ask on and no --yes is a usage failure, and it
+	// is answered before any session or network work happens (review CLI1 §8,
+	// T12).
+	if inv.cmd == cmdOrphansRemove && !inv.yes && !ui.IsTerminal() {
+		return reportError(stderr, usagef(
+			"orphans remove needs --yes when the input is not a terminal"))
 	}
 
 	// The sampling surface belongs to the one command that polls it: an install
@@ -285,6 +288,12 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome
 			return reportError(stderr, err)
 		}
 		return renderVerify(stdout, stderr, res)
+
+	case cmdOrphansCheck:
+		return ui.runOrphansCheck(ctx, d, inv, stdout, stderr)
+
+	case cmdOrphansRemove:
+		return ui.runOrphansRemove(ctx, d, inv, stdout, stderr)
 
 	case cmdInstall:
 		// The lifecycle has one owner and one order (review UI1 v3 §6.E):

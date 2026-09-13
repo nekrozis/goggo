@@ -56,7 +56,7 @@ type VerifyResult struct {
 // hide the state of the rest, so it is reported as a fact with an error and the
 // walk continues.
 func (d *Downloader) Verify(ctx context.Context, req InstallRequest) (VerifyResult, error) {
-	res, err := d.buildPlan(ctx, req, planForVerify)
+	res, err := d.buildPlan(ctx, req, planForReadOnly)
 	out := VerifyResult{InstallPath: res.InstallPath, Notices: res.Messages}
 	if err != nil {
 		return out, err

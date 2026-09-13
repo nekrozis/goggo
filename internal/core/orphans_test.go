@@ -2,20 +2,25 @@ package core
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/model"
 )
 
-// orphansFixture lays out an install root: two installed files (they are the
-// plan's items), a small-files member, and one true orphan.
+// orphansFixture lays out an install root: three files the installation owns
+// (they are the plan's expected set), and one true orphan.
+//
+// The ledger is PlanResult.Expected, the same set a verification reads (review
+// S6), so the fixture states the installed paths directly instead of assembling
+// them from tasks, containers and skipped destinations.
 type orphansFixture struct {
 	root string
 	res  PlanResult
-	cfg  func() // mutates the downloader's config before the check runs
 }
 
 func newOrphansFixture(t *testing.T) *orphansFixture {
@@ -23,15 +28,13 @@ func newOrphansFixture(t *testing.T) *orphansFixture {
 	f := &orphansFixture{root: t.TempDir()}
 	f.res = PlanResult{
 		InstallPath: f.root,
-		Plan: model.DownloadPlan{
-			Tasks: []model.FileTask{
-				{Item: model.GalaxyDepotItem{Path: "game/data.bin"}, Destination: f.root + "/game/data.bin"},
-				{Item: model.GalaxyDepotItem{Path: "game/readme.txt"}, Destination: f.root + "/game/readme.txt"},
-			},
-			SFC: []model.SFCGroup{{
-				Container: model.GalaxyDepotItem{Path: "container.bin", ProductID: "42"},
-				Items:     []model.GalaxyDepotItem{{Path: "game/small1.txt", ProductID: "42", SFCOffset: 0, SFCSize: 4}},
-			}},
+		Expected: []InstalledFile{
+			{Destination: f.root + "/game/data.bin", Item: model.GalaxyDepotItem{Path: "game/data.bin"}},
+			{Destination: f.root + "/game/readme.txt", Item: model.GalaxyDepotItem{Path: "game/readme.txt"}},
+			// A small-files member is an expected file like any other: the walk
+			// must not report it even though no container mentions it.
+			{Destination: f.root + "/game/small1.txt",
+				Item: model.GalaxyDepotItem{Path: "game/small1.txt", SFCOffset: 0, SFCSize: 4}},
 		},
 	}
 	for _, p := range []string{"game/data.bin", "game/readme.txt", "game/small1.txt", "leftover.bin"} {
@@ -138,21 +141,22 @@ func TestCheckOrphanedFilesIgnorelistReadError(t *testing.T) {
 	}
 }
 
-// TestCheckOrphanedFilesSkipped locks the D44 invariant: a destination the
-// plan skipped belongs to the target installation even though it produced no
-// download task — it is neither reported as an orphan nor deleted, with the
-// delete gate on. The installed set describes which paths are valid for the
-// target installation, not which paths produced a transfer.
-func TestCheckOrphanedFilesSkipped(t *testing.T) {
+// TestCheckOrphanedFilesExpectedLedger locks where the ledger comes from (review
+// S5/S6): the walk keys on the plan's expected set and on nothing else. A file
+// the installation owns but which appears in no task, no container and no
+// skipped list is neither reported nor deleted — the ledger this step replaced
+// would have rebuilt the set from exactly those three sources and deleted it.
+func TestCheckOrphanedFilesExpectedLedger(t *testing.T) {
 	f := newOrphansFixture(t)
-	skippedPath := filepath.Join(f.root, "game", "skipped.bin")
-	if err := os.WriteFile(skippedPath, []byte("x"), 0o644); err != nil {
+	owned := filepath.Join(f.root, "game", "owned.bin")
+	if err := os.WriteFile(owned, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	f.res.Skipped = []SkippedFile{{
-		Destination: skippedPath,
-		Item:        model.GalaxyDepotItem{Path: "game/skipped.bin"},
-	}}
+	f.res.Expected = append(f.res.Expected, InstalledFile{
+		Destination: owned,
+		Item:        model.GalaxyDepotItem{Path: "game/owned.bin"},
+	})
+
 	cfg := planTestConfig(t)
 	cfg.DownloadConfig.DeleteOrphans = true
 	d := newOfflineDownloader(t, noopServer(t), cfg, newFakeConsole())
@@ -160,13 +164,170 @@ func TestCheckOrphanedFilesSkipped(t *testing.T) {
 	if err := d.CheckOrphanedFiles(context.Background(), f.res); err != nil {
 		t.Fatalf("CheckOrphanedFiles: %v", err)
 	}
-	assertFileContent(t, skippedPath, "x")
+	assertFileContent(t, owned, "x")
+	assertFileAbsent(t, filepath.Join(f.root, "leftover.bin"))
 	if !strings.Contains(consoleText(t, d), "\t1 orphaned files") {
 		t.Errorf("output = %q, want only the true leftover counted", consoleText(t, d))
 	}
 }
 
-// TestCheckOrphanedFilesDeleteListsObjects locks the UI1-R2 amendment: a
+// TestCheckOrphansReportsTheUnaccountedFiles walks a real installation built from
+// a real plan: the files the manifest expects are silent, and everything else is
+// an orphan — a leftover, the install metadata file (no special case: upstream has
+// none), a small-files container that outlived its extraction (the one deliberate
+// change of this step) — while a directory is never one.
+func TestCheckOrphansReportsTheUnaccountedFiles(t *testing.T) {
+	f := newVerifyFixture(t)
+	container := "galaxy_smallfilescontainer_" + planProductID
+	info := "goggame-" + planProductID + ".info"
+
+	f.place(t, "game/data.bin", verifyPlain)
+	f.place(t, "leftover.bin", []byte("x"))
+	f.place(t, info, []byte("{}"))
+	f.place(t, container, []byte("x"))
+	if err := os.MkdirAll(filepath.Join(f.root, "emptydir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := f.downloader(t).CheckOrphans(context.Background(), NewInstallRequest(f.cfg, planProductID, ""))
+	if err != nil {
+		t.Fatalf("CheckOrphans: %v", err)
+	}
+	if res.InstallPath != f.root {
+		t.Errorf("InstallPath = %q, want %q", res.InstallPath, f.root)
+	}
+
+	var got []string
+	for _, path := range res.Files {
+		got = append(got, res.Relative(path))
+	}
+	sort.Strings(got)
+	want := []string{container, info, "leftover.bin"}
+	sort.Strings(want)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("orphans = %v, want %v", got, want)
+	}
+	// No absolute path leaks into the listing: the header names the root.
+	for _, path := range res.Files {
+		if strings.HasPrefix(res.Relative(path), f.root) {
+			t.Errorf("%s was not made relative to the root", path)
+		}
+	}
+}
+
+// TestCheckOrphansCarriesTheWalkDiagnostics locks the filter files' notices: they
+// come back as data with the error flag set, so the front end decides the stream
+// — core prints nothing on this path (review S6).
+func TestCheckOrphansCarriesTheWalkDiagnostics(t *testing.T) {
+	f := newOrphansFixture(t)
+	cfg := planTestConfig(t)
+	cfg.MsgLevel = msgLevelVerbose
+	ignorePath := filepath.Join(t.TempDir(), "ignorelist.txt")
+	if err := os.WriteFile(ignorePath, []byte("R leftover"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.IgnorelistFilePath = ignorePath
+	d := newOfflineDownloader(t, noopServer(t), cfg, newFakeConsole())
+
+	files, notices, err := d.walkOrphans(f.root, f.res.Expected)
+	if err != nil {
+		t.Fatalf("walkOrphans: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("orphans = %v, want none: the only leftover is ignorelisted", files)
+	}
+	if len(notices) != 1 || !notices[0].Err || !strings.Contains(notices[0].Text, "skipped ignorelisted file") {
+		t.Errorf("notices = %+v, want the verbose skip as an error-stream notice", notices)
+	}
+	if out := consoleText(t, d); out != "" {
+		t.Errorf("stdout = %q, want nothing: the walk does not print", out)
+	}
+}
+
+// TestCheckOrphansIsReadOnly locks the read-only promise of `orphans check`
+// (review CLI1 §4, T11): the walk changes neither the content nor the
+// modification time of anything it finds, orphans included.
+func TestCheckOrphansIsReadOnly(t *testing.T) {
+	f := newVerifyFixture(t)
+	f.place(t, "game/data.bin", verifyPlain)
+	f.place(t, "leftover.bin", []byte("x"))
+
+	before := treeState(t, f.root)
+	res, err := f.downloader(t).CheckOrphans(context.Background(), NewInstallRequest(f.cfg, planProductID, ""))
+	if err != nil {
+		t.Fatalf("CheckOrphans: %v", err)
+	}
+	if len(res.Files) != 1 {
+		t.Fatalf("orphans = %v, want the one leftover", res.Files)
+	}
+
+	after := treeState(t, f.root)
+	if len(after) != len(before) {
+		t.Fatalf("the tree has %d files after the walk, had %d", len(after), len(before))
+	}
+	for path, want := range before {
+		if got, ok := after[path]; !ok || got != want {
+			t.Errorf("%s changed: %+v, want %+v", path, got, want)
+		}
+	}
+}
+
+// TestRemoveOrphansDeletesExactlyTheList locks the removal contract (review S6):
+// core deletes the paths it was handed, in order, and nothing else — a file that
+// exists but is not on the list survives, and one unremovable path does not stop
+// the batch.
+func TestRemoveOrphansDeletesExactlyTheList(t *testing.T) {
+	dir := t.TempDir()
+	listed := filepath.Join(dir, "listed.bin")
+	second := filepath.Join(dir, "second.bin")
+	unlisted := filepath.Join(dir, "unlisted.bin")
+	for _, path := range []string{listed, second, unlisted} {
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A NUL byte makes one path impossible to remove on every platform, so the
+	// failure is the code's and not the environment's (review S6).
+	unremovable := "x\x00y"
+
+	d := newOfflineDownloader(t, noopServer(t), planTestConfig(t), newFakeConsole())
+	res := OrphansResult{InstallPath: dir, Files: []string{listed, unremovable, second}}
+
+	attempts, err := d.RemoveOrphans(context.Background(), res)
+	if err != nil {
+		t.Fatalf("RemoveOrphans: %v", err)
+	}
+	if len(attempts) != 3 {
+		t.Fatalf("attempts = %d, want one per listed file", len(attempts))
+	}
+	if attempts[0].Path != listed || attempts[0].Err != nil {
+		t.Errorf("attempt[0] = %+v, want %s removed", attempts[0], listed)
+	}
+	if attempts[1].Path != unremovable || attempts[1].Err == nil {
+		t.Errorf("attempt[1] = %+v, want the unremovable path reported", attempts[1])
+	}
+	if attempts[2].Path != second || attempts[2].Err != nil {
+		t.Errorf("attempt[2] = %+v, want the batch to have continued", attempts[2])
+	}
+	assertFileAbsent(t, listed)
+	assertFileAbsent(t, second)
+	assertFileContent(t, unlisted, "x")
+
+	// A cancelled run removes nothing: the caller interrupted before the first
+	// deletion, and a destructive batch must not start on its way out (review
+	// S6, D33).
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	attempts, err = d.RemoveOrphans(ctx, OrphansResult{InstallPath: dir, Files: []string{unlisted}})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want the cancellation", err)
+	}
+	if len(attempts) != 0 {
+		t.Errorf("attempts = %+v, want none after a cancelled run", attempts)
+	}
+	assertFileContent(t, unlisted, "x")
+}
+
 // destructive delete names its objects. The header aggregates the scale, each
 // removed file gets one indented line relative to the install root, and a
 // zero-orphan run prints no header at all (the count line above already said

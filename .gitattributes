@@ -1,0 +1,24 @@
+# Line endings are a repository property, not a developer setting.
+#
+# Go sources are LF in blob, index and working tree, on every platform. That is
+# what makes `gofmt -l .` a reliable structural check: without this rule a
+# Windows checkout with core.autocrlf=true rewrites every .go file to CRLF, and
+# gofmt then reports every file as unformatted — a checkout artefact that looks
+# exactly like a formatting failure.
+*.go text eol=lf
+
+# Go toolchain files and the ignore list: LF as well, for the same reason.
+go.mod     text eol=lf
+go.sum     text eol=lf
+.gitignore text eol=lf
+
+# Prose and data: normalize on commit, native line endings on checkout.
+*.md   text
+*.yml  text
+*.yaml text
+*.json text
+
+# Windows scripts keep CRLF, which is what their tooling expects.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf

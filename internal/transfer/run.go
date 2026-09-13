@@ -102,7 +102,9 @@ func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps R
 	}
 	switch decision {
 	case reconcile.DecisionSkip:
-		emit(Event{Path: task.Destination, Text: task.Destination + ": OK", Kind: EventMessageSuccess})
+		// The explicit skip marker (review UI1-R2): the front end aggregates
+		// dynamic skips on this text, never on an inferred event sequence.
+		emit(Event{Path: task.Destination, Text: SkipMessage(task.Destination), Kind: EventMessageSuccess})
 		emit(Event{Path: task.Destination, Kind: EventTaskFinish})
 		return nil
 	case reconcile.DecisionReplace:
@@ -111,6 +113,10 @@ func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps R
 			return fail("Failed to delete " + task.Destination + ": " + err.Error())
 		}
 		startChunk = 0
+	case reconcile.DecisionResume:
+		// The explicit resume marker (review UI1-R2, decision 1): the ONLY
+		// signal the front end counts resumed tasks by — see observer.go.
+		emit(Event{Path: task.Destination, Text: ResumeMessage(startChunk, task.Destination), Kind: EventMessageInfo})
 	}
 
 	// An item without chunks is an empty file (downloader.cpp:4644-4650).

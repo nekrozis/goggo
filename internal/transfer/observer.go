@@ -1,5 +1,10 @@
 package transfer
 
+import (
+	"strconv"
+	"strings"
+)
+
 // EventKind tells the front end what kind of thing happened: one kind drives
 // the progress bar, the other four map onto ui/log's message types.
 type EventKind int
@@ -37,8 +42,45 @@ type Event struct {
 }
 
 // Observer receives transfer events. The front end implements it; transfer
-// calls it synchronously and never assumes the call is cheap — an
+// calls it synchronously and never assumes the call is cheap - an
 // implementation that renders a progress bar does I/O on every Progress event.
 type Observer interface {
 	OnEvent(Event)
+}
+
+// ResumeMessagePrefix marks an EventMessageInfo as the explicit resume marker
+// (review UI1-R2, decision 1). Counting resumed tasks must ride on this
+// signal, never on an inferred event sequence: a task that shows no progress
+// events is not necessarily a resume (zero-size items and future skip-like
+// tasks share that shape), so an inference would embed a fragile behavioural
+// guess into the UI.
+const ResumeMessagePrefix = "Resuming from chunk "
+
+// ResumeMessage builds the marker text. The absolute path it carries is the
+// lifecycle record: diagnostics keep filesystem identity, the presentation
+// layer decides what reaches the screen (UI1-R2 section 3).
+func ResumeMessage(startChunk int, path string) string {
+	return ResumeMessagePrefix + strconv.Itoa(startChunk) + ": " + path
+}
+
+// IsResumeMessage reports whether a message text is the explicit marker.
+func IsResumeMessage(text string) bool {
+	return strings.HasPrefix(text, ResumeMessagePrefix)
+}
+
+// SkipMessagePrefix marks an EventMessageSuccess as transfer's authoritative
+// "nothing to transfer" (the dynamic-skip case RES1 added). The front end
+// aggregates skips on this explicit signal for the same reason it counts
+// resumes on theirs: no event-sequence inference (review UI1-R2, decision 1).
+const SkipMessagePrefix = "Skipped: "
+
+// SkipMessage builds the skip marker text; the ": OK" tail keeps the upstream
+// line shape so verbose output still reads like the record it is.
+func SkipMessage(path string) string {
+	return SkipMessagePrefix + path + ": OK"
+}
+
+// IsSkipMessage reports whether a message text is the explicit skip marker.
+func IsSkipMessage(text string) bool {
+	return strings.HasPrefix(text, SkipMessagePrefix)
 }

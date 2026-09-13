@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -469,5 +471,141 @@ func TestBuildPlanBlacklistFiltersTasks(t *testing.T) {
 	// dependency file remain.
 	if len(res.Plan.Tasks) != 1 {
 		t.Errorf("tasks = %d, want the two .bin tasks gone", len(res.Plan.Tasks))
+	}
+}
+
+// planMessageTexts joins the plan's notice lines for assertion convenience.
+func planMessageTexts(res PlanResult) string {
+	var b strings.Builder
+	for _, m := range res.Messages {
+		b.WriteString(m.Text)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// TestBuildPlanSkipAggregation locks the UI1-R2 plan-side rules: a destination
+// already satisfying its item leaves the queue with NO transfer task and
+// lands in the Skipped report; the per-file ": OK" is a verbose record, not a
+// default notice; the header names the semantic install root exactly once; and
+// a fully-up-to-date plan says "Already up to date: K files" followed by
+// "Nothing to download."
+func TestBuildPlanSkipAggregation(t *testing.T) {
+	f := newPlanFixture(t)
+	// Two single-chunk items with self-consistent digests, plus one missing
+	// file: the first two are on disk already, the third must download.
+	const contentA = "already on disk A"
+	const contentB = "already on disk B"
+	digest := func(s string) string { sum := md5.Sum([]byte(s)); return hex.EncodeToString(sum[:]) }
+
+	v2New := galaxy.HashToGalaxyPath(planBuildHashNew)
+	f.set("/products/"+planProductID+"/os/windows/builds",
+		`{"items":[{"build_id":"b-new","version_name":"1.0.2","date_published":"2024-03-02","generation":2,`+
+			`"link":"https://cdn.gog.com/content-system/v2/meta/`+v2New+`"}]}`)
+	f.set("/content-system/v2/meta/"+v2New,
+		`{"baseProductId":"`+planProductID+`","installDirectory":"W3 GOTY","version":2,`+
+			`"products":[{"name":"The Witcher 3: Wild Hunt"}],`+
+			`"depots":[{"productId":"`+planProductID+`","languages":["en-US"],"osBitness":["64"],"manifest":"`+planDepotHashLang+`"}]}`)
+	f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(planDepotHashLang),
+		`{"depot":{"items":[`+
+			`{"path":"game/a.bin","md5":"`+digest(contentA)+`","chunks":[{"md5":"`+digest(contentA)+`","size":`+fmt.Sprint(len(contentA))+`}]},`+
+			`{"path":"game/b.bin","md5":"`+digest(contentB)+`","chunks":[{"md5":"`+digest(contentB)+`","size":`+fmt.Sprint(len(contentB))+`}]},`+
+			`{"path":"game/missing.bin","md5":"missing-md5","chunks":[{"md5":"m-u","size":1}]}]}}`)
+
+	cfg := planTestConfig(t)
+	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+	installPath := cfg.Directories.Directory + "W3 GOTY"
+	if err := os.MkdirAll(installPath+"/game", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installPath+"/game/a.bin", []byte(contentA), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installPath+"/game/b.bin", []byte(contentB), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, ""))
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	if len(res.Skipped) != 2 {
+		t.Errorf("Skipped = %+v, want the two installed files", res.Skipped)
+	}
+	if len(res.Plan.Tasks) != 1 || res.Plan.Tasks[0].Item.Path != "game/missing.bin" {
+		t.Errorf("tasks = %+v, want only the missing file", res.Plan.Tasks)
+	}
+
+	msgs := planMessageTexts(res)
+	if !strings.Contains(msgs, "Installing → "+installPath) {
+		t.Errorf("messages = %q, want the install-root header once", msgs)
+	}
+	if !strings.Contains(msgs, "Already up to date: 2 files") {
+		t.Errorf("messages = %q, want the aggregate skip count", msgs)
+	}
+	if strings.Contains(msgs, "a.bin: OK") || strings.Contains(msgs, "b.bin: OK") {
+		t.Errorf("messages = %q, want NO per-file OK at default verbosity", msgs)
+	}
+	if strings.Contains(msgs, "Nothing to download") {
+		t.Errorf("messages = %q, want no fast-path line while a task remains", msgs)
+	}
+
+	// Verbose restores the per-object records. The downloader copies its
+	// config at construction, so the verbose run needs a fresh one.
+	cfg.MsgLevel = msgLevelVerbose
+	dv := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+	res, err = dv.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, ""))
+	if err != nil {
+		t.Fatalf("BuildPlan verbose: %v", err)
+	}
+	msgs = planMessageTexts(res)
+	if !strings.Contains(msgs, "game/a.bin: OK") {
+		t.Errorf("verbose messages = %q, want the per-file OK line", msgs)
+	}
+}
+
+// TestBuildPlanNothingToDownload locks scene ②: every item already satisfies
+// the manifest ⇒ zero tasks, zero bytes to fetch, and the two aggregate
+// sentences.
+func TestBuildPlanNothingToDownload(t *testing.T) {
+	f := newPlanFixture(t)
+	const contentA = "already on disk A"
+	digest := func(s string) string { sum := md5.Sum([]byte(s)); return hex.EncodeToString(sum[:]) }
+
+	v2New := galaxy.HashToGalaxyPath(planBuildHashNew)
+	f.set("/products/"+planProductID+"/os/windows/builds",
+		`{"items":[{"build_id":"b-new","version_name":"1.0.2","date_published":"2024-03-02","generation":2,`+
+			`"link":"https://cdn.gog.com/content-system/v2/meta/`+v2New+`"}]}`)
+	f.set("/content-system/v2/meta/"+v2New,
+		`{"baseProductId":"`+planProductID+`","installDirectory":"W3 GOTY","version":2,`+
+			`"products":[{"name":"The Witcher 3: Wild Hunt"}],`+
+			`"depots":[{"productId":"`+planProductID+`","languages":["en-US"],"osBitness":["64"],"manifest":"`+planDepotHashLang+`"}]}`)
+	f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(planDepotHashLang),
+		`{"depot":{"items":[`+
+			`{"path":"game/a.bin","md5":"`+digest(contentA)+`","chunks":[{"md5":"`+digest(contentA)+`","size":`+fmt.Sprint(len(contentA))+`}]}]}}`)
+
+	cfg := planTestConfig(t)
+	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+	installPath := cfg.Directories.Directory + "W3 GOTY"
+	if err := os.MkdirAll(installPath+"/game", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installPath+"/game/a.bin", []byte(contentA), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, ""))
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	if len(res.Plan.Tasks) != 0 || len(res.Skipped) != 1 {
+		t.Fatalf("tasks/skipped = %d/%d, want 0 tasks and 1 skipped", len(res.Plan.Tasks), len(res.Skipped))
+	}
+	msgs := planMessageTexts(res)
+	if !strings.Contains(msgs, "Already up to date: 1 files") || !strings.Contains(msgs, "Nothing to download.") {
+		t.Errorf("messages = %q, want both aggregate sentences", msgs)
+	}
+	if strings.Contains(msgs, "Total size installed: ") && !strings.Contains(msgs, "0.00 B") {
+		t.Errorf("messages = %q, want a zero download total", msgs)
 	}
 }

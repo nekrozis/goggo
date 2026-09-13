@@ -93,20 +93,58 @@ func TestLayoutHeightTrim(t *testing.T) {
 	}
 }
 
-// TestTaskLineDegradation locks the priority order (D31): the bar goes first,
-// then the full path gives way to the base name, then the byte counts, then
-// the rate — the percentage and the row number survive everything short of a
-// truncation.
-func TestTaskLineDegradation(t *testing.T) {
-	tk := taskRow{index: 7, path: "/install/VIDEO.VID", pct: 0.58, done: 300 << 20, total: 577 << 20, rate: 350e3}
-
-	wide := taskLine(tk, 200, nil, 0)
-	if !strings.Contains(wide, "/install/VIDEO.VID") || !strings.Contains(wide, "KiB/s") {
-		t.Errorf("wide row = %q, want path, bytes and rate", wide)
+// TestCompactPath locks the fish-style hierarchy-preserving compaction
+// (review UI1-R2 §3): the basename is never sacrificed, leading directories
+// abbreviate first, ancestors drop behind …/ only under heavier pressure,
+// and a path that fits is never touched for tidiness.
+func TestCompactPath(t *testing.T) {
+	p := "Maps/Campaign/Shadow of Death/foo.h3m" // 38 cells; base foo.h3m = 8
+	stages := []struct {
+		cells int
+		want  string
+	}{
+		{40, p}, // fits ⇒ untouched
+		{35, "…/Campaign/Shadow of Death/foo.h3m"}, // three components
+		{26, "…/Shadow of Death/foo.h3m"},          // deepest dir + name
+		{8, "foo.h3m"},                             // last escape: bare name
+		{6, "foo.h3"},                              // even that truncated
 	}
-	mid := taskLine(tk, 46, nil, 0)
-	if strings.Contains(mid, "/install/") {
-		t.Errorf("mid row = %q, want the base name after the path degrades", mid)
+	for _, st := range stages {
+		if got := compactPath(p, st.cells); got != st.want {
+			t.Errorf("compactPath(_, %d) = %q, want %q", st.cells, got, st.want)
+		}
+	}
+	// Identity is never lost while context still fits: two same-named files
+	// under different dirs compact to DIFFERENT forms (review UI1-R2 — the
+	// basename is an escape hatch, not the norm).
+	a := compactPath("Mods/Old/Data/Heroes3.exe", 20)
+	b := compactPath("Mods/Old/Patch/Heroes3.exe", 20)
+	if a != "…/Data/Heroes3.exe" || b != "…/Patch/Heroes3.exe" {
+		t.Errorf("a/b = %q/%q, want dir-qualified forms kept distinct", a, b)
+	}
+	// A path that already fits is never rewritten for tidiness.
+	if got := compactPath("Data/Heroes3.exe", 16); got != "Data/Heroes3.exe" {
+		t.Errorf("fitting path = %q, want it untouched", got)
+	}
+}
+
+// TestTaskLineDegradation locks the priority order (D31 + UI1-R2 §2): the bar
+// goes first, then the path compacts hierarchically, then the byte counts,
+// then the rate — the percentage and the row number survive everything short
+// of a truncation, and compaction exists only for width.
+func TestTaskLineDegradation(t *testing.T) {
+	tk := taskRow{index: 7, path: "Data/Campaign/Shadow of Death/video.h3m", pct: 0.58, done: 300 << 20, total: 577 << 20, rate: 350e3}
+
+	wide := taskLine(tk, 120, nil, 0)
+	if !strings.Contains(wide, "Data/Campaign/Shadow of Death/video.h3m") || !strings.Contains(wide, "KiB/s") {
+		t.Errorf("wide row = %q, want the full relative path, bytes and rate", wide)
+	}
+	mid := taskLine(tk, 60, nil, 0)
+	if mid == wide && visibleWidth(wide) > 60 {
+		t.Errorf("mid row = %q, want the path compacted under width pressure", mid)
+	}
+	if !strings.Contains(mid, "video.h3m") {
+		t.Errorf("mid row = %q, want the basename kept", mid)
 	}
 	narrow := taskLine(tk, 17, nil, 0)
 	if !strings.Contains(narrow, "58%") || !strings.Contains(narrow, "#7") {

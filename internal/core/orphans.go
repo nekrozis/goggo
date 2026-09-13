@@ -59,16 +59,37 @@ func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) err
 	if !d.cfg.DownloadConfig.DeleteOrphans {
 		return nil
 	}
+	// A deletion is a destructive action, so its objects stay auditable by
+	// default (review UI1-R2 §5, amended): a header states the scale, then
+	// one indented line names each file actually removed — a "deleted N"
+	// summary alone would hide WHICH mods or patches disappeared. The lines
+	// are relative to the install root; a failed delete stays its own
+	// diagnostic. The header only appears when there is something to delete:
+	// the count line above already said "0 orphaned files".
+	if len(orphans) > 0 {
+		fmt.Fprintf(d.ui.Out(), "Deleting %d orphaned files\n", len(orphans))
+	}
 	for _, path := range orphans {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		fmt.Fprintln(d.ui.Out(), "Deleting "+path)
 		if err := os.Remove(path); err != nil {
 			fmt.Fprintln(d.ui.ErrOut(), "Failed to delete "+path)
+			continue
 		}
+		fmt.Fprintf(d.ui.Out(), "  %s\n", orphanDisplayPath(res.InstallPath, path))
 	}
 	return nil
+}
+
+// orphanDisplayPath is the install-root-relative form of a walk path; a path
+// outside the root keeps its absolute form (it cannot be made relative).
+func orphanDisplayPath(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return path
+	}
+	return filepath.ToSlash(rel)
 }
 
 // orphanedFiles walks the install root and collects the files whose full path

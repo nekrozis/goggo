@@ -30,8 +30,13 @@ func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanRe
 			continue
 		}
 
-		fmt.Fprintln(d.ui.Out(), "Extracting small files container "+container)
-
+		// The stage line carries the aggregate once (review UI1-R2 §6.C):
+		// per-member lines repeat "extraction happened" N times with no
+		// information gain, and there is NO per-member progress worth
+		// painting — the extraction is one loop, so no fake progress bar
+		// (reviewer ruling). Only a failed member surfaces as a per-object
+		// line, with its absolute path: diagnostics keep filesystem identity.
+		var extracted int
 		for _, item := range group.Items {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -42,15 +47,19 @@ func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanRe
 				continue
 			}
 			target := res.InstallPath + "/" + item.Path
-			fmt.Fprintln(d.ui.Out(), target)
+			if d.cfg.MsgLevel >= msgLevelVerbose {
+				fmt.Fprintln(d.ui.Out(), target)
+			}
 
 			if err := extractSFCMember(container, target, item.SFCOffset, item.SFCSize); err != nil {
 				// A directory that cannot be created skips the member; the
 				// container is still deleted below (downloader.cpp:4291-4296).
-				fmt.Fprintln(d.ui.Out(), "Failed to create directory: "+filepath.Dir(target)+": "+err.Error())
+				fmt.Fprintln(d.ui.ErrOut(), "Failed to extract "+target+": "+err.Error())
 				continue
 			}
+			extracted++
 		}
+		fmt.Fprintln(d.ui.Out(), fmt.Sprintf("Extracting small files container %s (%d files)", container, extracted))
 
 		fmt.Fprintln(d.ui.Out(), "Deleting small files container "+container)
 		if err := os.Remove(container); err != nil {

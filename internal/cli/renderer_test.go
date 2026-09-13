@@ -15,24 +15,26 @@ import (
 // fakeSink records everything a renderer hands over, so the view-model tests
 // can assert on the derived state instead of scraping formatted strings.
 type fakeSink struct {
-	frames    [][]string
-	infos     []string
-	diags     []string
-	starts    []int
-	finishes  []int
-	ticks     []viewModel
-	reasons   []stopReason
-	completed []int
+	frames   [][]string
+	infos    []string
+	diags    []string
+	starts   []string
+	finishes []string
+	ticks    []viewModel
+	reasons  []stopReason
+	stats    []runStats
 }
 
-func (s *fakeSink) info(text string)           { s.infos = append(s.infos, text) }
-func (s *fakeSink) diagnostic(text string)     { s.diags = append(s.diags, text) }
-func (s *fakeSink) taskStart(i int, _ string)  { s.starts = append(s.starts, i) }
-func (s *fakeSink) taskFinish(i int, _ string) { s.finishes = append(s.finishes, i) }
-func (s *fakeSink) tick(vm viewModel)          { s.ticks = append(s.ticks, vm) }
-func (s *fakeSink) finalize(r stopReason, c int) {
+func (s *fakeSink) info(text string)             { s.infos = append(s.infos, text) }
+func (s *fakeSink) diagnostic(text string)       { s.diags = append(s.diags, text) }
+func (s *fakeSink) taskStart(_ int, path string) { s.starts = append(s.starts, path) }
+func (s *fakeSink) taskFinish(_ int, path string) {
+	s.finishes = append(s.finishes, path)
+}
+func (s *fakeSink) tick(vm viewModel) { s.ticks = append(s.ticks, vm) }
+func (s *fakeSink) finalize(r stopReason, st runStats) {
 	s.reasons = append(s.reasons, r)
-	s.completed = append(s.completed, c)
+	s.stats = append(s.stats, st)
 }
 
 var _ sink = (*fakeSink)(nil)
@@ -189,8 +191,8 @@ func TestTaskFinishLeavesActiveModel(t *testing.T) {
 	if vm.remaining != 2000 {
 		t.Errorf("remaining = %d, want 2000 (1500 pending + 500 active)", vm.remaining)
 	}
-	if len(s.finishes) != 1 || s.finishes[0] != 1 {
-		t.Errorf("finish indices = %v, want [1]", s.finishes)
+	if len(s.finishes) != 1 || s.finishes[0] != "/a.bin" {
+		t.Errorf("finish paths = %v, want [/a.bin] (the task that finished)", s.finishes)
 	}
 }
 
@@ -269,8 +271,8 @@ func TestStopFinalizesOnce(t *testing.T) {
 	r.Stop(stopCompleted)
 	r.Stop(stopCompleted) // no-op
 
-	if len(s.reasons) != 1 || s.reasons[0] != stopCompleted || s.completed[0] != 1 {
-		t.Errorf("finalize calls = %v/%v, want one (completed, 1)", s.reasons, s.completed)
+	if len(s.reasons) != 1 || s.reasons[0] != stopCompleted || s.stats[0].completed != 1 {
+		t.Errorf("finalize calls = %v/%v, want one (completed, 1)", s.reasons, s.stats)
 	}
 	// The repaint loop is over: ticks after Stop change nothing.
 	before := len(s.ticks)
@@ -280,18 +282,29 @@ func TestStopFinalizesOnce(t *testing.T) {
 	}
 }
 
-// TestFinalLines locks the three terminal states (review UI1 v3 §6.E): only
-// the completed state carries the completion count — a canceled run's active
-// tasks were interrupted, not finished.
+// TestFinalLines locks the terminal states (review UI1 v3 §6.E, UI1-R2 §5
+// scene ②): only the completed state carries the completion count — a
+// canceled run's active tasks were interrupted, not finished — and a
+// zero-transfer completed run says nothing (the plan's "Nothing to download."
+// already spoke for it).
 func TestFinalLines(t *testing.T) {
-	if got := finalLines(stopCompleted, 3); len(got) != 1 || !strings.Contains(got[0], "3") {
+	if got := finalLines(stopCompleted, runStats{completed: 3}); len(got) != 1 || !strings.Contains(got[0], "3") {
 		t.Errorf("completed = %q, want the count", got)
 	}
-	cancel := finalLines(stopCanceled, 3)
+	// The resume aggregate line rides the terminal state (UI1-R2: markers
+	// arrive mid-run, so the count lands beside the completion line).
+	got := finalLines(stopCompleted, runStats{completed: 2, resumed: 2})
+	if len(got) != 2 || !strings.Contains(got[0], "Resuming: 2") {
+		t.Errorf("completed+resumed = %q, want the resume line before the count", got)
+	}
+	if got := finalLines(stopCompleted, runStats{}); got != nil {
+		t.Errorf("zero-transfer completed = %q, want no final line", got)
+	}
+	cancel := finalLines(stopCanceled, runStats{completed: 3})
 	if len(cancel) != 1 || strings.Contains(cancel[0], "3") || !strings.Contains(cancel[0], "resume") {
 		t.Errorf("canceled = %q, want the resume guidance without a count", cancel)
 	}
-	if got := finalLines(stopFailed, 3); len(got) != 1 {
+	if got := finalLines(stopFailed, runStats{completed: 3}); len(got) != 1 {
 		t.Errorf("failed = %q, want one state line", got)
 	}
 }
@@ -407,8 +420,8 @@ func TestLogSinkCadence(t *testing.T) {
 func TestLogSinkFinalizeStreams(t *testing.T) {
 	var out, errOut strings.Builder
 	s := &logSink{out: &out, errOut: &errOut, unit: 0, now: time.Now, lastSummary: time.Now()}
-	s.finalize(stopCompleted, 2)
-	s.finalize(stopCanceled, 2)
+	s.finalize(stopCompleted, runStats{completed: 2})
+	s.finalize(stopCanceled, runStats{completed: 2})
 	if strings.Count(out.String(), "\n") != 1 || !strings.Contains(out.String(), "2") {
 		t.Errorf("stdout = %q, want only the completed count", out.String())
 	}
@@ -502,5 +515,86 @@ func TestStopBeforeStartThenStart(t *testing.T) {
 	}
 	if after := runtime.NumGoroutine(); after > before {
 		t.Errorf("goroutines before/after = %d/%d, want no ticker residue", before, after)
+	}
+}
+
+// TestDisplayPathFollowsInstallRoot locks the UI1-R2 seam: task rows are
+// relative to the plan's semantic install root once core hands it over, and
+// keep the absolute form before that (never wrong, only verbose). The
+// install root is the resolved %install_dir% — not a guessed prefix.
+func TestDisplayPathFollowsInstallRoot(t *testing.T) {
+	src := newFakeProgress()
+	now := time.Unix(1_000_000, 0)
+	r, s := newTestRenderer(src, &now)
+	root := "C:/Games/HoMM 3 Complete"
+
+	r.OnEvent(transfer.Event{Path: root + "/Data/VIDEO.VID", Kind: transfer.EventTaskStart})
+	if len(s.starts) != 1 || s.starts[0] != root+"/Data/VIDEO.VID" {
+		t.Fatalf("starts before the root is known = %v, want the absolute path", s.starts)
+	}
+	r.SetInstallRoot(root)
+	r.OnEvent(transfer.Event{Path: root + "/EULA/EULA US.doc", Kind: transfer.EventTaskStart})
+	if s.starts[1] != "EULA/EULA US.doc" {
+		t.Errorf("starts after the root = %v, want the relative display path", s.starts)
+	}
+	// The active frame rows carry display paths too.
+	vm := r.buildVM(now)
+	if vm.tasks[0].path != "Data/VIDEO.VID" {
+		t.Errorf("task row path = %q, want relative", vm.tasks[0].path)
+	}
+	// A path outside the root cannot be made relative; it passes through.
+	r.OnEvent(transfer.Event{Path: "C:/Elsewhere/x.bin", Kind: transfer.EventTaskStart})
+	if s.starts[2] != "C:/Elsewhere/x.bin" {
+		t.Errorf("outside-root path = %v, want it unchanged", s.starts[2])
+	}
+}
+
+// TestMarkersAggregate locks decision 1's UI side: the resume/skip markers
+// are explicit signals counted by the renderer, never display material. The
+// resume count rides the summary; neither marker produces an info line.
+func TestMarkersAggregate(t *testing.T) {
+	src := newFakeProgress()
+	now := time.Unix(1_000_000, 0)
+	r, s := newTestRenderer(src, &now)
+
+	for _, path := range []string{"/a.bin", "/b.bin"} {
+		r.OnEvent(transfer.Event{Path: path, Kind: transfer.EventTaskStart})
+		r.OnEvent(transfer.Event{Path: path, Text: transfer.ResumeMessage(3, path), Kind: transfer.EventMessageInfo})
+		r.OnEvent(transfer.Event{Path: path, Kind: transfer.EventTaskFinish})
+	}
+	r.OnEvent(transfer.Event{Path: "/c.bin", Kind: transfer.EventTaskStart})
+	r.OnEvent(transfer.Event{Path: "/c.bin", Text: transfer.SkipMessage("/c.bin"), Kind: transfer.EventMessageSuccess})
+	r.OnEvent(transfer.Event{Path: "/c.bin", Kind: transfer.EventTaskFinish})
+
+	if len(s.infos) != 0 {
+		t.Errorf("info lines = %v, want none (markers aggregate)", s.infos)
+	}
+	r.Stop(stopCompleted)
+	if s.stats[0].resumed != 2 || s.stats[0].skipped != 1 || s.stats[0].completed != 3 {
+		t.Errorf("stats = %+v, want 2 resumed / 1 skipped / 3 completed", s.stats[0])
+	}
+}
+
+// TestZeroTransferEmitsNothing locks scene ②: a run whose queue was empty has
+// no final line — the plan's "Already up to date / Nothing to download."
+// already spoke for it (review UI1-R2 §5).
+func TestZeroTransferEmitsNothing(t *testing.T) {
+	src := newFakeProgress()
+	src.setQueue(0, 0)
+	now := time.Unix(1_000_000, 0)
+	r, s := newTestRenderer(src, &now)
+	r.Start()
+	r.Stop(stopCompleted)
+
+	if len(s.reasons) != 1 {
+		t.Fatalf("finalize calls = %d, want the sink told once", len(s.reasons))
+	}
+	// The stats carry the empty truth; the sink's finalLines suppress the
+	// count line for a zero completed run.
+	if s.stats[0].completed != 0 {
+		t.Errorf("completed = %d, want 0", s.stats[0].completed)
+	}
+	if got := finalLines(stopCompleted, s.stats[0]); got != nil {
+		t.Errorf("finalLines = %q, want none for a zero-transfer run", got)
 	}
 }

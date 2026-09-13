@@ -361,3 +361,42 @@ func TestRunCreatesMissingEmptyFile(t *testing.T) {
 		t.Errorf("CDN hits = %d, want 0 for a chunkless item", total)
 	}
 }
+
+// TestRunResumeEmitsExplicitMarker locks UI1-R2 decision 1: the resume branch
+// announces itself with exactly one EventMessageInfo carrying the marker the
+// front end counts on — the resume is never a sequence the UI has to infer.
+func TestRunResumeEmitsExplicitMarker(t *testing.T) {
+	content := strings.Repeat("a", 1000) + strings.Repeat("b", 1000) + strings.Repeat("c", 1000)
+	cdn := newCountingCDN(t)
+	item, bodies := buildChunkedItemParts(t, 3, content)
+	for _, ch := range item.Chunks {
+		cdn.set("/c/"+ch.CompressedMD5, bodies["/c/"+ch.CompressedMD5])
+	}
+
+	dest := filepath.Join(t.TempDir(), "file.bin")
+	if err := os.WriteFile(dest, []byte(content[:1000]), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	obs := &recordingObserver{}
+	if err := Run(context.Background(), []model.FileTask{{Item: item, Destination: dest}},
+		Options{Workers: 1}, countingDeps(t, cdn, obs)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var markers int
+	for _, ev := range obs.events {
+		if ev.Kind == EventMessageInfo && IsResumeMessage(ev.Text) {
+			markers++
+			if !strings.Contains(ev.Text, ": "+dest) {
+				t.Errorf("marker text = %q, want the absolute destination", ev.Text)
+			}
+		}
+	}
+	if markers != 1 {
+		t.Errorf("resume markers = %d, want exactly 1", markers)
+	}
+	// The prefix chunk was still not fetched (the resume itself).
+	if got := cdn.hits("/c/" + item.Chunks[0].CompressedMD5); got != 0 {
+		t.Errorf("chunk 0 hits = %d, want 0", got)
+	}
+}

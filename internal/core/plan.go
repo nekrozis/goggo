@@ -312,7 +312,13 @@ func (d *Downloader) BuildPlan(ctx context.Context, req InstallRequest) (PlanRes
 		}
 		if complete {
 			skipped++
-			res.addMessage(destination + ": OK")
+			// The per-file ": OK" is the reconcile record, not user output:
+			// N repeats of one path are one aggregate state (review UI1-R2
+			// §4.3 — repeated status aggregates). Verbose keeps the
+			// per-object lines the upstream output has.
+			if d.cfg.MsgLevel >= msgLevelVerbose {
+				res.addMessage(destination + ": OK")
+			}
 			res.Skipped = append(res.Skipped, SkippedFile{Destination: destination, Item: it})
 			continue
 		}
@@ -323,9 +329,19 @@ func (d *Downloader) BuildPlan(ctx context.Context, req InstallRequest) (PlanRes
 		tasks = append(tasks, model.FileTask{Item: it, Destination: destination})
 	}
 	res.addMessage(gameTitle)
+	// The header carries the shared context once (review UI1-R2 §6.B): the
+	// task rows are installPath-relative, so the root belongs here, not on
+	// every line.
+	res.addMessage("Installing → " + installPath)
 	res.addMessage(fmt.Sprintf("Files: %d", len(tasks)))
 	if skipped > 0 {
 		res.addMessage(fmt.Sprintf("Already up to date: %d files", skipped))
+		if len(tasks) == 0 {
+			// The zero-transfer fast path as a final state (review UI1-R2,
+			// decision 2): nothing enters the live UI because transfer.Run
+			// has no tasks, and the lines say exactly that.
+			res.addMessage("Nothing to download.")
+		}
 	}
 	res.addMessage("Total size installed: " + util.SizeString(totalSize, d.cfg.UnitFormat))
 

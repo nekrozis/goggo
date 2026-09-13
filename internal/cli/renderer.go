@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,11 +41,19 @@ const (
 
 // finalLines are the terminal's closing state for each reason. A canceled run
 // never shows a completion count: its active tasks were interrupted, not
-// finished (review UI1 v2 §E).
-func finalLines(reason stopReason, completed int) []string {
+// finished (review UI1 v2 §E). A zero-transfer run shows no count line — the
+// plan's "Nothing to download." already said it (review UI1-R2 §3, scene ②).
+func finalLines(reason stopReason, st runStats) []string {
 	switch reason {
 	case stopCompleted:
-		return []string{fmt.Sprintf("%d files completed", completed)}
+		var lines []string
+		if st.resumed > 0 {
+			lines = append(lines, fmt.Sprintf("Resuming: %d files", st.resumed))
+		}
+		if st.completed > 0 {
+			lines = append(lines, fmt.Sprintf("%d files completed", st.completed))
+		}
+		return lines
 	case stopCanceled:
 		return []string{"Interrupted. Partial files kept for resume."}
 	default:
@@ -55,7 +64,9 @@ func finalLines(reason stopReason, completed int) []string {
 // sink is the rendering back end. The renderer owns the state and the view
 // model; the sink only puts bytes on a stream. Every method is called with
 // the renderer's mutex held — the event deliverer and the repaint loop are
-// the only callers, so a sink needs no lock of its own.
+// the only callers, so a sink needs no lock of its own. The paths crossing
+// this boundary are display paths — relative to the install root once the
+// plan has handed it over (UI1-R2); diagnostics keep their absolute text.
 type sink interface {
 	// info renders a short-lived informational line. TTY: it becomes the
 	// frame's transient message row on the next repaint; log: stdout now.
@@ -72,7 +83,17 @@ type sink interface {
 	// summary when the cadence asks for it.
 	tick(vm viewModel)
 	// finalize renders the run's terminal state and ends all output.
-	finalize(reason stopReason, completed int)
+	finalize(reason stopReason, st runStats)
+}
+
+// runStats are the terminal-state counters: transferred completions, tasks
+// the transfer resumed from a partial file, and tasks the transfer skipped
+// authoritatively (the dynamic-skip case; plan-level skips never reach the
+// queue at all). Review UI1-R2 §5.
+type runStats struct {
+	completed int
+	resumed   int
+	skipped   int
 }
 
 // renderer turns the transfer event stream plus the Progress sampling surface
@@ -92,12 +113,15 @@ type renderer struct {
 	source   progressSource   // the numeric authority; never nil in production
 	sink     sink
 
-	mu            sync.Mutex
-	activeTasks   map[string]*renderTask
-	order         []string
-	finishedCount int
-	startedBytes  int64  // Σ started tasks' totals, accumulated at TaskStart
-	message       string // the latest transient info/success line
+	mu             sync.Mutex
+	activeTasks    map[string]*renderTask
+	order          []string
+	finishedCount  int
+	startedBytes   int64  // Σ started tasks' totals, accumulated at TaskStart
+	message        string // the latest transient info/success line
+	installRoot    string // the plan's semantic install root (UI1-R2); "" until handed over
+	resumed        int    // resumed tasks, counted from the explicit marker alone
+	skippedDynamic int    // transfer-side skips, counted from the explicit marker alone
 
 	stop     chan struct{}
 	stopped  chan struct{}
@@ -124,6 +148,7 @@ func newRenderTask(path string, now time.Time) *renderTask {
 type viewModel struct {
 	active    int // running tasks
 	queued    int // not yet started (snapshot − started)
+	resumed   int // resumed tasks seen so far (explicit marker count only)
 	rate      float64
 	remaining int64
 	etaSecs   float64
@@ -318,7 +343,35 @@ func (r *renderer) Stop(reason stopReason) {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.sink.finalize(reason, r.finishedCount)
+	r.sink.finalize(reason, r.stats())
+}
+
+// stats snapshots the terminal-state counters. Callers hold the mutex.
+func (r *renderer) stats() runStats {
+	return runStats{completed: r.finishedCount, resumed: r.resumed, skipped: r.skippedDynamic}
+}
+
+// SetInstallRoot records the plan's semantic install root (the core seam of
+// the same name calls this after BuildPlan). Task rows display paths relative
+// to it; without it they keep the absolute form, which is never wrong, only
+// verbose (review UI1-R2 §6.B).
+func (r *renderer) SetInstallRoot(path string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.installRoot = path
+}
+
+// displayPath strips the install root from a destination. A path outside the
+// root (or before the root is known) is returned unchanged.
+func (r *renderer) displayPath(path string) string {
+	if r.installRoot == "" {
+		return path
+	}
+	rel := strings.TrimPrefix(path, r.installRoot+"/")
+	if rel == path {
+		return path
+	}
+	return rel
 }
 
 // OnEvent implements transfer.Observer. The call is serial — transfer delivers
@@ -331,21 +384,34 @@ func (r *renderer) OnEvent(ev transfer.Event) {
 	switch ev.Kind {
 	case transfer.EventTaskStart:
 		// RES1 publishes the task's total before emitting TaskStart, so the
-		// pending-byde side can accumulate it here and stays correct after
+		// pending-byte side can accumulate it here and stays correct after
 		// finished tasks leave the active model.
 		r.activeTasks[ev.Path] = newRenderTask(ev.Path, r.now())
 		r.order = append(r.order, ev.Path)
 		if total, ok := r.source.Total(ev.Path); ok {
 			r.startedBytes += total
 		}
-		r.sink.taskStart(len(r.order), ev.Path)
+		r.sink.taskStart(len(r.order), r.displayPath(ev.Path))
 	case transfer.EventTaskFinish:
 		// The task leaves the active model; the row numbering is stable
 		// because r.order keeps every started path.
 		delete(r.activeTasks, ev.Path)
 		r.finishedCount++
-		r.sink.taskFinish(r.indexOf(ev.Path), ev.Path)
+		r.sink.taskFinish(r.indexOf(ev.Path), r.displayPath(ev.Path))
 	case transfer.EventMessageInfo, transfer.EventMessageSuccess:
+		// The explicit resume/skip markers are counters, not display
+		// material: N identical lifecycle records aggregate (review UI1-R2
+		// §4.3). Their event text is never shown, and a resume is recognised
+		// ONLY by the marker — never by inferring an event sequence
+		// (decision 1).
+		if transfer.IsResumeMessage(ev.Text) {
+			r.resumed++
+			break
+		}
+		if transfer.IsSkipMessage(ev.Text) {
+			r.skippedDynamic++
+			break
+		}
 		r.message = ev.Text
 		r.sink.info(ev.Text)
 	case transfer.EventMessageWarning, transfer.EventMessageError:
@@ -386,7 +452,7 @@ func (r *renderer) tick() {
 // the aggregate rate — with remaining==0 taking priority over the rate==0
 // omission, so a finished run shows 0s rather than nothing.
 func (r *renderer) buildVM(now time.Time) viewModel {
-	vm := viewModel{message: r.message}
+	vm := viewModel{message: r.message, resumed: r.resumed}
 	var activeRemaining int64
 	for i, path := range r.order {
 		t := r.activeTasks[path]
@@ -418,7 +484,7 @@ func (r *renderer) buildVM(now time.Time) viewModel {
 			pct = float64(done) / float64(total)
 		}
 		vm.tasks = append(vm.tasks, taskRow{
-			index: i + 1, path: path, pct: pct, done: done, total: total, rate: rate,
+			index: i + 1, path: r.displayPath(path), pct: pct, done: done, total: total, rate: rate,
 		})
 	}
 
@@ -466,8 +532,8 @@ func (s *ttySink) tick(vm viewModel) {
 	s.coord.drawFrame(lines)
 }
 
-func (s *ttySink) finalize(reason stopReason, completed int) {
-	s.coord.finalize(finalLines(reason, completed))
+func (s *ttySink) finalize(reason stopReason, st runStats) {
+	s.coord.finalize(finalLines(reason, st))
 }
 
 // logSink is the non-TTY back end: append-only stable lines, no ANSI, no
@@ -505,13 +571,16 @@ func (s *logSink) tick(vm viewModel) {
 	if vm.etaValid {
 		line += " · ETA " + util.EtaString(int64(vm.etaSecs))
 	}
+	if vm.resumed > 0 {
+		line += fmt.Sprintf(" · %d resuming", vm.resumed)
+	}
 	fmt.Fprintf(s.out, "%d active · %d queued · %s\n", vm.active, vm.queued, line)
 	s.lastSummary = now
 	s.finishedSince = 0
 }
 
-func (s *logSink) finalize(reason stopReason, completed int) {
-	for _, line := range finalLines(reason, completed) {
+func (s *logSink) finalize(reason stopReason, st runStats) {
+	for _, line := range finalLines(reason, st) {
 		if reason == stopCompleted {
 			fmt.Fprintln(s.out, line)
 		} else {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/reconcile"
 	"github.com/nekrozis/goggo/internal/transfer"
 )
@@ -48,12 +49,7 @@ func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 		return err
 	}
 
-	if err := transfer.Run(ctx, res.Plan.Tasks, d.transferOptions(), transfer.RunDeps{
-		HTTP:     d.http,
-		URL:      d.chunkURLProvider(),
-		Observer: d.transferObserver(),
-		Progress: d.progress,
-	}); err != nil {
+	if err := d.runTransfer(ctx, res.Plan.Tasks); err != nil {
 		return err
 	}
 
@@ -71,10 +67,45 @@ func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 	// The post-transfer steps (downloader.cpp:4265-4343): the small-files
 	// containers unpack and the orphan check. Both print as they go and both
 	// are non-fatal in their per-item failures, the way the C++ source is.
-	if err := d.ExtractSmallFilesContainers(ctx, res); err != nil {
+	pending, err := d.ExtractSmallFilesContainers(ctx, res)
+	if err != nil {
 		return err
 	}
+	// A container member the extraction refused is downloaded directly — the
+	// manifest's sfcRef does not describe it, and leaving the file unwritten
+	// would leave the installation short of the manifest state (D48/D49). The
+	// fallback is an ordinary transfer, so the front end sees the same events
+	// and the result counts as this install's own work; the container is not
+	// unpacked again for it.
+	if len(pending) > 0 {
+		if err := d.runTransfer(ctx, pending); err != nil {
+			return err
+		}
+		for _, task := range pending {
+			complete, err := reconcile.IsComplete(task.Item, task.Destination)
+			if err != nil {
+				return fmt.Errorf("Failed to inspect %s: %w", task.Destination, err)
+			}
+			if !complete {
+				// The install must not report success over a file that does not
+				// hold what the manifest declares (decisions D43, D49).
+				return fmt.Errorf("%s: content does not match the manifest after the direct download", task.Destination)
+			}
+		}
+	}
 	return d.CheckOrphanedFiles(ctx, res)
+}
+
+// runTransfer is the one place a task list reaches the transfer layer: the
+// install's main pass and the small-files fallback share it, so both publish the
+// same events and the same progress to the front end (review S9-R).
+func (d *Downloader) runTransfer(ctx context.Context, tasks []model.FileTask) error {
+	return transfer.Run(ctx, tasks, d.transferOptions(), transfer.RunDeps{
+		HTTP:     d.http,
+		URL:      d.chunkURLProvider(),
+		Observer: d.transferObserver(),
+		Progress: d.progress,
+	})
 }
 
 // revalidateSkipped re-observes the plan's skipped destinations and fails on

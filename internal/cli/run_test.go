@@ -365,3 +365,57 @@ func TestRenderNotice(t *testing.T) {
 		t.Errorf("stderr = %q, want %q", errOut.String(), want)
 	}
 }
+
+// TestRunHelpTopicsLockTheirContent locks the layered help (review S3 §12): the
+// root topic lists the surface and says how to reach a command's own options, a
+// command topic lists exactly what that command accepts (with the sentences a
+// user needs), and the orphan topics carry the cross-platform warning before a
+// destructive run.
+func TestRunHelpTopicsLockTheirContent(t *testing.T) {
+	_, root, _ := run(t, "", "--help")
+	if !strings.Contains(root, "Run 'goggo <command> -h'") {
+		t.Errorf("root help does not point at the per-command topics: %q", root)
+	}
+	if strings.Contains(root, "--threads") {
+		t.Errorf("root help lists a command-only option: %q", root)
+	}
+
+	_, install, _ := run(t, "", "install", "-h")
+	for _, want := range []string{"Usage: goggo install <game>", "--threads", "--platform", "--install-dir", "--verbose"} {
+		if !strings.Contains(install, want) {
+			t.Errorf("install topic is missing %s: %q", want, install)
+		}
+	}
+	if !strings.Contains(install, "not a template") {
+		t.Errorf("install topic must explain --install-dir is a plain name: %q", install)
+	}
+	if strings.Contains(install, "%") {
+		t.Errorf("the help must not print template placeholders at all: %q", install)
+	}
+
+	_, authTopic, _ := run(t, "", "help", "auth")
+	for _, want := range []string{"login", "logout", "status", "subcommand"} {
+		if !strings.Contains(authTopic, want) {
+			t.Errorf("auth topic is missing %s: %q", want, authTopic)
+		}
+	}
+
+	for _, args := range [][]string{{"orphans", "check", "-h"}, {"orphans", "remove", "-h"}} {
+		_, out, _ := run(t, "", args...)
+		if !strings.Contains(out, "other variants may be reported as orphaned") {
+			t.Errorf("%v does not carry the cross-platform warning: %q", args, out)
+		}
+	}
+
+	// The topic rule reaches the exit code: a known topic is success, an
+	// unknown one is a usage failure.
+	if code, _, _ := run(t, "", "help", "install"); code != 0 {
+		t.Errorf("help install exit = %d, want 0", code)
+	}
+	if code, _, errOut := run(t, "", "help", "bogus"); code != 2 || !strings.Contains(errOut, "unknown command") {
+		t.Errorf("help bogus = %d/%q, want a usage failure", code, errOut)
+	}
+	if code, _, _ := run(t, "", "install", "-h"); code != 0 {
+		t.Errorf("install -h exit = %d, want 0", code)
+	}
+}

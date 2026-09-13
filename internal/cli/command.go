@@ -87,6 +87,21 @@ type commandNode struct {
 	id       commandID
 	options  []optionID
 	children []commandNode
+	// notes are the lines a reader must see before running the command: the
+	// help prints them between the summary and the options (review §5,
+	// constraint B).
+	notes []string
+}
+
+// orphanNotes is the warning both orphan commands carry.
+//
+// The single-manifest ledger is this port's model — upstream forces every
+// platform and language when it checks orphans (downloader.cpp:1678-1685) — so
+// files belonging to another variant can be reported as orphaned. A destructive
+// command must say that before it runs, not only in an audit file.
+var orphanNotes = []string{
+	"Orphan detection uses the manifest of the selected platform and language:",
+	"files belonging to other variants may be reported as orphaned.",
 }
 
 // The installation-locating options, shared by every command that has to
@@ -195,9 +210,9 @@ var commandTree = []commandNode{
 		summary: "Files in the installation that no manifest accounts for",
 		children: []commandNode{
 			{name: "check", summary: "List them (read-only)", id: cmdOrphansCheck,
-				options: joinOptions(installTargetOptions, orphansOptions)},
+				options: joinOptions(installTargetOptions, orphansOptions), notes: orphanNotes},
 			{name: "remove", summary: "Delete them", id: cmdOrphansRemove,
-				options: joinOptions(installTargetOptions, orphansOptions, []optionID{optYes})},
+				options: joinOptions(installTargetOptions, orphansOptions, []optionID{optYes}), notes: orphanNotes},
 		},
 	},
 }

@@ -110,7 +110,10 @@ type optionSpec struct {
 	hidden  bool
 	arg     string
 	summary string
-	parse   func(inv *invocation, value string) error
+	// detail is the longer explanation a command topic prints under the
+	// option. Empty means the summary says everything.
+	detail string
+	parse  func(inv *invocation, value string) error
 }
 
 // optionTable is the CLI's complete option vocabulary (CLI1 v8 §5).
@@ -120,7 +123,9 @@ var optionTable = []optionSpec{
 	{
 		id: optVerbose, long: "verbose", aliases: []string{"v"},
 		summary: "Verbose output (per-file records, skipped files)",
-		parse:   func(inv *invocation, _ string) error { inv.cfg.MsgLevel = msgLevelVerbose; return nil },
+		detail: "Adds the per-file records the default output aggregates:\n" +
+			"skipped files, container members and orphan paths.",
+		parse: func(inv *invocation, _ string) error { inv.cfg.MsgLevel = msgLevelVerbose; return nil },
 	},
 	{
 		id: optNoColor, long: "no-color",
@@ -173,6 +178,8 @@ var optionTable = []optionSpec{
 	{
 		id: optDirectory, long: "directory", value: valueRequired, arg: "<path>",
 		summary: "Download and installation root (default: .)",
+		detail: "The root every path is built from: the game goes into\n" +
+			"<directory>/<install-dir>, and the account data lives beside it.",
 		parse: func(inv *invocation, v string) error {
 			inv.cfg.Directories.Directory = v
 			return nil
@@ -181,6 +188,8 @@ var optionTable = []optionSpec{
 	{
 		id: optInstallDir, long: "install-dir", value: valueRequired, arg: "<name>",
 		summary: "Subdirectory to install the game into (default: the manifest's installation directory)",
+		detail: "A concrete directory name. It is not a template: the internal\n" +
+			"placeholder language the config layer understands is not accepted here.",
 		parse: func(inv *invocation, v string) error {
 			// The user gives a concrete directory name. The internal
 			// subdirectory resolver still has a template language (the default
@@ -241,6 +250,7 @@ var optionTable = []optionSpec{
 	{
 		id: optThreads, long: "threads", value: valueRequired, arg: "<n>",
 		summary: "Number of download workers",
+		detail:  "0 is not \"auto\": it falls back to a single worker at run time.",
 		parse: func(inv *invocation, v string) error {
 			n, err := strconv.ParseUint(v, 10, 32)
 			if err != nil {
@@ -301,6 +311,7 @@ var optionTable = []optionSpec{
 	{
 		id: optTag, long: "tag", value: valueRequired, arg: "<a,b>",
 		summary: "Only games carrying these tags",
+		detail:  "Comma-separated; a game must carry every listed tag.",
 		parse: func(inv *invocation, v string) error {
 			inv.cfg.DownloadConfig.Tags = util.Split(v, ",")
 			return nil
@@ -411,7 +422,9 @@ var optionTable = []optionSpec{
 	{
 		id: optYes, long: "yes",
 		summary: "Do not ask for confirmation before deleting",
-		parse:   func(inv *invocation, _ string) error { inv.yes = true; return nil },
+		detail: "Required when stdin is not a terminal: this CLI never deletes\n" +
+			"without either a confirmation or this flag.",
+		parse: func(inv *invocation, _ string) error { inv.yes = true; return nil },
 	},
 
 	{
@@ -614,25 +627,39 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 		used = append(used, spec.id)
 	}
 
-	node, path, rest, err := resolveCommand(words)
-	if err != nil {
-		return invocation{}, err
-	}
-
-	// The meta shortcuts answer before the command's own arity is checked, so
-	// "goggo install -h" is help rather than a missing-argument error (D18).
+	// The help shortcut answers BEFORE the command line is resolved: it asks
+	// about a topic, so it must not require a runnable command underneath
+	// ("goggo auth -h" is help for the auth namespace, not a
+	// missing-subcommand error) and must not check the command's arity (D18).
+	// Both spellings — this shortcut and the help command — resolve their topic
+	// with the SAME rule, so they can never disagree about what a topic is
+	// (review S2: the two used to differ on unknown and leftover words).
 	if helpSeen {
+		topic, err := resolveHelpTopic(words)
+		if err != nil {
+			return invocation{}, err
+		}
 		inv.meta = metaHelp
-		inv.helpPath = path
+		inv.helpPath = topic
 		return inv, nil
 	}
 	if versionSeen {
 		inv.meta = metaVersion
 		return inv, nil
 	}
+
+	node, path, rest, err := resolveCommand(words)
+	if err != nil {
+		return invocation{}, err
+	}
+
 	if node.name == "help" {
+		topic, err := resolveHelpTopic(rest)
+		if err != nil {
+			return invocation{}, err
+		}
 		inv.meta = metaHelp
-		inv.helpPath = rest
+		inv.helpPath = topic
 		return inv, nil
 	}
 	if node.name == "version" {
@@ -787,6 +814,65 @@ func parseTarget(arg string) (target, error) {
 		tgt.Build = parts[1]
 	}
 	return tgt, nil
+}
+
+// resolveHelpTopic turns the words after a help request into a topic path.
+//
+// One rule serves both spellings (review S3):
+//
+//	no words                  → the root topic
+//	longest resolvable prefix → that node's topic
+//	namespace with leftovers  → usage error: unknown subcommand
+//	leaf with at most one argument → its topic (help does NOT require the
+//	                                  argument the command would need to run)
+//	leaf with more leftovers  → usage error
+//	nothing resolvable        → usage error: unknown command
+//
+// The alternative — printing the root help for anything unrecognised — would
+// answer a question the user did not ask while looking like success, which is
+// exactly what D2 refuses.
+func resolveHelpTopic(words []string) ([]string, error) {
+	if len(words) == 0 {
+		return nil, nil
+	}
+	nodes := append(append([]commandNode{}, commandTree...), metaCommands...)
+	var (
+		node commandNode
+		path []string
+		idx  int
+	)
+	for idx < len(words) {
+		child, ok := findChild(nodes, words[idx])
+		if !ok {
+			break
+		}
+		node = child
+		path = append(path, child.name)
+		idx++
+		if len(child.children) == 0 {
+			break
+		}
+		nodes = child.children
+	}
+	if len(path) == 0 {
+		return nil, unknownCommand(words[0])
+	}
+	if len(node.children) != 0 {
+		if idx < len(words) {
+			return nil, usagef("unknown subcommand %q for %q (%s)", words[idx], strings.Join(path, " "), childNames(node))
+		}
+		return path, nil
+	}
+	if want, takes := commandArity(node.id); takes {
+		if len(words)-idx > 1 {
+			return nil, usagef("%s takes one %s, got %d", strings.Join(path, " "), want, len(words)-idx)
+		}
+		return path, nil
+	}
+	if len(words) != idx {
+		return nil, usagef("%s takes no arguments", strings.Join(path, " "))
+	}
+	return path, nil
 }
 
 // unknownOption builds the failure for an option this CLI does not have, adding

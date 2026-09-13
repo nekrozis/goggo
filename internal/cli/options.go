@@ -20,8 +20,9 @@ import (
 // front end declares next to the options themselves; config.NewConfig gains the
 // remaining option defaults with the full option table (S24).
 //
-// The download worker count is deliberately absent: its default is a product
-// decision settled by the threads benchmark (review D9), not a value to inherit.
+// The download worker count is here by the same rule — it is a front-end default,
+// not a config default — but its value is not inherited from the C++ source's 4:
+// it is a product decision settled by measurement (D9/D46). See defaultThreads.
 const (
 	defaultGalaxyBuildSort     = "score"
 	defaultGalaxyPlatform      = "w"
@@ -30,6 +31,21 @@ const (
 	defaultGalaxyCDNPriority   = "edgecast,akamai_edgecast_proxy,fastly"
 	defaultGalaxyInstallSubdir = "%install_dir%"
 	defaultDirectory           = "./"
+
+	// defaultThreads is how many download workers an install uses when
+	// --threads is absent.
+	//
+	// Measured, not guessed (D9/D46, dev/plans/active/CLI1.md §9.1): on a
+	// Terraria install (1927 tasks, 812.49 MiB) the median wall clock over two
+	// runs per tier was 792 / 336 / 269 / 254 / 238 s for 1 / 4 / 8 / 16 / 32
+	// workers. The rate gain per step first falls below the pre-registered 15%
+	// at 8→16 (+6.1%), and 8 and 16 differ by only 6.1% — inside the noise band
+	// — so the knee is 8. Past it, quadrupling the connections buys ~10%.
+	//
+	// This is only the CLI's default. --threads 0 keeps its own meaning ("let
+	// the runtime fall back", one worker) and transfer/schedule's fallback is
+	// untouched (review S7).
+	defaultThreads = 8
 
 	// The progress interval stays within 1..10000 ms; an out-of-range value is
 	// clamped to the nearest bound (main.cpp:519-523).

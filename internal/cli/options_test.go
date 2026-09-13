@@ -137,6 +137,13 @@ func TestParseUnknownAndRemovedOptions(t *testing.T) {
 		{[]string{"--download"}, ""},
 		{[]string{"--repair"}, ""},
 		{[]string{"--verbosity", "1"}, "goggo -v"},
+		// The credential options D19 refuses to introduce. They are unknown
+		// options like any other — see TestCredentialOptionsAreNeverAdvertised
+		// for why they carry no hint.
+		{[]string{"--password", "hunter2"}, ""},
+		{[]string{"--password-stdin"}, ""},
+		{[]string{"--token-stdin"}, ""},
+		{[]string{"--non-interactive"}, ""},
 	} {
 		_, err := parseArgs(c.args, testDefaults())
 		if err == nil || !isUsageError(err) {
@@ -157,6 +164,54 @@ func TestParseUnknownAndRemovedOptions(t *testing.T) {
 	}
 	if _, err := parseArgs([]string{"install", "123", "--retries", "x"}, testDefaults()); err == nil {
 		t.Error("a malformed value must be refused")
+	}
+}
+
+// TestCredentialOptionsAreNeverAdvertised locks D19 end to end at the parser
+// boundary: the four ways of handing a secret to a command line are not part of
+// this CLI, and the refusal must not pretend otherwise.
+//
+// The upstream front end never had these options either — it had only
+// --login-email and --login-password (main.cpp:327-328) — so a migration hint
+// would tell a user that a capability was removed when it was never there. That
+// is why the hint table must stay clear of them, and why this test asserts the
+// absence of a hint rather than merely the failure.
+//
+// The value must not come back either: the refusal names the option, never what
+// was offered as its value (D19: a credential must not reach stderr, a log or an
+// audit file).
+func TestCredentialOptionsAreNeverAdvertised(t *testing.T) {
+	const secret = "hunter2"
+
+	for _, args := range [][]string{
+		{"--password", secret},
+		{"--password=" + secret},
+		{"--password-stdin"},
+		{"--token-stdin"},
+		{"--non-interactive"},
+	} {
+		_, err := parseArgs(args, testDefaults())
+		if err == nil || !isUsageError(err) {
+			t.Fatalf("parseArgs(%v) = %v, want a usage error", args, err)
+		}
+		message := err.Error()
+		if !strings.Contains(message, "unknown option") {
+			t.Errorf("parseArgs(%v) error = %v, want an unknown option", args, message)
+		}
+		if strings.Contains(message, "hint:") {
+			t.Errorf("parseArgs(%v) error = %v, want no migration hint: these options never existed upstream", args, message)
+		}
+		if strings.Contains(message, secret) {
+			t.Errorf("parseArgs(%v) error = %v, want the supplied value withheld", args, message)
+		}
+	}
+
+	// Structural guard: the hint table is for options that were removed, so a
+	// credential option must never enter it — that would fabricate a history.
+	for _, name := range []string{"password", "password-stdin", "token-stdin", "non-interactive"} {
+		if _, ok := removedOptions[name]; ok {
+			t.Errorf("removedOptions[%q] is set: D19 refuses to introduce these, so they were never removed", name)
+		}
 	}
 }
 

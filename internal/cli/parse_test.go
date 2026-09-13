@@ -447,3 +447,45 @@ func TestMigrationHintsAreUsable(t *testing.T) {
 		}
 	}
 }
+
+// TestHelpTopicResolution locks the ONE topic rule both spellings share (review
+// S3): -h/--help and the help command resolve the same path the same way, and
+// an unknown or over-specified topic is a usage failure rather than a silent
+// root help.
+func TestHelpTopicResolution(t *testing.T) {
+	ok := []struct {
+		args []string
+		path string
+	}{
+		{[]string{"-h"}, ""},
+		{[]string{"--help"}, ""},
+		{[]string{"help"}, ""},
+		{[]string{"install", "-h"}, "install"},
+		{[]string{"install", "--help", "123"}, "install"}, // help does not require the game
+		{[]string{"help", "install"}, "install"},
+		{[]string{"help", "auth", "login"}, "auth login"},
+		{[]string{"auth", "-h"}, "auth"}, // a namespace has a topic too
+		{[]string{"help", "orphans"}, "orphans"},
+		{[]string{"help", "version"}, "version"},
+	}
+	for _, tc := range ok {
+		inv := mustParse(t, tc.args...)
+		if inv.meta != metaHelp || strings.Join(inv.helpPath, " ") != tc.path {
+			t.Errorf("parseArgs(%v) = meta %d path %v, want help %q", tc.args, inv.meta, inv.helpPath, tc.path)
+		}
+	}
+
+	bad := [][]string{
+		{"help", "bogus"},
+		{"help", "auth", "bogus"},
+		{"--help", "bogus"},
+		{"install", "-h", "1", "2"},
+		{"list", "games", "-h", "extra"}, // no argument to spend
+	}
+	for _, args := range bad {
+		err := mustUsageError(t, args...)
+		if !strings.Contains(err.Error(), "unknown") && !strings.Contains(err.Error(), "takes") {
+			t.Errorf("parseArgs(%v) error = %v, want an unknown command or an arity failure", args, err)
+		}
+	}
+}

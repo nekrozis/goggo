@@ -16,93 +16,158 @@ func renderVersion(w io.Writer) {
 	fmt.Fprintf(w, "%s compatibility: %s\n", config.UpstreamName, config.UpstreamCompatibilityVersion)
 }
 
-// usage writes the CLI's surface for a topic path (empty for the whole CLI).
+// usage writes the help for a topic path (empty for the CLI itself).
 //
-// The text is generated from the parser's own tables — the command tree and the
-// option table — so the help cannot drift from what the parser accepts.
-//
-// Interim (CLI1 S2): one level, shared options only, no long descriptions. S3
-// owns the layered help: per-command topics, the option groups, the hidden set,
-// and the decision on how an unknown topic is answered (registered in the S1
-// audit).
+// Every layer is generated from the parser's own tables — the command tree and
+// the option table — so the help cannot describe a command the parser does not
+// have, an option the parser does not accept, or a per-command option set the
+// tree does not declare. The topic path arrives already resolved and validated
+// (parseArgs owns that rule, shared by -h/--help and the help command), so this
+// layer only renders.
 func usage(w io.Writer, path []string) {
-	if len(path) > 0 {
-		if text, ok := commandUsage(path); ok {
-			fmt.Fprint(w, text)
-			return
-		}
+	node, ok := resolveTopic(path)
+	if !ok {
+		fmt.Fprint(w, rootUsage())
+		return
 	}
-	fmt.Fprint(w, generalUsage())
+	switch {
+	case len(path) == 0:
+		fmt.Fprint(w, rootUsage())
+	case len(node.children) != 0:
+		fmt.Fprint(w, namespaceUsage(node, path))
+	default:
+		fmt.Fprint(w, commandUsage(node, path))
+	}
 }
 
-// generalUsage lists the commands and the options every command shares.
-func generalUsage() string {
+// rootUsage lists the CLI's commands and the options they all share.
+func rootUsage() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Usage: %s <command> [options]\n\nCommands:\n", config.ProgramName)
 	for _, node := range commandTree {
-		b.WriteString(commandLines(node, "  "))
+		b.WriteString(commandLines(node))
 	}
-	b.WriteString(commandLines(commandNode{name: "help", summary: "Show help for a command"}, "  "))
-	b.WriteString(commandLines(commandNode{name: "version", summary: "Show version"}, "  "))
+	b.WriteString(commandLines(commandNode{name: "help", summary: "Show help for a command or the CLI"}))
+	b.WriteString(commandLines(commandNode{name: "version", summary: "Show version"}))
 	b.WriteString("\nShared options:\n")
-	b.WriteString(optionLines(sharedOptions, "  "))
+	b.WriteString(optionLines(sharedOptions))
+	fmt.Fprintf(&b, "\nRun '%s <command> -h' for the options of one command.\n", config.ProgramName)
 	return b.String()
 }
 
-// commandUsage renders one command's topic: what it does and what it accepts.
-func commandUsage(path []string) (string, bool) {
-	node, _, rest, err := resolveCommand(path)
-	if err != nil || node.name == "" || len(rest) != 0 {
-		return "", false
-	}
+// namespaceUsage lists a namespace's subcommands.
+func namespaceUsage(node commandNode, path []string) string {
 	var b strings.Builder
-	if len(node.children) != 0 {
-		fmt.Fprintf(&b, "Usage: %s %s <subcommand> [options]\n\nSubcommands:\n", config.ProgramName, strings.Join(path, " "))
-		for _, child := range node.children {
-			fmt.Fprintf(&b, "  %-16s %s\n", child.name, child.summary)
-		}
-		return b.String(), true
+	fmt.Fprintf(&b, "Usage: %s %s <subcommand> [options]\n\n%s\n\nSubcommands:\n",
+		config.ProgramName, strings.Join(path, " "), node.summary)
+	for _, child := range node.children {
+		fmt.Fprintf(&b, "  %-16s %s\n", child.name, child.summary)
 	}
+	return b.String()
+}
+
+// commandUsage renders one command: how to call it, what it does, what the user
+// should know before running it, and what it accepts.
+func commandUsage(node commandNode, path []string) string {
+	var b strings.Builder
 	fmt.Fprintf(&b, "Usage: %s %s", config.ProgramName, strings.Join(path, " "))
 	if want, takes := commandArity(node.id); takes {
 		fmt.Fprintf(&b, " <%s>", want)
 	}
 	fmt.Fprintf(&b, " [options]\n\n%s\n", node.summary)
+
+	if len(node.notes) != 0 {
+		b.WriteString("\n")
+		for _, note := range node.notes {
+			fmt.Fprintf(&b, "%s\n", note)
+		}
+	}
+
+	// The shared options are listed first when the command adds its own, so a
+	// reader sees the command's own knobs without having to subtract.
 	if len(node.options) != 0 {
 		b.WriteString("\nOptions:\n")
-		b.WriteString(optionLines(optionSet(node.options), "  "))
+		b.WriteString(detailedOptionLines(optionSet(node.options)))
+		b.WriteString("\nAlso accepted (shared with every command):\n")
+		b.WriteString(optionLines(sharedOptions))
+		return b.String()
 	}
-	return b.String(), true
+	b.WriteString("\nOptions:\n")
+	b.WriteString(detailedOptionLines(sharedOptions))
+	return b.String()
+}
+
+// resolveTopic walks a path against the tree, meta commands included.
+func resolveTopic(path []string) (commandNode, bool) {
+	if len(path) == 0 {
+		return commandNode{}, true // the root topic
+	}
+	nodes := append(append([]commandNode{}, commandTree...), metaCommands...)
+	var node commandNode
+	for _, name := range path {
+		child, ok := findChild(nodes, name)
+		if !ok {
+			return commandNode{}, false
+		}
+		node = child
+		nodes = child.children
+	}
+	return node, true
 }
 
 // commandLines renders one node of the tree, indenting its children.
-func commandLines(node commandNode, indent string) string {
+func commandLines(node commandNode) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-*s%s\n", len(indent)+24, indent+node.name, node.summary)
+	fmt.Fprintf(&b, "  %-24s%s\n", node.name, node.summary)
 	for _, child := range node.children {
-		fmt.Fprintf(&b, "%-*s%s\n", len(indent)+2+24, indent+"  "+child.name, child.summary)
+		fmt.Fprintf(&b, "    %-22s%s\n", child.name, child.summary)
 	}
 	return b.String()
 }
 
 // optionLines renders the options in ids, in table order, hiding the ones the
 // table marks hidden.
-func optionLines(ids []optionID, indent string) string {
+func optionLines(ids []optionID) string {
 	var b strings.Builder
 	for i := range optionTable {
 		spec := &optionTable[i]
 		if spec.hidden || !containsOption(ids, spec.id) {
 			continue
 		}
-		name := "--" + spec.long
-		if spec.arg != "" {
-			name += " " + spec.arg
-		}
-		short := ""
-		if len(spec.aliases) != 0 {
-			short = " (-" + spec.aliases[0] + ")"
-		}
-		fmt.Fprintf(&b, "%-*s%s\n", len(indent)+28, indent+name+short, spec.summary)
+		fmt.Fprintf(&b, "  %-26s%s\n", optionUsage(spec), spec.summary)
 	}
 	return b.String()
+}
+
+// detailedOptionLines renders the same list with each option's longer
+// description below it, for the topic of a single command.
+func detailedOptionLines(ids []optionID) string {
+	var b strings.Builder
+	for i := range optionTable {
+		spec := &optionTable[i]
+		if spec.hidden || !containsOption(ids, spec.id) {
+			continue
+		}
+		fmt.Fprintf(&b, "  %-26s%s\n", optionUsage(spec), spec.summary)
+		for _, line := range strings.Split(spec.detail, "\n") {
+			if line == "" {
+				continue
+			}
+			fmt.Fprintf(&b, "  %-26s%s\n", "", line)
+		}
+	}
+	return b.String()
+}
+
+// optionUsage is the option as a user types it, with its short alias and its
+// value placeholder.
+func optionUsage(spec *optionSpec) string {
+	name := "--" + spec.long
+	if spec.arg != "" {
+		name += " " + spec.arg
+	}
+	if len(spec.aliases) != 0 {
+		name += " (-" + spec.aliases[0] + ")"
+	}
+	return name
 }

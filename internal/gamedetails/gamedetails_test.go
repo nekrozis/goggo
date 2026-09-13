@@ -140,10 +140,14 @@ func TestMakeFilepathDLC(t *testing.T) {
 	}
 }
 
-// TestFilterWithPrioritiesKeepsTies locks the scoring: with the priority
-// "French then English" and "Linux then Windows", the Windows French and the
-// Linux English files both survive — every tie at the best score is kept.
-func TestFilterWithPrioritiesKeepsTies(t *testing.T) {
+// TestFilterWithPrioritiesKeepsTheBestScore locks the scoring: with the priority
+// "French then English" and "Linux then Windows", the French Linux file is the
+// only entry at the best score, so only it survives.
+//
+// Renamed from TestFilterWithPrioritiesKeepsTies, which claimed a tie case it
+// never built (S-GD1 review Δ-GD1-T1); the tie itself is covered by
+// TestFilterWithPrioritiesKeepsEveryTie below.
+func TestFilterWithPrioritiesKeepsTheBestScore(t *testing.T) {
 	frLinux := GameFile{Language: config.LangFR, Platform: config.PlatformLinux, Type: config.GFBaseInstaller}
 	enLinux := GameFile{Language: config.LangEN, Platform: config.PlatformLinux, Type: config.GFBaseInstaller}
 	enWindows := GameFile{Language: config.LangEN, Platform: config.PlatformWindows, Type: config.GFBaseInstaller}
@@ -161,6 +165,36 @@ func TestFilterWithPrioritiesKeepsTies(t *testing.T) {
 	}
 	if gd.Installers[0].Score != 0 {
 		t.Errorf("score = %d, want the written-back 0", gd.Installers[0].Score)
+	}
+}
+
+// TestFilterWithPrioritiesKeepsEveryTie is the tie case the name above used to
+// claim (S-GD1 review Δ-GD1-T1): two entries sharing the best score must both
+// survive while a worse one goes. The upstream comparison is "score <=
+// bestScore", so every entry at the best score is kept, not just the first.
+func TestFilterWithPrioritiesKeepsEveryTie(t *testing.T) {
+	frWindows := GameFile{Language: config.LangFR, Platform: config.PlatformWindows, Type: config.GFBaseInstaller}
+	enLinux := GameFile{Language: config.LangEN, Platform: config.PlatformLinux, Type: config.GFBaseInstaller}
+	enWindows := GameFile{Language: config.LangEN, Platform: config.PlatformWindows, Type: config.GFBaseInstaller}
+
+	langPriority := []uint32{config.LangFR, config.LangEN}
+	platformPriority := []uint32{config.PlatformLinux, config.PlatformWindows}
+
+	gd := GameDetails{Installers: []GameFile{frWindows, enLinux, enWindows}}
+	gd.FilterWithPriorities(platformPriority, langPriority)
+
+	// frWindows: 0 + 1 = 1; enLinux: 1 + 0 = 1; enWindows: 1 + 1 = 2.
+	// The two entries tied at the best score both stay.
+	if len(gd.Installers) != 2 {
+		t.Fatalf("installers = %+v, want the two entries tied at the best score", gd.Installers)
+	}
+	for _, gf := range gd.Installers {
+		if gf.Score != 1 {
+			t.Errorf("score = %d for %+v, want 1", gf.Score, gf)
+		}
+		if gf.Language == config.LangEN && gf.Platform == config.PlatformWindows {
+			t.Errorf("the worst-scoring entry survived: %+v", gf)
+		}
 	}
 }
 

@@ -1,8 +1,12 @@
-// Package gamedetails is the pure data layer of the website download face:
-// the GameFile/GameDetails model, the priority and type filters, and the
-// filepath template derivation (gamedetails.h, gamedetails.cpp). It performs
-// no I/O of its own — the JSON conversion (S-GD2), the batch orchestration
-// (S-GD3) and the command wiring (S-GD4) consume it.
+// Package gamedetails is the pure data layer of the website download face: the
+// GameFile/GameDetails model, the priority and type filters, the filepath
+// template derivation (gamedetails.h, gamedetails.cpp) and — since GD1 — the
+// JSON conversion of a Galaxy product document into that model (convert.go).
+//
+// The conversion resolves each file entry's downlink through an injected
+// DownlinkResolver, so this package still performs no I/O of its own: the
+// network and the cache live with the caller (GD2 / S-GD3), and the command
+// wiring follows in GD3 / S-GD4.
 package gamedetails
 
 import (

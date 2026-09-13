@@ -5,12 +5,10 @@
 // Mapping:
 //
 //	include/gamefile.h        + src/gamefile.cpp  -> gamefile.go
-//	include/gamedetails.h                         -> gamedetails.go
 //	include/downloadinfo.h                        -> downloadinfo.go
 //
-// Behavioural methods declared on gameDetails in the C++ header (filters,
-// path templates, JSON rendering, see gamedetails.h:40-57) are NOT ported
-// here. They live in src/gamedetails.cpp and land together with the features
-// that consume them (list assembly in internal/core, S11; directory template
-// and filtering work later in the core split).
+// The gameDetails structures are NOT here: gameDetails itself lives in
+// internal/gamedetails (with the filters, the path templates and, since GD1,
+// the Galaxy product JSON conversion), so this package holds only the data the
+// download and account faces share.
 package model

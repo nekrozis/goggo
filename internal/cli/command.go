@@ -242,3 +242,29 @@ func containsOption(ids []optionID, id optionID) bool {
 type optionSet []optionID
 
 func (s optionSet) contains(id optionID) bool { return containsOption(s, id) }
+
+// commandPaths maps every command to the verb path a user types. Diagnostics use
+// it so a failure names the command the way the help does.
+var commandPaths = map[commandID]string{
+	cmdAuthLogin:     "auth login",
+	cmdAuthLogout:    "auth logout",
+	cmdAuthStatus:    "auth status",
+	cmdListGames:     "list games",
+	cmdListTags:      "list tags",
+	cmdListWishlist:  "list wishlist",
+	cmdShowBuilds:    "show builds",
+	cmdShowManifest:  "show manifest",
+	cmdShowCDNs:      "show cdns",
+	cmdInstall:       "install",
+	cmdVerify:        "verify",
+	cmdOrphansCheck:  "orphans check",
+	cmdOrphansRemove: "orphans remove",
+}
+
+// path is the command's verb path, or "?" for a command that has none.
+func (id commandID) path() string {
+	if p, ok := commandPaths[id]; ok {
+		return p
+	}
+	return "?"
+}

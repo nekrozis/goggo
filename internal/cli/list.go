@@ -31,10 +31,10 @@ const (
 // listing command where it was (review ruling D17=b), so the orchestration it
 // needs is reached through the two accessors below. The whole function moves
 // into internal/core when the listing does.
-func renderList(ctx context.Context, d *core.Downloader, inv Invocation, w io.Writer) error {
+func renderList(ctx context.Context, d *core.Downloader, format uint32, w io.Writer) error {
 	cfg := d.Config()
 	web := d.Web()
-	switch inv.ListFormat {
+	switch format {
 	case config.ListFormatGames:
 		res, err := catalog.List(ctx, web, catalog.ListOptions{
 			Tags:              cfg.DownloadConfig.Tags,

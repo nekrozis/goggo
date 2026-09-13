@@ -14,6 +14,55 @@ import (
 	"github.com/nekrozis/goggo/internal/util"
 )
 
+// outcome is how a command line ended. It is the ONLY thing exitCode turns into
+// a number (review CLI1 §8): the contract — 0 success, 1 operational failure,
+// 2 usage failure, 130 interrupted — lives in exactly one place, so no code path
+// can invent a fifth meaning for a code.
+type outcome uint8
+
+const (
+	outcomeOK outcome = iota
+	outcomeUsageFailure
+	outcomeOperationFailure
+	outcomeInterrupted
+)
+
+// exitCode is the single exit-code authority.
+func exitCode(o outcome) int {
+	switch o {
+	case outcomeOK:
+		return 0
+	case outcomeUsageFailure:
+		return 2
+	case outcomeInterrupted:
+		return 130
+	default:
+		return 1
+	}
+}
+
+// outcomeForError classifies a failure: everything the parser refuses is a usage
+// failure, everything else is an operational one.
+func outcomeForError(err error) outcome {
+	if isUsageError(err) {
+		return outcomeUsageFailure
+	}
+	return outcomeOperationFailure
+}
+
+// stopOutcome maps the install lifecycle's terminal reason (review UI1 v3 §6.E)
+// onto the same contract.
+func stopOutcome(reason stopReason) outcome {
+	switch reason {
+	case stopCompleted:
+		return outcomeOK
+	case stopCanceled:
+		return outcomeInterrupted
+	default:
+		return outcomeOperationFailure
+	}
+}
+
 // newConfig resolves the XDG roots (the single entry point for path
 // resolution) and builds the defaults from them.
 func newConfig() (config.Config, error) {
@@ -32,179 +81,188 @@ func newConfig() (config.Config, error) {
 //
 // It performs no process-level work: all input and output goes through the
 // streams it is given, so the whole front end is testable and nothing can reach
-// the real terminal. Exit codes are 0 for success and 1 for any failure, as in
-// the C++ front end.
-//
-// The dispatch order mirrors the C++ if/else chain, which means the first match
-// wins and combinations are not errors: Help, Version, an unimplemented option,
-// the login-status query, the local logout and then the commands proper
-// (main.cpp:686-931). The orchestration itself lives in internal/core.
+// the real terminal. The command vocabulary, the option acceptance and the exit
+// codes are the ones the parser and the command tree define; this function only
+// decides which command runs (review CLI1 §6).
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	cfg, err := newConfig()
 	if err != nil {
-		fmt.Fprintf(stderr, "Error: %v\n", err)
-		return 1
+		return fail(stderr, err)
 	}
-	inv, err := Parse(args, cfg)
+	inv, err := parseArgs(args, cfg)
 	if err != nil {
-		fmt.Fprintf(stderr, "Error: %v\n", err)
-		return 1
+		return fail(stderr, err)
 	}
+	return exitCode(dispatch(inv, stdin, stdout, stderr))
+}
 
-	switch {
-	case inv.Help:
-		fmt.Fprintln(stdout, config.VersionString)
-		usage(stdout)
-		return 0
-	case inv.Version:
-		// Identity first, then the upstream release this port tracks: the
-		// compatibility baseline is metadata, never presented as our version.
-		fmt.Fprintln(stdout, config.VersionString)
-		fmt.Fprintf(stdout, "%s compatibility: %s\n", config.UpstreamName, config.UpstreamCompatibilityVersion)
-		return 0
-	case inv.Unsupported != "":
-		// Recognised option, but this build does not implement it: fail loudly
-		// rather than report a success that never happened.
-		fmt.Fprintf(stderr, "Error: %s is not implemented in this build\n", inv.Unsupported)
-		return 1
-	}
+// fail prints one diagnostic and returns the exit code its class implies.
+func fail(w io.Writer, err error) int {
+	fmt.Fprintf(w, "Error: %v\n", err)
+	return exitCode(outcomeForError(err))
+}
 
+// dispatch runs one parsed invocation. The order below is the CLI's own: meta
+// answers first (D18), then the commands that need no session, then everything
+// that does.
+func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome {
 	ui := newConsole(stdin, stdout, stderr)
 	ctx := context.Background()
 
-	// The three Galaxy command arguments are resolved BEFORE any session work,
-	// so a malformed argument fails without opening one. The C++ source splits
-	// them at dispatch time instead (main.cpp:840-845) and reads the first token
-	// without checking that the split produced any, which makes an argument of
-	// "/" read past the end of an empty vector.
-	showBuildsProduct, showBuildsID, err := galaxyCommandArgument(inv.GalaxyShowBuilds, "--galaxy-show-builds")
-	if err != nil {
-		fmt.Fprintf(stderr, "Error: %v\n", err)
-		return 1
-	}
-	listCDNsProduct, listCDNsID, err := galaxyCommandArgument(inv.GalaxyListCDNs, "--galaxy-list-cdns")
-	if err != nil {
-		fmt.Fprintf(stderr, "Error: %v\n", err)
-		return 1
-	}
-	installProduct, installBuild, err := galaxyCommandArgument(inv.GalaxyInstall, "--galaxy-install")
-	if err != nil {
-		fmt.Fprintf(stderr, "Error: %v\n", err)
-		return 1
+	switch inv.meta {
+	case metaHelp:
+		usage(stdout, inv.helpPath)
+		return outcomeOK
+	case metaVersion:
+		renderVersion(stdout)
+		return outcomeOK
 	}
 
-	// --check-login-status answers before any login is attempted
-	// (main.cpp:686-698).
-	if inv.CheckLoginStatus {
-		d, err := core.Open(ctx, inv.Config, ui, false)
+	if inv.cmd == cmdNone {
+		// A bare invocation shows the CLI's surface and fails as a usage
+		// error, so a script that forgot the command does not read the run as
+		// a success.
+		fmt.Fprintln(stderr, config.VersionString)
+		usage(stderr, nil)
+		return outcomeUsageFailure
+	}
+
+	// Commands that answer without a session, in the order they must be
+	// considered: a mutation never outranks a query, and neither opens one
+	// (auth logout must not: a Downloader flushes its cookie jar on Close,
+	// which would write the removed cookie file straight back).
+	switch inv.cmd {
+	case cmdAuthStatus:
+		d, err := core.Open(ctx, inv.cfg, ui, false)
 		if err != nil {
-			fmt.Fprintf(stderr, "Error: %v\n", err)
-			return 1
+			return reportError(stderr, err)
 		}
 		if d.LoggedIn() {
 			fmt.Fprintln(stdout, "Login status: Logged in")
-			return 0
+			return outcomeOK
 		}
 		fmt.Fprintln(stdout, "Login status: Not logged in")
-		return 1
+		return outcomeOperationFailure
+	case cmdAuthLogout:
+		if err := logout(inv.cfg, stdout); err != nil {
+			return reportError(stderr, err)
+		}
+		return outcomeOK
+	case cmdAuthLogin:
+		// An explicit login always runs the flow, even with a usable session
+		// stored: that is what asking to log in means (the upstream --login
+		// does the same, main.cpp:679-683).
+		inv.cfg.Login = true
 	}
 
-	// --logout clears the local login state and stops. It sits after the check
-	// above — a query outranks a mutation, so both flags together answer the
-	// query and remove nothing — and before the session below, because it must
-	// never open one: a Downloader flushes its cookie jar on Close, which would
-	// write the removed cookie file straight back.
-	if inv.Logout {
-		if err := logout(inv.Config, stdout); err != nil {
-			fmt.Fprintf(stderr, "Error: %v\n", err)
-			return 1
-		}
-		return 0
+	// The commands whose capability arrives in a later step of CLI1 (S5/S6).
+	// They are registered so their names are stable and their help exists, but
+	// they must not pretend to have done something.
+	switch inv.cmd {
+	case cmdVerify, cmdOrphansCheck, cmdOrphansRemove:
+		return reportError(stderr, usagef("%s is not implemented yet", inv.cmd.path()))
 	}
 
 	// The sampling surface belongs to the one command that polls it: an install
-	// run publishes its per-task byte counts into this registry and the
-	// renderer reads it back. Every other command opens without one, which is
-	// the nil case transfer skips entirely (review S-ETA2).
+	// run publishes its per-task byte counts into this registry and the renderer
+	// reads it back. Every other command opens without one, which is the nil
+	// case transfer skips entirely (review S-ETA2).
 	var progress *transfer.Progress
-	if inv.GalaxyInstall != "" {
+	if inv.cmd == cmdInstall {
 		progress = transfer.NewProgress()
 	}
 
-	d, err := core.OpenWith(ctx, inv.Config, ui, true, core.Dependencies{Progress: progress})
+	d, err := core.OpenWith(ctx, inv.cfg, ui, true, core.Dependencies{Progress: progress})
 	if err != nil {
-		fmt.Fprintf(stderr, "Error: %v\n", err)
-		return 1
+		return reportError(stderr, err)
 	}
 	defer func() { _ = d.Close() }()
 
 	// Downloader::init (main.cpp:802-806): a usable access token is checked
 	// before any command runs, and a failure stops the run.
 	if err := d.Init(ctx); err != nil {
-		fmt.Fprintf(stderr, "Error: %v\n", err)
-		return 1
+		return reportError(stderr, err)
 	}
 
-	// The command chain, in the C++ order (main.cpp:810-931). Options this
-	// build does not implement never reach here: they are recognised by the
-	// parser and answered above.
-	if inv.List {
-		if err := renderList(ctx, d, inv, stdout); err != nil {
-			fmt.Fprintf(stderr, "Error: %v\n", err)
-			return 1
+	switch inv.cmd {
+	case cmdListGames, cmdListTags, cmdListWishlist:
+		if err := renderList(ctx, d, listFormat(inv.cmd), stdout); err != nil {
+			return reportError(stderr, err)
 		}
-		return 0
-	}
+		return outcomeOK
 
-	if showBuildsProduct != "" {
-		res, err := d.ShowBuilds(ctx, showBuildsProduct, showBuildsID)
+	case cmdShowBuilds, cmdShowManifest:
+		// "show builds" lists a product's builds; "show manifest" shows one
+		// build's manifest. Upstream folded both into one option whose meaning
+		// changed with the argument (downloader.cpp:4833-4837); the split made
+		// the intent explicit, so a manifest request without a build means the
+		// build a plain install would pick (index 0), not "list them".
+		build := inv.target.Build
+		if inv.cmd == cmdShowManifest && build == "" {
+			build = "0"
+		}
+		res, err := d.ShowBuilds(ctx, inv.target.Product, build)
 		// The Linux support messages are rendered even when the run then fails:
 		// the C++ source prints them to stdout and this port reports the missing
 		// fallback on stderr afterwards (downloader.cpp:4858-4863).
 		renderNotice(stdout, stderr, res.Notice)
 		if err != nil {
-			fmt.Fprintf(stderr, "Error: %v\n", err)
-			return 1
+			return reportError(stderr, err)
 		}
 		if res.Manifest != nil {
 			if err := renderManifest(stdout, res.Manifest); err != nil {
-				fmt.Fprintf(stderr, "Error: %v\n", err)
-				return 1
+				return reportError(stderr, err)
 			}
-			return 0
+			return outcomeOK
 		}
 		if err := renderBuilds(stdout, res.Builds); err != nil {
-			fmt.Fprintf(stderr, "Error: %v\n", err)
-			return 1
+			return reportError(stderr, err)
 		}
-		return 0
-	}
+		return outcomeOK
 
-	if listCDNsProduct != "" {
-		res, err := d.ListCDNs(ctx, listCDNsProduct, listCDNsID)
+	case cmdShowCDNs:
+		res, err := d.ListCDNs(ctx, inv.target.Product, inv.target.Build)
 		renderNotice(stdout, stderr, res.Notice)
 		if err != nil {
-			fmt.Fprintf(stderr, "Error: %v\n", err)
-			return 1
+			return reportError(stderr, err)
 		}
 		if err := renderCDNNames(stdout, res.Names); err != nil {
-			fmt.Fprintf(stderr, "Error: %v\n", err)
-			return 1
+			return reportError(stderr, err)
 		}
-		return 0
+		return outcomeOK
+
+	case cmdInstall:
+		// The lifecycle has one owner and one order (review UI1 v3 §6.E):
+		// signal context → renderer start → the install with Stop deferred →
+		// signal restore. Stop covers every exit path — error, cancellation and
+		// panic — but never swallows: a panic propagates after the cleanup, as
+		// Go would.
+		req := core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build)
+		return stopOutcome(ui.runInstall(ctx, d, req, inv.cfg, progress))
 	}
 
-	// --galaxy-install (main.cpp:886). The lifecycle has one owner and one
-	// order (review UI1 v3 §6.E): signal context → renderer start → the
-	// install with Stop deferred → signal restore. Stop covers every exit
-	// path — error, cancellation and panic (its reason is whatever the result
-	// variable holds when the defer runs) — but never swallows: a panic
-	// propagates after the cleanup, as Go would.
-	if inv.GalaxyInstall != "" {
-		req := core.NewInstallRequest(inv.Config, installProduct, installBuild)
-		return exitCodeFor(ui.runInstall(ctx, d, req, inv.Config, progress))
-	}
+	// Unreachable while the command tree and this switch agree; keeping it an
+	// operational failure means a future command that forgets a case fails
+	// loudly instead of exiting 0.
+	return reportError(stderr, fmt.Errorf("%s has no handler", inv.cmd.path()))
+}
 
+// reportError prints a diagnostic to stderr and classifies it.
+func reportError(w io.Writer, err error) outcome {
+	fmt.Fprintf(w, "Error: %v\n", err)
+	return outcomeForError(err)
+}
+
+// listFormat maps the list commands onto the catalogue's format mask.
+func listFormat(id commandID) uint32 {
+	switch id {
+	case cmdListGames:
+		return config.ListFormatGames
+	case cmdListTags:
+		return config.ListFormatTags
+	case cmdListWishlist:
+		return config.ListFormatWishlist
+	}
 	return 0
 }
 
@@ -250,40 +308,4 @@ func classifyInstallResult(err error, ctx context.Context) stopReason {
 		return stopCanceled
 	}
 	return stopFailed
-}
-
-// exitCodeFor is the single authority for the reason→exit-code mapping
-// (review UI1 v3, constraint 8): completed→0, canceled→130, failed→1. No
-// other code path may derive an install exit code, so ctx.Err() can never
-// produce a second exit-1 route.
-func exitCodeFor(reason stopReason) int {
-	switch reason {
-	case stopCompleted:
-		return 0
-	case stopCanceled:
-		return 130
-	default:
-		return 1
-	}
-}
-
-// galaxyCommandArgument splits the "<product id or gamename>[/<build id or
-// index>]" argument of the two Galaxy commands (main.cpp:840-845).
-//
-// An empty value means the command was not requested and is not an error.
-// Anything beyond the second token is ignored, as it is upstream; an argument
-// that produces no token at all is an error here, because the C++ source would
-// read past the end of an empty vector.
-func galaxyCommandArgument(value, option string) (productID, buildID string, err error) {
-	if value == "" {
-		return "", "", nil
-	}
-	tokens := util.Split(value, "/")
-	if len(tokens) == 0 {
-		return "", "", fmt.Errorf("%s: no product id in %q", option, value)
-	}
-	if len(tokens) == 2 {
-		buildID = tokens[1]
-	}
-	return tokens[0], buildID, nil
 }

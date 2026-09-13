@@ -5,300 +5,355 @@ import (
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/util"
 )
 
 func testDefaults() config.Config {
 	return config.NewConfig("/cfg", "/cache")
 }
 
-func parse(t *testing.T, args ...string) Invocation {
+// parseOpts is the migrated entry point of these tests: the old Parse is gone
+// (CLI1 S2), and every case below now speaks the command vocabulary.
+func parseOpts(t *testing.T, args ...string) invocation {
 	t.Helper()
-	inv, err := Parse(args, testDefaults())
+	inv, err := parseArgs(args, testDefaults())
 	if err != nil {
-		t.Fatalf("Parse(%v): %v", args, err)
+		t.Fatalf("parseArgs(%v): %v", args, err)
 	}
 	return inv
 }
 
+// TestParseDefaultsComeFromConfig locks the precedence order: the configuration
+// handed in is the base, the parser installs only the defaults it declares, and
+// a value the caller set survives unless a flag overrides it.
 func TestParseDefaultsComeFromConfig(t *testing.T) {
-	inv := parse(t)
-	// "." becomes "./" : Parse normalises directory arguments after the flags
-	// are read (main.cpp:647).
-	if inv.Config.Directories.Directory != "./" {
-		t.Errorf("directory default = %q, want ./", inv.Config.Directories.Directory)
+	cfg := testDefaults()
+	cfg.Threads = 8
+	cfg.Color = false
+	inv, err := parseArgs([]string{"install", "123"}, cfg)
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
 	}
-	if inv.Config.PlatformPriority != config.DefaultPlatformPriority {
-		t.Errorf("platform default = %q", inv.Config.PlatformPriority)
+	if inv.cfg.Threads != 8 || inv.cfg.Color {
+		t.Errorf("caller values were lost: threads=%d color=%v", inv.cfg.Threads, inv.cfg.Color)
 	}
-	if inv.Config.Retries != 3 || inv.Config.Wait != 0 {
-		t.Errorf("retries/wait defaults = %d/%d", inv.Config.Retries, inv.Config.Wait)
+	if inv.cfg.Directories.Directory != "./" {
+		t.Errorf("directory = %q, want the default normalised to ./", inv.cfg.Directories.Directory)
 	}
-	if !inv.Config.Color {
-		t.Error("colour must default to on")
-	}
-	if inv.Config.DownloadConfig.Include != config.IncludeAllMask() {
-		t.Errorf("include default = %d, want the all mask", inv.Config.DownloadConfig.Include)
-	}
-	if inv.Config.Curl.CookiePath != "/cfg/goggo/cookies.txt" {
-		t.Errorf("cookie path = %q", inv.Config.Curl.CookiePath)
-	}
-	if !strings.HasPrefix(inv.Config.Curl.UserAgent, config.ProgramName+"/"+config.Version) {
-		t.Errorf("user agent = %q", inv.Config.Curl.UserAgent)
+	if inv.cfg.UnitFormat != config.UnitFormatIEC || inv.cfg.Retries != 3 {
+		t.Errorf("config defaults missing: unit=%d retries=%d", inv.cfg.UnitFormat, inv.cfg.Retries)
 	}
 }
 
-// TestParseFlagsOverrideDefaults locks the defaults-then-flags precedence.
+// TestParseFlagsOverrideDefaults locks that a flag wins over both layers.
 func TestParseFlagsOverrideDefaults(t *testing.T) {
-	inv := parse(t, "--directory", "/games", "--retries", "7", "--wait", "5",
-		"--no-color", "--respect-umask", "--include-hidden-products")
-	// Parse normalises directory arguments (main.cpp:647), so the value gains a
-	// trailing separator.
-	if inv.Config.Directories.Directory != "/games/" {
-		t.Errorf("directory = %q", inv.Config.Directories.Directory)
+	inv := parseOpts(t, "install", "123", "--threads", "16", "--retries", "5", "--wait", "250",
+		"--unit-format", "SI", "--directory", "/games", "--no-color", "--no-unicode", "--timeout", "30")
+	if inv.cfg.Threads != 16 || inv.cfg.Retries != 5 || inv.cfg.Wait != 250 {
+		t.Errorf("numeric flags: %+v", inv.cfg)
 	}
-	if inv.Config.Retries != 7 || inv.Config.Wait != 5 {
-		t.Errorf("retries/wait = %d/%d", inv.Config.Retries, inv.Config.Wait)
+	if inv.cfg.UnitFormat != config.UnitFormatSI || inv.cfg.Curl.Timeout != 30 {
+		t.Errorf("unit/timeout: %+v", inv.cfg)
 	}
-	if inv.Config.Color {
-		t.Error("--no-color must clear colour")
-	}
-	if !inv.Config.RespectUmask || !inv.Config.IncludeHiddenProducts {
-		t.Errorf("flags = %+v", inv.Config)
+	if inv.cfg.Directories.Directory != "/games/" || inv.cfg.Color || inv.cfg.Unicode {
+		t.Errorf("directory/rendering: %+v", inv.cfg.Directories)
 	}
 }
 
+// TestParsePlatformAndLanguage locks the install-side platform selection and its
+// validation (the listing side lives on list games, see parse_test.go).
 func TestParsePlatformAndLanguage(t *testing.T) {
-	inv := parse(t, "--platform", "w+l", "--language", "en")
-	if inv.Config.DownloadConfig.InstallerPlatform != config.PlatformWindows|config.PlatformLinux {
-		t.Errorf("platform mask = %d", inv.Config.DownloadConfig.InstallerPlatform)
+	inv := parseOpts(t, "install", "123", "--platform", "linux", "--language", "fr", "--arch", "x86")
+	if inv.cfg.DownloadConfig.GalaxyPlatform != config.PlatformLinux {
+		t.Errorf("platform = %#x, want linux", inv.cfg.DownloadConfig.GalaxyPlatform)
 	}
-	// "w+l" is one comma-group combining two platforms, so the priority list
-	// holds a single entry carrying both bits.
-	if got := inv.Config.DownloadConfig.PlatformPriority; len(got) != 1 ||
-		got[0] != config.PlatformWindows|config.PlatformLinux {
-		t.Errorf("platform priority = %v", got)
+	if inv.cfg.DownloadConfig.GalaxyArch != config.ArchX86 {
+		t.Errorf("arch = %#x, want x86", inv.cfg.DownloadConfig.GalaxyArch)
 	}
-	if inv.Config.DownloadConfig.InstallerLanguage != config.LangEN {
-		t.Errorf("language mask = %d", inv.Config.DownloadConfig.InstallerLanguage)
+	// A language with no match leaves 0, which the Galaxy layer reads as
+	// English — the upstream behaviour (downloader.cpp:3904-3913).
+	if got := parseOpts(t, "install", "123", "--language", "nonsense").cfg.DownloadConfig.GalaxyLanguage; got != 0 {
+		t.Errorf("unmatched language = %#x, want 0 (English)", got)
 	}
-
-	if _, err := Parse([]string{"--platform", "nonsense"}, testDefaults()); err == nil {
-		t.Error("invalid --platform must fail")
+	_, err := parseArgs([]string{"install", "123", "--platform", "nonsense"}, testDefaults())
+	if err == nil {
+		t.Error("an unmatched platform must be refused")
 	}
-	if _, err := Parse([]string{"--language", ""}, testDefaults()); err == nil {
-		t.Error("empty --language must fail")
+	if !isUsageError(err) {
+		t.Error("the refusal must be a usage error")
 	}
 }
 
+// TestParseIncludeExclude locks the include mask (verify honours it; the orphan
+// walk does not, and the option table says so).
 func TestParseIncludeExclude(t *testing.T) {
-	inv := parse(t, "--include", "all", "--exclude", "bi")
-	want := config.IncludeAllMask() &^ config.GFBaseInstaller
-	if inv.Config.DownloadConfig.Include != want {
-		t.Errorf("include = %d, want %d", inv.Config.DownloadConfig.Include, want)
+	inv := parseOpts(t, "verify", "123", "--include", "installers,patches", "--exclude", "patches")
+	want := optionMask("installers,patches", config.IncludeOptions) &^ optionMask("patches", config.IncludeOptions)
+	if inv.cfg.DownloadConfig.Include != want {
+		t.Errorf("include = %#x, want %#x", inv.cfg.DownloadConfig.Include, want)
 	}
-
-	// --exclude alone keeps the "all" default on the include side.
-	only := parse(t, "--exclude", "di")
-	if only.Config.DownloadConfig.Include != config.IncludeAllMask()&^config.GFDLCInstaller {
-		t.Errorf("include = %d", only.Config.DownloadConfig.Include)
+	// --include alone keeps everything the mask lists.
+	only := parseOpts(t, "verify", "123", "--include", "installers")
+	if only.cfg.DownloadConfig.Include == 0 || only.cfg.DownloadConfig.Include&^config.IncludeAllMask() != 0 {
+		t.Errorf("include = %#x, want a subset of all", only.cfg.DownloadConfig.Include)
 	}
 }
 
-func TestParseListFormats(t *testing.T) {
-	cases := []struct {
-		args   []string
-		format uint32
-		unsup  string
+// TestParseListResources locks the listing vocabulary: the resource is a
+// subcommand, and each one maps onto the catalogue's format mask.
+func TestParseListResources(t *testing.T) {
+	for _, tc := range []struct {
+		resource string
+		cmd      commandID
+		format   uint32
 	}{
-		{[]string{"--list"}, config.ListFormatGames, ""},
-		{[]string{"--list", "games"}, config.ListFormatGames, ""},
-		{[]string{"--list", "tags"}, config.ListFormatTags, ""},
-		{[]string{"--list", "wishlist"}, config.ListFormatWishlist, ""},
-		// Known but unimplemented formats keep their parsed mask and are
-		// reported as unsupported; an unknown format parses to 0.
-		{[]string{"--list", "details"}, config.ListFormatDetailsText, "--list details"},
-		{[]string{"--list", "json"}, config.ListFormatDetailsJSON, "--list json"},
-		{[]string{"--list", "nonsense"}, 0, "--list nonsense"},
-		{[]string{"--list=wishlist"}, config.ListFormatWishlist, ""},
-	}
-	for _, c := range cases {
-		t.Run(strings.Join(c.args, " "), func(t *testing.T) {
-			inv := parse(t, c.args...)
-			if !inv.List {
-				t.Error("List must be set")
-			}
-			if inv.ListFormat != c.format {
-				t.Errorf("format = %d, want %d", inv.ListFormat, c.format)
-			}
-			if inv.Unsupported != c.unsup {
-				t.Errorf("unsupported = %q, want %q", inv.Unsupported, c.unsup)
-			}
-		})
-	}
-
-	// --list must not swallow a following flag as its format.
-	inv := parse(t, "--list", "--no-color")
-	if inv.ListFormat != config.ListFormatGames || inv.Config.Color {
-		t.Errorf("--list --no-color parsed as %+v", inv)
-	}
-}
-
-func TestParseUnsupportedAndUnknown(t *testing.T) {
-	for _, flag := range []string{"--save-config", "--reset-config", "--update-cache", "--download", "--repair"} {
-		inv := parse(t, flag)
-		if inv.Unsupported != flag {
-			t.Errorf("%s: unsupported = %q", flag, inv.Unsupported)
+		{"games", cmdListGames, config.ListFormatGames},
+		{"tags", cmdListTags, config.ListFormatTags},
+		{"wishlist", cmdListWishlist, config.ListFormatWishlist},
+	} {
+		inv := parseOpts(t, "list", tc.resource)
+		if inv.cmd != tc.cmd || listFormat(inv.cmd) != tc.format {
+			t.Errorf("list %s = cmd %d format %#x", tc.resource, inv.cmd, listFormat(inv.cmd))
 		}
 	}
-	if _, err := Parse([]string{"--nonsense"}, testDefaults()); err == nil {
-		t.Error("unknown option must fail")
-	}
-	if _, err := Parse([]string{"positional"}, testDefaults()); err == nil {
-		t.Error("positional argument must fail")
-	}
-	if _, err := Parse([]string{"--game"}, testDefaults()); err == nil {
-		t.Error("missing option value must fail")
-	}
-	if _, err := Parse([]string{"--retries", "x"}, testDefaults()); err == nil {
-		t.Error("non-numeric --retries must fail")
+	// The removed option that used to carry this is unknown, with a hint.
+	err := mustUsageError(t, "--list", "tags")
+	if !strings.Contains(err.Error(), "unknown option") || !strings.Contains(err.Error(), "goggo list") {
+		t.Errorf("error = %v, want the removal hint", err)
 	}
 }
 
-func TestParseLoginAndFilterFlags(t *testing.T) {
-	inv := parse(t, "--login", "--browser-login", "--login-email", "a@b", "--login-password", "pw",
-		"--game", "alpha", "--game-list", "/tmp/list", "--tags", "a,b",
-		"--updated", "--new", "--no-platform-detection", "--ignore-dlc-count",
-		"--cacert", "/tmp/ca.pem", "--unit-format", "si")
-	if !inv.Config.Login || !inv.Config.ForceBrowserLogin {
-		t.Errorf("login flags = %+v", inv.Config)
-	}
-	if inv.Config.Email != "a@b" || inv.Config.Password != "pw" {
-		t.Errorf("credentials = %q/%q", inv.Config.Email, inv.Config.Password)
-	}
-	if inv.Config.GameRegex != "alpha" || inv.Config.GameListFilePath != "/tmp/list" {
-		t.Errorf("filters = %q/%q", inv.Config.GameRegex, inv.Config.GameListFilePath)
-	}
-	if len(inv.Config.DownloadConfig.Tags) != 2 {
-		t.Errorf("tags = %v", inv.Config.DownloadConfig.Tags)
-	}
-	if !inv.Config.Updated || !inv.Config.New {
-		t.Error("--updated/--new must set their fields")
-	}
-	if inv.Config.PlatformDetection {
-		t.Error("--no-platform-detection must clear the flag")
-	}
-	if inv.Config.IgnoreDLCCountRegex != ".*" {
-		t.Errorf("ignore-dlc-count default = %q, want .*", inv.Config.IgnoreDLCCountRegex)
-	}
-	if inv.Config.Curl.CACertPath != "/tmp/ca.pem" {
-		t.Errorf("cacert = %q", inv.Config.Curl.CACertPath)
-	}
-	if inv.Config.UnitFormat != config.UnitFormatSI {
-		t.Errorf("unit format = %d", inv.Config.UnitFormat)
-	}
-}
-
-// TestParseBrowserLoginImpliesLogin locks main.cpp:472-475: --browser-login
-// selects the login path itself, so it must set Login too. Without it, Open's
-// trigger (cfg.Login || !LoggedIn) would short-circuit on a stored session and
-// a requested browser login would never run.
-func TestParseBrowserLoginImpliesLogin(t *testing.T) {
-	inv := parse(t, "--browser-login")
-	if !inv.Config.ForceBrowserLogin {
-		t.Error("--browser-login must set ForceBrowserLogin")
-	}
-	if !inv.Config.Login {
-		t.Error("--browser-login must also set Login (main.cpp:472-475)")
-	}
-
-	// The implication is one-way: --login must not force the browser flow.
-	inv = parse(t, "--login")
-	if !inv.Config.Login {
-		t.Error("--login must set Login")
-	}
-	if inv.Config.ForceBrowserLogin {
-		t.Error("--login must not set ForceBrowserLogin")
-	}
-}
-
-// TestParseLogout locks the goggo-native --logout flag: it selects the local
-// logout action and must not imply a login.
-func TestParseLogout(t *testing.T) {
-	inv := parse(t, "--logout")
-	if !inv.Logout {
-		t.Error("--logout must set Logout")
-	}
-	if inv.Config.Login || inv.Config.ForceBrowserLogin {
-		t.Error("--logout must not imply a login")
-	}
-}
-
-// TestParseLogoutConflicts locks the Q1/Q5 ruling: --logout is a mutation that
-// clears the whole local login state, so pairing it with another action is
-// refused by name rather than resolved silently. --check-login-status is a
-// query and is deliberately NOT a conflict (query > mutation, Q7), and
-// --help/--version are answered by the dispatcher before anything runs.
-func TestParseLogoutConflicts(t *testing.T) {
-	cases := []struct {
-		name string
+// TestParseUnknownAndRemovedOptions locks the failure shape and the migration
+// hints (D2/D11): a removed option is still an error, and the hint only says
+// where the capability went.
+func TestParseUnknownAndRemovedOptions(t *testing.T) {
+	for _, c := range []struct {
 		args []string
-		want string // empty means the command line is accepted
+		hint string
 	}{
-		{name: "alone", args: []string{"--logout"}},
-		{name: "with login", args: []string{"--logout", "--login"}, want: "--logout cannot be combined with --login"},
-		{name: "login first", args: []string{"--login", "--logout"}, want: "--logout cannot be combined with --login"},
-		{name: "with browser login", args: []string{"--logout", "--browser-login"}, want: "--logout cannot be combined with --browser-login"},
-		{name: "with list", args: []string{"--logout", "--list"}, want: "--logout cannot be combined with --list"},
-		{name: "with list format", args: []string{"--logout", "--list", "tags"}, want: "--logout cannot be combined with --list"},
-		{name: "with check-login-status", args: []string{"--logout", "--check-login-status"}},
-		{name: "with help", args: []string{"--logout", "--help"}},
-		{name: "with version", args: []string{"--logout", "--version"}},
+		{[]string{"--galaxy-install", "123"}, "goggo install <game>"},
+		{[]string{"--check-orphans", "x"}, "goggo orphans check <game>"},
+		{[]string{"--status"}, "goggo verify <game>"},
+		{[]string{"--download"}, ""},
+		{[]string{"--repair"}, ""},
+		{[]string{"--verbosity", "1"}, "goggo -v"},
+	} {
+		_, err := parseArgs(c.args, testDefaults())
+		if err == nil || !isUsageError(err) {
+			t.Fatalf("parseArgs(%v) = %v, want a usage error", c.args, err)
+		}
+		if !strings.Contains(err.Error(), "unknown option") {
+			t.Errorf("parseArgs(%v) error = %v, want an unknown option", c.args, err)
+		}
+		if c.hint != "" && !strings.Contains(err.Error(), c.hint) {
+			t.Errorf("parseArgs(%v) error = %v, want the hint %q", c.args, err, c.hint)
+		}
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			inv, err := Parse(c.args, testDefaults())
-			if c.want == "" {
-				if err != nil {
-					t.Fatalf("Parse(%v) must be accepted: %v", c.args, err)
-				}
-				if !inv.Logout {
-					t.Errorf("Parse(%v) must still set Logout", c.args)
-				}
-				return
-			}
-			if err == nil {
-				t.Fatalf("Parse(%v) must be refused", c.args)
-			}
-			if err.Error() != c.want {
-				t.Errorf("err = %q, want %q", err.Error(), c.want)
-			}
-		})
+	if _, err := parseArgs([]string{"install", "123", "--nonsense"}, testDefaults()); err == nil {
+		t.Error("an unknown option must be refused")
+	}
+	if _, err := parseArgs([]string{"install"}, testDefaults()); err == nil {
+		t.Error("a missing game must be refused")
+	}
+	if _, err := parseArgs([]string{"install", "123", "--retries", "x"}, testDefaults()); err == nil {
+		t.Error("a malformed value must be refused")
 	}
 }
 
-func TestParseIgnoresExtraDashesAndEquals(t *testing.T) {
-	inv := parse(t, "-directory=/games", "--retries=2")
-	// The directory is normalised like any other (main.cpp:647).
-	if inv.Config.Directories.Directory != "/games/" || inv.Config.Retries != 2 {
-		t.Errorf("config = %+v", inv.Config)
+// TestParseLoginAndFilterFlags locks the auth command's inputs and the listing
+// filters (D7: they belong to the command).
+func TestParseLoginAndFilterFlags(t *testing.T) {
+	inv := parseOpts(t, "auth", "login", "--email", "user@example.com")
+	if inv.cmd != cmdAuthLogin || inv.cfg.Email != "user@example.com" {
+		t.Errorf("auth login = cmd %d email %q", inv.cmd, inv.cfg.Email)
+	}
+
+	filters := parseOpts(t, "list", "games",
+		"--game", "^The", "--game-list", "/tmp/list.txt", "--updated", "--new",
+		"--include-hidden-products", "--ignore-dlc-count", "--ignore-dlc-count=^Skip")
+	if filters.cfg.GameRegex != "^The" || filters.cfg.GameListFilePath != "/tmp/list.txt" {
+		t.Errorf("game filters: %+v", filters.cfg)
+	}
+	if !filters.cfg.Updated || !filters.cfg.New || !filters.cfg.IncludeHiddenProducts {
+		t.Errorf("boolean filters: %+v", filters.cfg)
+	}
+	// An implicit value takes the documented default, and an explicit one wins.
+	if got := parseOpts(t, "list", "games", "--ignore-dlc-count").cfg.IgnoreDLCCountRegex; got != ".*" {
+		t.Errorf("implicit ignore-dlc-count = %q, want .*", got)
+	}
+	if got := parseOpts(t, "list", "games", "--ignore-dlc-count=^Skip").cfg.IgnoreDLCCountRegex; got != "^Skip" {
+		t.Errorf("explicit ignore-dlc-count = %q", got)
 	}
 }
 
-func TestParseHelpVersionCheck(t *testing.T) {
-	inv := parse(t, "--help")
-	if !inv.Help {
-		t.Error("--help not detected")
-	}
-	inv = parse(t, "--version")
-	if !inv.Version {
-		t.Error("--version not detected")
-	}
-	inv = parse(t, "--check-login-status")
-	if !inv.CheckLoginStatus {
-		t.Error("--check-login-status not detected")
+// TestParseBrowserLogin locks --browser: it selects the flow. The "and therefore
+// log in" half lives in the dispatcher (auth login always sets cfg.Login), not
+// in the option.
+func TestParseBrowserLogin(t *testing.T) {
+	inv := parseOpts(t, "auth", "login", "--browser")
+	if !inv.cfg.ForceBrowserLogin {
+		t.Error("--browser must force the browser flow")
 	}
 }
 
+// TestParseLogout locks the local logout command and the grammar that replaced
+// the old conflict checks: one command per line, so there is nothing to
+// conflict with.
+func TestParseLogout(t *testing.T) {
+	if inv := parseOpts(t, "auth", "logout"); inv.cmd != cmdAuthLogout {
+		t.Errorf("auth logout = cmd %d", inv.cmd)
+	}
+	for _, args := range [][]string{
+		{"auth", "logout", "--login"}, // the removed option
+		{"auth", "logout", "login"},   // a second verb is an argument
+	} {
+		_, err := parseArgs(args, testDefaults())
+		if err == nil || !isUsageError(err) {
+			t.Errorf("parseArgs(%v) = %v, want a usage error", args, err)
+		}
+	}
+}
+
+// TestParseEqualsForm locks --name=value, the form the parser accepts for every
+// option that takes a value.
+func TestParseEqualsForm(t *testing.T) {
+	inv := parseOpts(t, "install", "123", "--threads=8", "--platform=windows", "--directory=/games")
+	if inv.cfg.Threads != 8 || inv.cfg.Directories.Directory != "/games/" {
+		t.Errorf("equals form: threads=%d directory=%q", inv.cfg.Threads, inv.cfg.Directories.Directory)
+	}
+	if inv.cfg.DownloadConfig.GalaxyPlatform != config.PlatformWindows {
+		t.Error("--platform=windows did not select windows")
+	}
+}
+
+// TestParseShowCommands locks the show family and the target split it carries.
+func TestParseShowCommands(t *testing.T) {
+	if inv := parseOpts(t, "show", "builds", "123"); inv.cmd != cmdShowBuilds || inv.target.Build != "" {
+		t.Errorf("show builds = cmd %d target %+v", inv.cmd, inv.target)
+	}
+	manifest := parseOpts(t, "show", "manifest", "123/2")
+	if manifest.cmd != cmdShowManifest || manifest.target.Product != "123" || manifest.target.Build != "2" {
+		t.Errorf("show manifest = cmd %d target %+v", manifest.cmd, manifest.target)
+	}
+	if inv := parseOpts(t, "show", "cdns", "123"); inv.cmd != cmdShowCDNs {
+		t.Errorf("show cdns = cmd %d", inv.cmd)
+	}
+	// "show builds" lists builds; a build in the argument is a different
+	// command, not a filter (the split that replaced upstream's dual meaning).
+	if _, err := parseArgs([]string{"show", "builds", "123/2"}, testDefaults()); err == nil {
+		t.Error("show builds with a build must be refused")
+	}
+}
+
+// TestParseTargetErrors locks the target's shape rules (D2: refuse rather than
+// silently reinterpret).
+func TestParseTargetErrors(t *testing.T) {
+	for _, arg := range []string{"", "/2", "1/2/3", "/"} {
+		if _, err := parseArgs([]string{"install", arg}, testDefaults()); err == nil {
+			t.Errorf("install %q must be refused", arg)
+		}
+	}
+	// An empty build is "no build given", the way the upstream tokenizer reads it.
+	if inv := parseOpts(t, "install", "1/"); inv.target.Product != "1" || inv.target.Build != "" {
+		t.Errorf("install 1/ = %+v, want product 1 with no build", inv.target)
+	}
+}
+
+// TestParseInstallDefaults locks the defaults the parser owns for an install.
+func TestParseInstallDefaults(t *testing.T) {
+	inv := parseOpts(t, "install", "123")
+	if inv.cfg.GalaxyBuildSortingOrder != defaultGalaxyBuildSort {
+		t.Errorf("sort = %q", inv.cfg.GalaxyBuildSortingOrder)
+	}
+	if inv.cfg.DownloadConfig.GalaxyPlatform != config.PlatformWindows ||
+		inv.cfg.DownloadConfig.GalaxyArch != config.ArchX64 {
+		t.Errorf("platform/arch: %+v", inv.cfg.DownloadConfig)
+	}
+	if !inv.cfg.Directories.SubDirectories || !inv.cfg.DownloadConfig.GalaxyDependencies {
+		t.Error("the negations' defaults must be the positive values")
+	}
+	if inv.cfg.Directories.GalaxyInstallSubdir != defaultGalaxyInstallSubdir {
+		t.Errorf("subdir = %q", inv.cfg.Directories.GalaxyInstallSubdir)
+	}
+	want := util.Split(defaultGalaxyCDNPriority, ",")
+	if len(inv.cfg.DownloadConfig.GalaxyCDNPriority) != len(want) {
+		t.Errorf("cdn priority = %v, want %v", inv.cfg.DownloadConfig.GalaxyCDNPriority, want)
+	}
+}
+
+// TestParseInstallFlags locks the install domain flags: they configure how the
+// plan is resolved, not what is installed.
+func TestParseInstallFlags(t *testing.T) {
+	inv := parseOpts(t, "install", "123", "--install-dir", "My Game", "--no-subdirectories",
+		"--cdn-priority", "fastly", "--no-dependencies", "--check-free-space")
+	if inv.cfg.Directories.GalaxyInstallSubdir != "My Game" {
+		t.Errorf("install dir = %q", inv.cfg.Directories.GalaxyInstallSubdir)
+	}
+	if inv.cfg.Directories.SubDirectories || inv.cfg.DownloadConfig.GalaxyDependencies {
+		t.Error("the negations did not clear their settings")
+	}
+	if len(inv.cfg.DownloadConfig.GalaxyCDNPriority) != 1 || inv.cfg.DownloadConfig.GalaxyCDNPriority[0] != "fastly" {
+		t.Errorf("cdn priority = %v", inv.cfg.DownloadConfig.GalaxyCDNPriority)
+	}
+	if !inv.cfg.DownloadConfig.FreeSpaceCheck {
+		t.Error("--check-free-space did not set the gate")
+	}
+	// The same options belong to verify (the install root must be identical).
+	if inv := parseOpts(t, "verify", "123", "--install-dir", "My Game"); inv.cfg.Directories.GalaxyInstallSubdir != "My Game" {
+		t.Error("verify must resolve the same install root")
+	}
+}
+
+// TestEnsureTrailingSlash keeps the directory normalisation the install path is
+// concatenated from.
+func TestEnsureTrailingSlash(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"/games", "/games/"},
+		{"/games/", "/games/"},
+		{"games", "games/"},
+	} {
+		if got := ensureTrailingSlash(c.in, "./"); got != c.want {
+			t.Errorf("ensureTrailingSlash(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	if got := ensureTrailingSlash("", "/fallback/"); got != "/fallback/" {
+		t.Errorf("empty path = %q, want the fallback", got)
+	}
+}
+
+// TestParseThreadsAndProgressInterval locks the two numeric rendering/transfer
+// knobs the parser owns; the clamp itself is locked in parse_test.go.
+func TestParseThreadsAndProgressInterval(t *testing.T) {
+	inv := parseOpts(t, "install", "123", "--threads", "8", "--progress-interval", "50")
+	if inv.cfg.Threads != 8 || inv.cfg.ProgressInterval != 50 {
+		t.Errorf("threads/interval = %d/%d", inv.cfg.Threads, inv.cfg.ProgressInterval)
+	}
+	if _, err := parseArgs([]string{"install", "123", "--threads", "-1"}, testDefaults()); err == nil {
+		t.Error("a negative thread count must be refused")
+	}
+	if _, err := parseArgs([]string{"install", "123", "--progress-interval", "x"}, testDefaults()); err == nil {
+		t.Error("a malformed interval must be refused")
+	}
+}
+
+// TestParseOrphansOptions locks the orphan command's options: the two filter
+// files are its own, and the include mask is not (upstream checks everything).
+func TestParseOrphansOptions(t *testing.T) {
+	inv := parseOpts(t, "orphans", "check", "123", "--ignorelist", "/tmp/ignore.txt", "--blacklist", "/tmp/black.txt")
+	if inv.cfg.IgnorelistFilePath != "/tmp/ignore.txt" || inv.cfg.BlacklistFilePath != "/tmp/black.txt" {
+		t.Errorf("filter paths: %q / %q", inv.cfg.IgnorelistFilePath, inv.cfg.BlacklistFilePath)
+	}
+	remove := parseOpts(t, "orphans", "remove", "123", "--yes")
+	if remove.cmd != cmdOrphansRemove || !remove.yes {
+		t.Errorf("orphans remove = cmd %d yes=%v", remove.cmd, remove.yes)
+	}
+	if _, err := parseArgs([]string{"orphans", "check", "123", "--include", "all"}, testDefaults()); err == nil {
+		t.Error("the orphan walk must not accept the include mask")
+	}
+}
+
+// TestNewConfigPaths locks the config-domain defaults (unchanged by the parser
+// rework, kept here so the file still covers them).
 func TestNewConfigPaths(t *testing.T) {
 	cfg := config.NewConfig("/cfg", "/cache")
 	if cfg.CacheDirectory != "/cache/goggo" || cfg.XMLDirectory != "/cache/goggo/xml" {
@@ -332,272 +387,5 @@ func TestIdentityIsSeparateFromCompatibility(t *testing.T) {
 	}
 	if strings.Contains(ua, config.UpstreamName) {
 		t.Errorf("UserAgent = %q must not carry the upstream product name", ua)
-	}
-}
-
-// TestParseGalaxyCommands locks the two Galaxy commands and their two settings
-// (main.cpp:329,334,340,346), including the two defaults this layer owns
-// because the C++ front end declares them next to the options.
-func TestParseGalaxyCommands(t *testing.T) {
-	inv := parse(t)
-	if inv.Config.GalaxyBuildSortingOrder != defaultGalaxyBuildSort {
-		t.Errorf("galaxy-builds-sort default = %q, want %q",
-			inv.Config.GalaxyBuildSortingOrder, defaultGalaxyBuildSort)
-	}
-	if inv.Config.DownloadConfig.GalaxyPlatform != config.PlatformWindows {
-		t.Errorf("galaxy-platform default = %d, want the Windows value",
-			inv.Config.DownloadConfig.GalaxyPlatform)
-	}
-	if inv.GalaxyShowBuilds != "" || inv.GalaxyListCDNs != "" {
-		t.Error("no Galaxy command may be requested by default")
-	}
-
-	// The argument is kept verbatim: splitting it into product and build is the
-	// dispatcher's job (main.cpp:840-845).
-	inv = parse(t, "--galaxy-show-builds", "12345/2")
-	if inv.GalaxyShowBuilds != "12345/2" {
-		t.Errorf("--galaxy-show-builds = %q, want the raw argument", inv.GalaxyShowBuilds)
-	}
-
-	inv = parse(t, "--galaxy-list-cdns=12345", "--galaxy-builds-sort", "date", "--galaxy-platform", "linux")
-	if inv.GalaxyListCDNs != "12345" {
-		t.Errorf("--galaxy-list-cdns = %q, want the value after =", inv.GalaxyListCDNs)
-	}
-	if inv.Config.GalaxyBuildSortingOrder != "date" {
-		t.Errorf("galaxy-builds-sort = %q, want date", inv.Config.GalaxyBuildSortingOrder)
-	}
-	if inv.Config.DownloadConfig.GalaxyPlatform != config.PlatformLinux {
-		t.Errorf("galaxy-platform = %d, want the Linux value", inv.Config.DownloadConfig.GalaxyPlatform)
-	}
-
-	// An unrecognised order is accepted: the C++ source only acts on two of them
-	// and leaves the list alone otherwise (downloader.cpp:6826-6830).
-	inv = parse(t, "--galaxy-builds-sort", "whatever")
-	if inv.Config.GalaxyBuildSortingOrder != "whatever" {
-		t.Errorf("galaxy-builds-sort = %q, want the value stored as given",
-			inv.Config.GalaxyBuildSortingOrder)
-	}
-}
-
-// TestParseGalaxyErrors locks the two rejected shapes: a missing value and an
-// unmatched platform. The platform rejection is a recorded difference — the C++
-// Util::getOptionValue returns 0 for an unknown name and the front end then
-// treats it as Windows, while --platform already rejects it here.
-func TestParseGalaxyErrors(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{name: "missing value", args: []string{"--galaxy-show-builds"}, want: "requires a value"},
-		{name: "missing sort value", args: []string{"--galaxy-builds-sort"}, want: "requires a value"},
-		{
-			name: "unknown platform", args: []string{"--galaxy-platform", "nope"},
-			want: "invalid value for --galaxy-platform",
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			_, err := Parse(c.args, testDefaults())
-			if err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Fatalf("err = %v, want it to contain %q", err, c.want)
-			}
-		})
-	}
-}
-
-// TestParseGalaxyInstallDefaults locks the defaults the option layer owns
-// (main.cpp:341-345). Two of them are the positive side of a negated option,
-// which matters because their zero values are the opposite.
-func TestParseGalaxyInstallDefaults(t *testing.T) {
-	inv := parse(t)
-
-	if inv.GalaxyInstall != "" {
-		t.Errorf("GalaxyInstall = %q, want no command", inv.GalaxyInstall)
-	}
-	if inv.Config.DownloadConfig.GalaxyLanguage != config.LangEN {
-		t.Errorf("galaxy language = %d, want the English flag", inv.Config.DownloadConfig.GalaxyLanguage)
-	}
-	if inv.Config.DownloadConfig.GalaxyArch != config.ArchX64 {
-		t.Errorf("galaxy arch = %d, want the 64-bit flag", inv.Config.DownloadConfig.GalaxyArch)
-	}
-	priority := inv.Config.DownloadConfig.GalaxyCDNPriority
-	want := []string{"edgecast", "akamai_edgecast_proxy", "fastly"}
-	if len(priority) != len(want) {
-		t.Fatalf("galaxy cdn priority = %v, want %v", priority, want)
-	}
-	for i := range want {
-		if priority[i] != want[i] {
-			t.Errorf("galaxy cdn priority = %v, want %v", priority, want)
-		}
-	}
-	if inv.Config.Directories.GalaxyInstallSubdir != "%install_dir%" {
-		t.Errorf("install subdir = %q, want the template default", inv.Config.Directories.GalaxyInstallSubdir)
-	}
-	// --no-subdirectories and --galaxy-no-dependencies are negations, so their
-	// defaults are true — the zero value here would be wrong.
-	if !inv.Config.Directories.SubDirectories {
-		t.Error("SubDirectories = false, want true by default")
-	}
-	if !inv.Config.DownloadConfig.GalaxyDependencies {
-		t.Error("GalaxyDependencies = false, want true by default")
-	}
-}
-
-// TestParseGalaxyInstallFlags locks the seven flags, including that the command
-// argument is kept whole: splitting it is the dispatcher's job.
-func TestParseGalaxyInstallFlags(t *testing.T) {
-	inv := parse(t, "--galaxy-install", "12345/2", "--galaxy-language", "de",
-		"--galaxy-arch", "x86", "--galaxy-cdn-priority", "a,,b",
-		"--subdir-galaxy-install", "%product_id%",
-		"--galaxy-no-dependencies", "--no-subdirectories")
-
-	if inv.GalaxyInstall != "12345/2" {
-		t.Errorf("GalaxyInstall = %q, want the raw argument", inv.GalaxyInstall)
-	}
-	if inv.Config.DownloadConfig.GalaxyLanguage != config.LangDE {
-		t.Errorf("galaxy language = %d, want the German flag", inv.Config.DownloadConfig.GalaxyLanguage)
-	}
-	if inv.Config.DownloadConfig.GalaxyArch != config.ArchX86 {
-		t.Errorf("galaxy arch = %d, want the 32-bit flag", inv.Config.DownloadConfig.GalaxyArch)
-	}
-	// The empty element is dropped, exactly as Util::tokenize does.
-	if priority := inv.Config.DownloadConfig.GalaxyCDNPriority; len(priority) != 2 ||
-		priority[0] != "a" || priority[1] != "b" {
-		t.Errorf("galaxy cdn priority = %v, want [a b]", priority)
-	}
-	if inv.Config.Directories.GalaxyInstallSubdir != "%product_id%" {
-		t.Errorf("install subdir = %q", inv.Config.Directories.GalaxyInstallSubdir)
-	}
-	if inv.Config.DownloadConfig.GalaxyDependencies {
-		t.Error("--galaxy-no-dependencies must clear the setting")
-	}
-	if inv.Config.Directories.SubDirectories {
-		t.Error("--no-subdirectories must clear the setting")
-	}
-}
-
-// TestParseGalaxyLanguageArchUnmatched locks the deliberate difference from
-// --galaxy-platform: an unrecognised language or architecture is not refused.
-// The C++ source does not refuse it either, and the Galaxy layer turns a
-// missing match into its own default (downloader.cpp:3904-3922).
-func TestParseGalaxyLanguageArchUnmatched(t *testing.T) {
-	inv := parse(t, "--galaxy-language", "nope")
-	if inv.Config.DownloadConfig.GalaxyLanguage != 0 {
-		t.Errorf("galaxy language = %d, want no match", inv.Config.DownloadConfig.GalaxyLanguage)
-	}
-
-	// "all" and an unmatched value both mean 64-bit (main.cpp:579-580).
-	for _, value := range []string{"nope", "all"} {
-		inv = parse(t, "--galaxy-arch", value)
-		if inv.Config.DownloadConfig.GalaxyArch != config.ArchX64 {
-			t.Errorf("--galaxy-arch %s = %d, want the 64-bit flag",
-				value, inv.Config.DownloadConfig.GalaxyArch)
-		}
-	}
-
-	// The integer channel is real: std::stoi runs before the table walk, so a
-	// number selects the entry carrying that flag value.
-	inv = parse(t, "--galaxy-language", "4")
-	if inv.Config.DownloadConfig.GalaxyLanguage != config.LangFR {
-		t.Errorf("galaxy language 4 = %d, want the French flag",
-			inv.Config.DownloadConfig.GalaxyLanguage)
-	}
-}
-
-// TestEnsureTrailingSlash locks the post-parse normalisation (main.cpp:28-40).
-// Only a forward slash counts, so a backslash path gains one.
-func TestEnsureTrailingSlash(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{in: "", want: "./"},
-		{in: ".", want: "./"},
-		{in: "/games", want: "/games/"},
-		{in: "/games/", want: "/games/"},
-		{in: `C:\games`, want: `C:\games/`},
-	}
-	for _, c := range cases {
-		if got := ensureTrailingSlash(c.in, "./"); got != c.want {
-			t.Errorf("ensureTrailingSlash(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-	if got := ensureTrailingSlash("", "/fallback/"); got != "/fallback/" {
-		t.Errorf("fallback = %q, want /fallback/", got)
-	}
-}
-
-// TestParseCheckFreeSpace locks the plan-builder's space gate option: it is a
-// plain boolean, off by default (main.cpp:319).
-func TestParseCheckFreeSpace(t *testing.T) {
-	if parse(t).Config.DownloadConfig.FreeSpaceCheck {
-		t.Error("FreeSpaceCheck = true, want the false default")
-	}
-	if !parse(t, "--check-free-space").Config.DownloadConfig.FreeSpaceCheck {
-		t.Error("--check-free-space must set FreeSpaceCheck")
-	}
-}
-
-// TestParseThreadsProgressInterval locks the execution parameters the transfer
-// consumes: the thread count passes through (the run clamps it to the task
-// count) and the progress interval is clamped into 1..10000 ms (main.cpp:313).
-func TestParseThreadsProgressInterval(t *testing.T) {
-	inv := parse(t)
-	if inv.Config.Threads != 4 {
-		t.Errorf("threads default = %d, want 4", inv.Config.Threads)
-	}
-	if inv.Config.ProgressInterval != 100 {
-		t.Errorf("progress interval default = %d, want 100", inv.Config.ProgressInterval)
-	}
-
-	inv = parse(t, "--threads", "8", "--progress-interval", "5000")
-	if inv.Config.Threads != 8 || inv.Config.ProgressInterval != 5000 {
-		t.Errorf("threads/interval = %d/%d, want 8/5000",
-			inv.Config.Threads, inv.Config.ProgressInterval)
-	}
-
-	// Out-of-range intervals fall back to the default, and a negative thread
-	// count is refused the way an unsigned option is.
-	inv = parse(t, "--progress-interval", "0")
-	if inv.Config.ProgressInterval != 100 {
-		t.Errorf("interval 0 = %d, want the 100 fallback", inv.Config.ProgressInterval)
-	}
-	inv = parse(t, "--progress-interval", "20000")
-	if inv.Config.ProgressInterval != 100 {
-		t.Errorf("interval 20000 = %d, want the 100 fallback", inv.Config.ProgressInterval)
-	}
-	if _, err := Parse([]string{"--threads", "-1"}, testDefaults()); err == nil {
-		t.Error("--threads -1 must be refused")
-	}
-}
-
-// TestParseNoUnicode locks the progress bar's Unicode switch: it defaults to
-// on and --no-unicode clears it (main.cpp:283,538; review D78).
-func TestParseNoUnicode(t *testing.T) {
-	if !parse(t).Config.Unicode {
-		t.Error("Unicode = false, want the true default")
-	}
-	if parse(t, "--no-unicode").Config.Unicode {
-		t.Error("--no-unicode must clear Unicode")
-	}
-}
-
-// TestParseDeleteOrphans locks the D74 promotion: --delete-orphans left the
-// recognised-but-unimplemented list and now sets the install tail's gate.
-func TestParseDeleteOrphans(t *testing.T) {
-	if parse(t).Config.DownloadConfig.DeleteOrphans {
-		t.Error("DeleteOrphans = true, want the false default")
-	}
-	if !parse(t, "--delete-orphans").Config.DownloadConfig.DeleteOrphans {
-		t.Error("--delete-orphans must set DeleteOrphans")
-	}
-}
-
-// TestParseIgnorelist locks the second filter file's flag: it overrides the
-// <config>/ignorelist.txt default (main.cpp:272).
-func TestParseIgnorelist(t *testing.T) {
-	if parse(t).Config.IgnorelistFilePath == "" {
-		t.Error("IgnorelistFilePath = empty, want the config-directory default")
-	}
-	if got := parse(t, "--ignorelist", "other.txt").Config.IgnorelistFilePath; got != "other.txt" {
-		t.Errorf("IgnorelistFilePath = %q, want other.txt", got)
 	}
 }

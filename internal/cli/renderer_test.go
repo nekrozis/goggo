@@ -309,18 +309,40 @@ func TestFinalLines(t *testing.T) {
 	}
 }
 
-// TestExitCodeAuthority locks the single reason→code mapping (review UI1 v3,
-// constraint 8): 0/130/1 and nothing else.
+// TestExitCodeAuthority locks the single exit-code authority (review UI1 v3
+// constraint 8, extended by CLI1 §8): every outcome maps to one number, and the
+// install lifecycle's reasons are one of the paths into it — 0/1/2/130 and
+// nothing else.
 func TestExitCodeAuthority(t *testing.T) {
-	cases := map[stopReason]int{
-		stopCompleted: 0,
-		stopCanceled:  130,
-		stopFailed:    1,
-	}
-	for reason, want := range cases {
-		if got := exitCodeFor(reason); got != want {
-			t.Errorf("exitCodeFor(%d) = %d, want %d", reason, got, want)
+	for _, tc := range []struct {
+		outcome outcome
+		want    int
+	}{
+		{outcomeOK, 0},
+		{outcomeOperationFailure, 1},
+		{outcomeUsageFailure, 2},
+		{outcomeInterrupted, 130},
+	} {
+		if got := exitCode(tc.outcome); got != tc.want {
+			t.Errorf("exitCode(%d) = %d, want %d", tc.outcome, got, tc.want)
 		}
+	}
+	// The install lifecycle reaches the same authority through stopOutcome.
+	for reason, want := range map[stopReason]outcome{
+		stopCompleted: outcomeOK,
+		stopCanceled:  outcomeInterrupted,
+		stopFailed:    outcomeOperationFailure,
+	} {
+		if got := stopOutcome(reason); got != want {
+			t.Errorf("stopOutcome(%d) = %d, want %d", reason, got, want)
+		}
+	}
+	// A parser refusal is a usage failure, everything else an operational one.
+	if outcomeForError(usagef("bad")) != outcomeUsageFailure {
+		t.Error("usage errors must map to the usage exit code")
+	}
+	if outcomeForError(errors.New("boom")) != outcomeOperationFailure {
+		t.Error("plain errors must map to the operational failure code")
 	}
 }
 

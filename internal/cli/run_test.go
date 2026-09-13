@@ -17,38 +17,55 @@ func run(t *testing.T, stdin string, args ...string) (code int, stdout, stderr s
 	return code, out.String(), errOut.String()
 }
 
-// TestRunHelpAndVersion covers the two paths answered before any session work.
+// TestRunHelpAndVersion covers the two meta answers, which run before any
+// session work (D18). The help is generated from the parser's tables, so it
+// lists the command surface rather than a hand-kept option list.
 func TestRunHelpAndVersion(t *testing.T) {
-	code, out, errOut := run(t, "", "--help")
-	if code != 0 {
-		t.Errorf("--help exit = %d, want 0", code)
-	}
-	if !strings.Contains(out, config.VersionString) {
-		t.Errorf("--help output must start with the version, got %q", out)
-	}
-	if !strings.Contains(out, "--list") || !strings.Contains(out, "--login") {
-		t.Errorf("--help output is missing options: %q", out)
-	}
-	if errOut != "" {
-		t.Errorf("stderr = %q", errOut)
+	for _, flag := range []string{"--help", "-h"} {
+		code, out, errOut := run(t, "", flag)
+		if code != 0 {
+			t.Errorf("%s exit = %d, want 0", flag, code)
+		}
+		if !strings.HasPrefix(out, "Usage: ") {
+			t.Errorf("%s output must start with the usage line, got %q", flag, out)
+		}
+		if !strings.Contains(out, "Usage: ") || !strings.Contains(out, "Commands:") {
+			t.Errorf("%s output is missing the surface: %q", flag, out)
+		}
+		if errOut != "" {
+			t.Errorf("%s stderr = %q", flag, errOut)
+		}
 	}
 
 	// --version carries the full identity: our version plus the upstream
 	// release this port tracks.
-	code, out, _ = run(t, "", "--version")
-	if code != 0 {
-		t.Errorf("--version exit = %d, want 0", code)
+	for _, arg := range []string{"--version", "version"} {
+		code, out, _ := run(t, "", arg)
+		if code != 0 {
+			t.Errorf("%s exit = %d, want 0", arg, code)
+		}
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		wantVersion := config.VersionString
+		wantCompat := config.UpstreamName + " compatibility: " + config.UpstreamCompatibilityVersion
+		if len(lines) != 2 || lines[0] != wantVersion || lines[1] != wantCompat {
+			t.Errorf("%s output = %q, want %q + %q", arg, out, wantVersion, wantCompat)
+		}
 	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	wantVersion := config.VersionString
-	wantCompat := config.UpstreamName + " compatibility: " + config.UpstreamCompatibilityVersion
-	if len(lines) != 2 || lines[0] != wantVersion || lines[1] != wantCompat {
-		t.Errorf("--version output = %q, want %q + %q", out, wantVersion, wantCompat)
+
+	// A bare invocation is a usage failure: it shows the surface and does not
+	// look like a successful run.
+	code, out, errOut := run(t, "")
+	if code != 2 || out != "" || !strings.Contains(errOut, "Usage: ") {
+		t.Errorf("bare invocation = %d/%q/%q, want a usage failure on stderr", code, out, errOut)
 	}
 }
 
 // TestRunFailures locks the exit-code policy: nothing unimplemented or invalid
 // may report success.
+// TestRunFailures locks the failure contract (review CLI1 §8): anything the
+// parser or the command tree refuses is a usage failure and exits 2, with the
+// diagnostic on stderr and nothing on stdout. Removed upstream commands are
+// unknown commands now, not "not implemented" options (D1/D14).
 func TestRunFailures(t *testing.T) {
 	cases := []struct {
 		name string
@@ -56,21 +73,23 @@ func TestRunFailures(t *testing.T) {
 		want string
 	}{
 		{"unknown option", []string{"--nonsense"}, "unknown option"},
-		{"positional", []string{"game"}, "unexpected argument"},
-		{"missing value", []string{"--game"}, "requires a value"},
-		{"invalid platform", []string{"--platform", "nope"}, "invalid value for --platform"},
-		{"save-config", []string{"--save-config"}, "not implemented"},
-		{"reset-config", []string{"--reset-config"}, "not implemented"},
-		{"update-cache", []string{"--update-cache"}, "not implemented"},
-		{"list details", []string{"--list", "details"}, "not implemented"},
-		{"list json", []string{"--list", "json"}, "not implemented"},
-		{"download", []string{"--download"}, "not implemented"},
+		{"unknown command", []string{"frobnicate"}, "unknown command"},
+		{"removed command", []string{"download"}, "unknown command"},
+		{"removed option", []string{"--download"}, "unknown option"},
+		{"removed list option", []string{"--list", "details"}, "unknown option"},
+		{"missing value", []string{"list", "games", "--tag"}, "requires a value"},
+		{"invalid platform", []string{"install", "123", "--platform", "nope"}, "invalid value for --platform"},
+		{"unaccepted option", []string{"list", "games", "--threads", "8"}, "not accepted"},
+		{"missing game", []string{"install"}, "needs a game"},
+		{"malformed target", []string{"install", "/2"}, "the game is empty"},
+		{"show builds with a build", []string{"show", "builds", "123/2"}, "not a build"},
+		{"bare invocation", nil, "Usage:"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			code, out, errOut := run(t, "", c.args...)
-			if code != 1 {
-				t.Errorf("exit = %d, want 1", code)
+			if code != 2 {
+				t.Errorf("exit = %d, want 2 (usage failure)", code)
 			}
 			if out != "" {
 				t.Errorf("stdout = %q, want empty", out)
@@ -182,93 +201,78 @@ func TestRenderWishlist(t *testing.T) {
 }
 
 // TestGalaxyCommandArgument locks the split of the "<product id or
-// gamename>[/<build id or index>]" argument (main.cpp:840-845). The C++ source
-// ignores anything past the second token, and reads past the end of an empty
-// vector for an argument that produces no token at all.
-func TestGalaxyCommandArgument(t *testing.T) {
-	cases := []struct {
-		value     string
-		wantID    string
-		wantBuild string
-		wantErr   bool
-	}{
-		{value: ""},
-		{value: "12345", wantID: "12345"},
-		{value: "12345/2", wantID: "12345", wantBuild: "2"},
-		{value: "Some Game/1.0", wantID: "Some Game", wantBuild: "1.0"},
-		{value: "12345/2/3", wantID: "12345"},
-		{value: "/", wantErr: true},
-		{value: "//", wantErr: true},
-	}
-	for _, c := range cases {
-		t.Run(c.value, func(t *testing.T) {
-			productID, buildID, err := galaxyCommandArgument(c.value, "--galaxy-show-builds")
-			if c.wantErr {
-				if err == nil {
-					t.Fatalf("galaxyCommandArgument(%q) must fail", c.value)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("galaxyCommandArgument(%q): %v", c.value, err)
-			}
-			if productID != c.wantID || buildID != c.wantBuild {
-				t.Errorf("got %q/%q, want %q/%q", productID, buildID, c.wantID, c.wantBuild)
-			}
-		})
+// The old argument helper (galaxyCommandArgument) is gone: splitting
+// "<game>[/<build>]" now happens in the parser, and its shape rules are locked
+// by TestParseTargetErrors and TestParseShowCommands in options_test.go.
+
+// TestRunMalformedTargetFailsOffline locks that a malformed target fails before
+// any session work: the parser answers, so no directory is created and no
+// request is made (review CLI1 §6 — the argument is the parser's business now).
+func TestRunMalformedTargetFailsOffline(t *testing.T) {
+	for _, args := range [][]string{
+		{"show", "builds", "/"},
+		{"install", "/"},
+		{"show", "cdns", "1/2/3"},
+	} {
+		code, out, errOut := run(t, "", args...)
+		if code != 2 {
+			t.Errorf("run(%v) exit = %d, want 2", args, code)
+		}
+		if out != "" {
+			t.Errorf("run(%v) stdout = %q, want empty", args, out)
+		}
+		if !strings.Contains(errOut, "invalid target") {
+			t.Errorf("run(%v) stderr = %q, want the argument error", args, errOut)
+		}
 	}
 }
 
-// TestRunGalaxyArgumentError locks that a malformed Galaxy argument fails before
-// any session work: no directory is created, no request is made.
-func TestRunGalaxyArgumentError(t *testing.T) {
-	code, out, errOut := run(t, "", "--galaxy-show-builds", "/")
-	if code != 1 {
-		t.Errorf("exit = %d, want 1", code)
-	}
-	if out != "" {
-		t.Errorf("stdout = %q, want empty", out)
-	}
-	if !strings.Contains(errOut, "no product id") {
-		t.Errorf("stderr = %q, want the argument error", errOut)
-	}
-}
-
-// TestRunHelpListsGalaxyOptions keeps the help text in step with the parser: an
-// option that runs but is not documented is a user-visible gap.
-func TestRunHelpListsGalaxyOptions(t *testing.T) {
+// TestRunHelpListsTheCommandSurface keeps the interim help in step with the
+// parser: every command and every shared option the CLI accepts is listed, and
+// nothing it removed is (review D14 — the help shows the supported surface).
+func TestRunHelpListsTheCommandSurface(t *testing.T) {
 	_, out, _ := run(t, "", "--help")
 	for _, want := range []string{
-		"--galaxy-show-builds", "--galaxy-list-cdns", "--galaxy-builds-sort", "--galaxy-platform",
-		"--galaxy-install", "--galaxy-language", "--galaxy-arch",
-		"--galaxy-cdn-priority", "--subdir-galaxy-install",
-		"--galaxy-no-dependencies", "--no-subdirectories",
+		"auth", "login", "logout", "status",
+		"list", "games", "tags", "wishlist",
+		"show", "builds", "manifest", "cdns",
+		"install", "verify", "orphans", "check", "remove",
+		"help", "version",
+		// The root topic shows the shared options; a command's own options
+		// (--threads, --directory, ...) belong to its topic.
+		"--verbose", "--no-color", "--no-unicode", "--unit-format",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("--help output does not mention %s: %q", want, out)
 		}
 	}
+	for _, gone := range []string{"--galaxy-install", "--check-orphans", "--download", "--repair"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("--help still advertises the removed %s: %q", gone, out)
+		}
+	}
 }
 
-// TestRunGalaxyInstallArgumentError locks that the install argument is resolved
-// before any session work, like the other two Galaxy commands: a malformed one
-// fails without opening a session or touching the network.
-//
-// The not-implemented answer needs a session, so it is covered where the
-// orchestration lives (core.TestInstallNotImplemented) plus a field check; this
-// test stays on the side of the boundary that is offline.
-func TestRunGalaxyInstallArgumentError(t *testing.T) {
-	code, out, errOut := run(t, "", "--galaxy-install", "/")
-	if code != 1 {
-		t.Errorf("exit = %d, want 1", code)
+// TestRunHelpForACommandAndRemovedCommands locks the two meta answers that do
+// not need a session: a command topic renders from the tree, and a removed
+// command is unknown (with the migration hint when one exists).
+func TestRunHelpForACommandAndRemovedCommands(t *testing.T) {
+	if code, out, _ := run(t, "", "help", "install"); code != 0 || !strings.Contains(out, "install") {
+		t.Errorf("help install = %d/%q, want the topic", code, out)
 	}
-	if out != "" {
-		t.Errorf("stdout = %q, want empty", out)
+	if code, out, _ := run(t, "", "install", "-h"); code != 0 || !strings.Contains(out, "--platform") {
+		t.Errorf("install -h = %d/%q, want the command's options", code, out)
 	}
-	if !strings.Contains(errOut, "no product id") {
-		t.Errorf("stderr = %q, want the argument error", errOut)
+	if code, _, errOut := run(t, "", "repair"); code != 2 || !strings.Contains(errOut, "unknown command") {
+		t.Errorf("removed command = %d/%q, want a usage failure", code, errOut)
+	}
+	if code, _, errOut := run(t, "", "--galaxy-install", "123"); code != 2 || !strings.Contains(errOut, "hint: use") {
+		t.Errorf("removed option = %d/%q, want the hint", code, errOut)
 	}
 }
+
+// The install argument is parsed by the same target rules as the show commands,
+// so its malformed cases are covered by TestRunMalformedTargetFailsOffline.
 
 // TestRenderBuilds locks the listing line (downloader.cpp:4906-4913).
 func TestRenderBuilds(t *testing.T) {

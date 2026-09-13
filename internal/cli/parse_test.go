@@ -366,3 +366,84 @@ func TestOptionPrefixStrictness(t *testing.T) {
 		}
 	}
 }
+
+// TestOptionTableIsComplete locks a structural property the first cut of the
+// table got wrong: an option that parses but has no setter is an option that
+// silently does nothing (--no-color and --no-unicode were exactly that). Every
+// entry must either carry a setter or be one the parser handles itself.
+func TestOptionTableIsComplete(t *testing.T) {
+	handledByTheParser := map[optionID]bool{
+		optHelp:    true, // meta, answered after the tree is known
+		optVersion: true, // meta
+		optInclude: true, // combined with exclude after the loop
+		optExclude: true,
+	}
+	for i := range optionTable {
+		spec := &optionTable[i]
+		if spec.parse == nil && !handledByTheParser[spec.id] {
+			t.Errorf("option --%s has no setter and is not handled by the parser", spec.long)
+		}
+	}
+}
+
+// TestMigrationHintsAreUsable locks a property the first cut of the hint table
+// got wrong twice over: a hint is only useful if the user can paste it. Every
+// hint must therefore name a command the tree actually has — and, when it names
+// an option, one that command actually accepts (review S2: "goggo list
+// --installer-platform" named a command path that does not exist, because the
+// installer filters belong to "list games").
+func TestMigrationHintsAreUsable(t *testing.T) {
+	for flag, hint := range removedOptions {
+		if hint == "" {
+			t.Errorf("removed option --%s has no hint and no reason to be listed", flag)
+			continue
+		}
+		fields := strings.Fields(hint)
+		if len(fields) < 2 || fields[0] != "goggo" {
+			t.Errorf("hint for --%s = %q, want it to start with the program name", flag, hint)
+			continue
+		}
+
+		var (
+			path    []string
+			optName string
+		)
+		for _, field := range fields[1:] {
+			switch {
+			case strings.HasPrefix(field, "-"):
+				optName = strings.TrimLeft(field, "-")
+			case strings.HasPrefix(field, "<"), strings.HasPrefix(field, "("):
+				// A placeholder or a parenthetical ends the command path.
+			default:
+				path = append(path, field)
+			}
+			if optName != "" || strings.HasPrefix(field, "<") || strings.HasPrefix(field, "(") {
+				break
+			}
+		}
+
+		var node commandNode
+		if len(path) != 0 {
+			resolved, _, rest, err := resolveCommand(path)
+			if err != nil || resolved.name == "" || len(rest) != 0 {
+				t.Errorf("hint for --%s = %q: %v names no runnable command", flag, hint, path)
+				continue
+			}
+			node = resolved
+		}
+		if optName == "" {
+			continue
+		}
+		spec := longByName[optName]
+		if spec == nil {
+			spec = shortByName[optName]
+		}
+		if spec == nil {
+			t.Errorf("hint for --%s = %q names option --%s, which does not exist", flag, hint, optName)
+			continue
+		}
+		if len(path) != 0 && !node.accepts(spec.id) {
+			t.Errorf("hint for --%s = %q: %v does not accept --%s", flag, hint, path, optName)
+		}
+	}
+}

@@ -304,7 +304,7 @@ func TestUnknownAndMalformedAreUsageErrors(t *testing.T) {
 
 // TestBareInvocationAndDefaults locks the two boundaries S1 owns: a line with no
 // command parses to nothing to run (the caller decides what to print), and the
-// parser installs its own defaults while leaving the thread count alone (D9).
+// parser installs its own defaults — including the measured worker count (D9).
 func TestBareInvocationAndDefaults(t *testing.T) {
 	inv := mustParse(t)
 	if inv.cmd != cmdNone || inv.meta != metaNone {
@@ -326,8 +326,25 @@ func TestBareInvocationAndDefaults(t *testing.T) {
 	if !got.Directories.SubDirectories || !got.DownloadConfig.GalaxyDependencies {
 		t.Error("the negations' defaults must be the positive values")
 	}
-	if got.Threads != 0 {
-		t.Errorf("threads default = %d: the worker count is settled by the benchmark (D9), not here", got.Threads)
+	if got.Threads != defaultThreads {
+		t.Errorf("threads default = %d, want %d (D9/D46: the benchmark settled it)", got.Threads, defaultThreads)
+	}
+}
+
+// TestThreadsPrecedence locks the three-way precedence the default introduces
+// (review S7): the parser's measured default, an explicit count that wins over
+// it, and an explicit 0 that keeps its own meaning. 0 must NOT become a second
+// spelling of the default — it is the request for the runtime's single-worker
+// fallback, which lives in transfer/schedule and is not the CLI's to redefine.
+func TestThreadsPrecedence(t *testing.T) {
+	if got := mustParse(t, "install", "123").cfg.Threads; got != defaultThreads {
+		t.Errorf("absent --threads: threads = %d, want the default %d", got, defaultThreads)
+	}
+	if got := mustParse(t, "install", "123", "--threads", "6").cfg.Threads; got != 6 {
+		t.Errorf("--threads 6: threads = %d, want 6", got)
+	}
+	if got := mustParse(t, "install", "123", "--threads", "0").cfg.Threads; got != 0 {
+		t.Errorf("--threads 0: threads = %d, want 0 (the runtime fallback, not the default)", got)
 	}
 }
 

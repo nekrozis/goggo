@@ -249,14 +249,15 @@ var optionTable = []optionSpec{
 
 	{
 		id: optThreads, long: "threads", value: valueRequired, arg: "<n>",
-		summary: "Number of download workers",
+		summary: "Number of download workers (default: 8)",
 		detail:  "0 is not \"auto\": it falls back to a single worker at run time.",
 		parse: func(inv *invocation, v string) error {
 			n, err := strconv.ParseUint(v, 10, 32)
 			if err != nil {
 				return usagef("invalid value for --threads: %q", v)
 			}
-			// 0 keeps its meaning of "let the runtime fall back" (review D9);
+			// An explicit value always wins over the parser's default, and 0
+			// keeps its meaning of "let the runtime fall back" (review D9/D46);
 			// it is not a second spelling of "auto".
 			inv.cfg.Threads = uint32(n)
 			return nil
@@ -909,10 +910,14 @@ func optionName(id optionID) string {
 
 // applyParseDefaults installs the defaults the option parser owns.
 //
-// They are the values the parser itself declares — the same set the previous
-// front end installed, minus the two that are decisions of their own: the
-// download worker count is settled by the threads benchmark (D9), and the
-// progress interval keeps the renderer's own 100 ms fallback until then.
+// They are the values the parser itself declares. One of them is a decision of
+// its own rather than an inherited value: the download worker count, settled by
+// measurement (D9/D46) and documented on defaultThreads.
+//
+// This runs before any option is read, so an option on the command line simply
+// overwrites what is set here — including "--threads 0", which keeps its meaning
+// of "let the runtime fall back" instead of becoming a second spelling of this
+// default.
 func applyParseDefaults(cfg *config.Config) {
 	cfg.GalaxyBuildSortingOrder = defaultGalaxyBuildSort
 	cfg.DownloadConfig.GalaxyPlatform = util.OptionValue(defaultGalaxyPlatform, config.Platforms, true)
@@ -920,6 +925,7 @@ func applyParseDefaults(cfg *config.Config) {
 	cfg.DownloadConfig.GalaxyArch = util.OptionValue(defaultGalaxyArch, config.GalaxyArchs, false)
 	cfg.DownloadConfig.GalaxyCDNPriority = util.Split(defaultGalaxyCDNPriority, ",")
 	cfg.Directories.GalaxyInstallSubdir = defaultGalaxyInstallSubdir
+	cfg.Threads = defaultThreads
 	// --no-subdirectories and --no-dependencies are negations of their
 	// settings, so the parser's default is the positive value.
 	cfg.Directories.SubDirectories = true

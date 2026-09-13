@@ -315,11 +315,11 @@ func TestCredentialsEmptyValuesReported(t *testing.T) {
 }
 
 // TestCredentialsHeadless locks the non-terminal branch (downloader.cpp:256-265)
-// against review rulings Q1=b, ① and ②: the two persistence paths go to stdout,
-// nothing is prompted, the failure text is the same whether or not those files
-// exist, and an empty credential pair is never posted — the branch fails
-// instead. credentials performs no HTTP work at all, so "nothing was posted" is
-// structural rather than merely observed here.
+// against review rulings Q1=b, ① and S4-2 (which replaced ②'s hint wording): the
+// two persistence paths go to stdout, nothing is prompted, the failure text is
+// the same whether or not those files exist, and an empty credential pair is
+// never posted — the branch fails instead. credentials performs no HTTP work at
+// all, so "nothing was posted" is structural rather than merely observed here.
 func TestCredentialsHeadless(t *testing.T) {
 	newCfg := func(t *testing.T) (config.Config, string, string) {
 		t.Helper()
@@ -432,10 +432,11 @@ func TestCredentialsHeadless(t *testing.T) {
 }
 
 // headlessMessage is the single non-interactive failure text: review ruling ①
-// unified the two sub-cases, and ② made the hint actionable by naming the flags
-// (--login cannot prompt in a non-interactive session either).
+// unified the two sub-cases, and S4 ruling 2 replaced the hint: the flags it
+// named (--login, --login-email, --login-password) are not part of this CLI any
+// more, so it points at the login command and the terminal it needs.
 const headlessMessage = "no credentials available in a non-interactive session; " +
-	"run --login in a terminal, or pass --login-email/--login-password"
+	"run `goggo auth login` in a terminal"
 
 // TestLoginStreamsAndStatus drives the login flow offline and locks the R2
 // stream policy: every status line goes to stderr, stdout stays empty, and the
@@ -768,7 +769,7 @@ func TestOpenWithInjectedTransportSeesAFreshAccount(t *testing.T) {
 	cfg := config.NewConfig(t.TempDir(), t.TempDir())
 	seededToken(t, cfg, 3600)
 
-	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), false, injectedDeps(t, srv.Server))
+	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), SessionRequest{}, injectedDeps(t, srv.Server))
 	if err != nil {
 		t.Fatalf("OpenWith: %v", err)
 	}
@@ -803,7 +804,7 @@ func TestOpenWithInjectedTransportRefreshesExpiredToken(t *testing.T) {
 	cfg := config.NewConfig(t.TempDir(), t.TempDir())
 	seededToken(t, cfg, -10)
 
-	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), false, injectedDeps(t, srv.Server))
+	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), SessionRequest{}, injectedDeps(t, srv.Server))
 	if err != nil {
 		t.Fatalf("OpenWith: %v", err)
 	}
@@ -829,13 +830,13 @@ func TestOpenWithInjectedTransportRefreshesExpiredToken(t *testing.T) {
 }
 
 // TestOpenWithInjectedTransportWithoutLoginPermission covers the
-// --check-login-status path: with allowLogin false a not-logged-in account is
-// reported, never logged in.
+// --check-login-status path: with the zero request — what `auth status` asks for
+// — a not-logged-in account is reported, never logged in and never failed.
 func TestOpenWithInjectedTransportWithoutLoginPermission(t *testing.T) {
 	srv := newOpenTestServer(t)
 	cfg := config.NewConfig(t.TempDir(), t.TempDir())
 
-	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), false, injectedDeps(t, srv.Server))
+	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), SessionRequest{}, injectedDeps(t, srv.Server))
 	if err != nil {
 		t.Fatalf("OpenWith: %v", err)
 	}
@@ -858,7 +859,7 @@ func TestOpenWithInjectedTransportWithoutToken(t *testing.T) {
 	srv := newOpenTestServer(t)
 	cfg := config.NewConfig(t.TempDir(), t.TempDir())
 
-	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), false, injectedDeps(t, srv.Server))
+	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), SessionRequest{}, injectedDeps(t, srv.Server))
 	if err != nil {
 		t.Fatalf("OpenWith without a token file: %v", err)
 	}
@@ -875,7 +876,7 @@ func TestOpenWithInjectedTransportRunsTheFullLogin(t *testing.T) {
 	cfg := config.NewConfig(t.TempDir(), t.TempDir())
 	cfg.Email, cfg.Password = "user@example.com", "pw"
 
-	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), true, injectedDeps(t, srv.Server))
+	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), SessionRequest{AllowLogin: true}, injectedDeps(t, srv.Server))
 	if err != nil {
 		t.Fatalf("OpenWith with a login: %v", err)
 	}
@@ -896,6 +897,128 @@ func TestOpenWithInjectedTransportRunsTheFullLogin(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("%q was not written: %v", path, err)
 		}
+	}
+}
+
+// TestSessionRequestReadOnlyNeverLogsIn locks the read-only half of the login
+// contract (review CLI1 §7): a command that needs a session and may not create
+// one fails with the one actionable error, without prompting and without the
+// login flow — even though this console could answer, which is what makes the
+// refusal policy rather than a missing terminal.
+func TestSessionRequestReadOnlyNeverLogsIn(t *testing.T) {
+	srv := newOpenTestServer(t)
+	cfg := config.NewConfig(t.TempDir(), t.TempDir())
+	ui := newFakeConsole() // a terminal, with no answers: any prompt would fail
+
+	d, err := OpenWith(context.Background(), cfg, ui, SessionRequest{Required: true},
+		injectedDeps(t, srv.Server))
+	if !errors.Is(err, ErrSessionRequired) {
+		t.Fatalf("err = %v, want ErrSessionRequired", err)
+	}
+	if want := "not logged in; run `goggo auth login`"; err.Error() != want {
+		t.Errorf("message = %q, want %q", err.Error(), want)
+	}
+	if d != nil {
+		t.Error("a refused run must not hand back a Downloader")
+	}
+	if got := strings.Join(ui.prompted, ","); got != "" {
+		t.Errorf("prompted %q, want nothing: a read-only command may not ask for credentials", got)
+	}
+	if ui.out.Len() != 0 || ui.errOut.Len() != 0 {
+		t.Errorf("wrote %q / %q, want nothing", ui.out.String(), ui.errOut.String())
+	}
+	accounts, tokens, logins := srv.counts()
+	if accounts != 1 {
+		t.Errorf("account probes = %d, want exactly one", accounts)
+	}
+	if tokens != 0 || logins != 0 {
+		t.Errorf("token requests = %d and login attempts = %d, want none", tokens, logins)
+	}
+}
+
+// TestSessionRequestNonInteractiveFailFast locks the writing half on a machine
+// that cannot answer (review CLI1 §7). The run stops with the actionable error
+// and never reaches the headless credentials branch: that branch's fingerprint
+// is the two store paths it prints, and it is written for an explicit login only
+// (review S4, ruling 2).
+func TestSessionRequestNonInteractiveFailFast(t *testing.T) {
+	srv := newOpenTestServer(t)
+	cfg := config.NewConfig(t.TempDir(), t.TempDir())
+	ui := newFakeConsole()
+	ui.interactive = false
+
+	d, err := OpenWith(context.Background(), cfg, ui, SessionRequest{Required: true},
+		injectedDeps(t, srv.Server))
+	if !errors.Is(err, ErrSessionRequired) {
+		t.Fatalf("err = %v, want ErrSessionRequired", err)
+	}
+	if d != nil {
+		t.Error("a refused run must not hand back a Downloader")
+	}
+	if ui.out.Len() != 0 {
+		t.Errorf("stdout = %q, want nothing: the headless branch prints the store paths", ui.out.String())
+	}
+	if ui.errOut.Len() != 0 {
+		t.Errorf("stderr = %q, want nothing", ui.errOut.String())
+	}
+	if _, _, logins := srv.counts(); logins != 0 {
+		t.Errorf("login attempts = %d, want none", logins)
+	}
+}
+
+// TestSessionRequestImplicitLoginOnATerminal covers automatic login (review CLI1
+// §7): the two prompts a missing account needs are asked, the flow completes and
+// the run comes back usable.
+func TestSessionRequestImplicitLoginOnATerminal(t *testing.T) {
+	srv := newOpenTestServer(t)
+	cfg := config.NewConfig(t.TempDir(), t.TempDir())
+	ui := newFakeConsole("user@example.com", "pw")
+
+	d, err := OpenWith(context.Background(), cfg, ui,
+		SessionRequest{Required: true, AllowLogin: true}, injectedDeps(t, srv.Server))
+	if err != nil {
+		t.Fatalf("OpenWith: %v", err)
+	}
+	if !d.LoggedIn() {
+		t.Error("LoggedIn = false after an automatic login")
+	}
+	if got := strings.Join(ui.prompted, ","); got != "email,password" {
+		t.Errorf("prompted %q, want the email and the password", got)
+	}
+	_, tokens, logins := srv.counts()
+	if logins != 1 || tokens != 1 {
+		t.Errorf("login attempts = %d, token requests = %d; want one of each", logins, tokens)
+	}
+}
+
+// TestSessionRequestExplicitLoginKeepsTheNonInteractiveBranch locks why an
+// explicit login is its own class (review S4, ruling 2): with no terminal it
+// still runs and reports the missing credentials, and a session-requiring
+// command reports that real failure rather than ErrSessionRequired — the login
+// attempt comes before the requirement is judged.
+func TestSessionRequestExplicitLoginKeepsTheNonInteractiveBranch(t *testing.T) {
+	srv := newOpenTestServer(t)
+	cfg := config.NewConfig(t.TempDir(), t.TempDir())
+	ui := newFakeConsole()
+	ui.interactive = false
+
+	// What `auth login` asks for: run the flow, need nothing beforehand.
+	if _, err := OpenWith(context.Background(), cfg, ui, SessionRequest{AllowLogin: true},
+		injectedDeps(t, srv.Server)); err == nil || err.Error() != headlessMessage {
+		t.Fatalf("err = %v, want %q", err, headlessMessage)
+	}
+	if want := cfg.Curl.CookiePath + "\n" + TokenPath(cfg) + "\n"; ui.out.String() != want {
+		t.Errorf("stdout = %q, want the two store paths %q", ui.out.String(), want)
+	}
+
+	ui.out.Reset()
+	_, err := OpenWith(context.Background(), cfg, ui,
+		SessionRequest{Required: true, AllowLogin: true}, injectedDeps(t, srv.Server))
+	if err == nil || errors.Is(err, ErrSessionRequired) {
+		t.Fatalf("err = %v, want the login failure rather than the requirement error", err)
+	}
+	if _, _, logins := srv.counts(); logins != 0 {
+		t.Errorf("login attempts = %d, want none: no credentials were ever supplied", logins)
 	}
 }
 

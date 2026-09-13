@@ -102,6 +102,34 @@ func fail(w io.Writer, err error) int {
 	return exitCode(outcomeForError(err))
 }
 
+// sessionRequest is the ONE place a command's declared session class becomes the
+// request core acts on (review CLI1 §7). The chain is short and has no second
+// source of truth: the tree declares the class, the parser copies it into the
+// invocation, and this function turns it into what OpenWith enforces.
+//
+// interactive is the terminal answer (ui.IsTerminal), and it conditions only the
+// implicit login: without a terminal there is nobody to answer its prompts, so
+// such a run must fail with the actionable error instead. An explicit login is
+// not conditioned on it — its flow has a non-interactive branch of its own, and
+// stdin may still carry the browser callback URL (review S4, ruling 2).
+//
+// An undeclared class is a broken tree, not user input. It panics rather than
+// silently becoming "no session needed", which would let a command that needs
+// the account run unauthenticated (review S4).
+func sessionRequest(class sessionClass, interactive bool) core.SessionRequest {
+	switch class {
+	case sessionNone:
+		return core.SessionRequest{}
+	case sessionRequired:
+		return core.SessionRequest{Required: true}
+	case sessionImplicitLogin:
+		return core.SessionRequest{Required: true, AllowLogin: interactive}
+	case sessionExplicitLogin:
+		return core.SessionRequest{AllowLogin: true}
+	}
+	panic("unhandled session class: " + class.String())
+}
+
 // dispatch runs one parsed invocation. The order below is the CLI's own: meta
 // answers first (D18), then the commands that need no session, then everything
 // that does.
@@ -133,7 +161,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome
 	// which would write the removed cookie file straight back).
 	switch inv.cmd {
 	case cmdAuthStatus:
-		d, err := core.Open(ctx, inv.cfg, ui, false)
+		d, err := core.Open(ctx, inv.cfg, ui, sessionRequest(inv.session, ui.IsTerminal()))
 		if err != nil {
 			return reportError(stderr, err)
 		}
@@ -152,12 +180,19 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome
 		// An explicit login always runs the flow, even with a usable session
 		// stored: that is what asking to log in means (the upstream --login
 		// does the same, main.cpp:679-683).
+		//
+		// It is set here, not in sessionRequest: SessionRequest says what the
+		// run needs from the session, while "the user ran the login command" is
+		// a fact about this command (review S4, ruling B).
 		inv.cfg.Login = true
 	}
 
 	// The commands whose capability arrives in a later step of CLI1 (S5/S6).
 	// They are registered so their names are stable and their help exists, but
-	// they must not pretend to have done something.
+	// they must not pretend to have done something. Their session class is
+	// already declared on the tree, so replacing the stub with the real
+	// capability needs no new wiring here: it falls through to the one
+	// OpenWith below (review S4).
 	switch inv.cmd {
 	case cmdVerify, cmdOrphansCheck, cmdOrphansRemove:
 		return reportError(stderr, usagef("%s is not implemented yet", inv.cmd.path()))
@@ -172,7 +207,10 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome
 		progress = transfer.NewProgress()
 	}
 
-	d, err := core.OpenWith(ctx, inv.cfg, ui, true, core.Dependencies{Progress: progress})
+	// What this command asks of the session, decided once for every command
+	// that opens one (review CLI1 §7).
+	req := sessionRequest(inv.session, ui.IsTerminal())
+	d, err := core.OpenWith(ctx, inv.cfg, ui, req, core.Dependencies{Progress: progress})
 	if err != nil {
 		return reportError(stderr, err)
 	}

@@ -721,6 +721,9 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 	}
 
 	inv.cmd = node.id
+	// The session class travels with the command: the dispatcher applies the
+	// declaration instead of deciding it (review S4).
+	inv.session = node.session
 	// Directory arguments are normalised once parsing is over: an empty value
 	// means the current directory, and any other value ends in a separator.
 	inv.cfg.Directories.Directory = ensureTrailingSlash(inv.cfg.Directories.Directory, defaultDirectory)

@@ -12,6 +12,58 @@ import "github.com/nekrozis/goggo/internal/config"
 // domain (D13: auth, orphans), and every other upstream verb is absent rather
 // than present-and-unimplemented.
 
+// sessionClass is what a command needs from the session before it can run, and
+// whether it may create one (review CLI1 §7).
+//
+// It is declared on the tree rather than decided in the dispatcher, so the login
+// contract sits next to the command it governs and a new command cannot be added
+// without stating it: the completeness test rejects a leaf that leaves the class
+// unset.
+type sessionClass uint8
+
+const (
+	// sessionUnset is not a usable class: it is what a leaf that forgot to
+	// declare one has. Nothing may dispatch such a command.
+	sessionUnset sessionClass = iota
+
+	// sessionNone runs without a session, so a missing one is not a failure:
+	// `auth status` answers "Not logged in" itself and `auth logout` only
+	// removes local files.
+	sessionNone
+
+	// sessionRequired needs a usable session and never logs in: every
+	// read-only command. A missing session fails the run with
+	// core.ErrSessionRequired.
+	sessionRequired
+
+	// sessionImplicitLogin needs a session and may create one when a terminal
+	// can answer the prompts: the commands that write. Without a terminal it
+	// fails like sessionRequired — it must not reach the headless credentials
+	// branch, whose diagnostic is written for an explicit login.
+	sessionImplicitLogin
+
+	// sessionExplicitLogin is the user asking for a login, so the flow always
+	// runs, terminal or not: without one, stdin may still carry the browser
+	// callback URL, and a missing credential is reported as such.
+	sessionExplicitLogin
+)
+
+// String names the class for diagnostics; an undeclared class says so instead of
+// printing a number.
+func (c sessionClass) String() string {
+	switch c {
+	case sessionNone:
+		return "sessionNone"
+	case sessionRequired:
+		return "sessionRequired"
+	case sessionImplicitLogin:
+		return "sessionImplicitLogin"
+	case sessionExplicitLogin:
+		return "sessionExplicitLogin"
+	}
+	return "sessionUnset"
+}
+
 // commandID identifies one leaf command: a node that can actually run.
 //
 // Namespaces (auth, list, show, orphans) have no id; they only group their
@@ -69,8 +121,12 @@ type invocation struct {
 	meta     metaAction
 	helpPath []string
 
-	cmd    commandID
-	target target
+	cmd commandID
+	// session is the resolved command's session class, copied from its tree
+	// node — never re-derived here, so the declaration the help shows and the
+	// policy the dispatcher applies are the same value (review S4).
+	session sessionClass
+	target  target
 	// yes carries the destructive-confirmation flag. Only the destructive
 	// commands accept it (D16).
 	yes bool
@@ -81,10 +137,15 @@ type invocation struct {
 // options lists what the node ADDS to the shared set (sharedOptions): the parser
 // checks an option against common ∪ node, so "global" means shared semantics,
 // not "every command accepts it" (D15). id is cmdNone for namespaces.
+//
+// session is what the command needs from the session before it can run. Every
+// leaf declares one; namespaces and the meta commands do not, because nothing
+// dispatches them.
 type commandNode struct {
 	name     string
 	summary  string
 	id       commandID
+	session  sessionClass
 	options  []optionID
 	children []commandNode
 	// notes are the lines a reader must see before running the command: the
@@ -158,39 +219,48 @@ var orphansOptions = []optionID{
 }
 
 // commandTree is the product surface: read it top to bottom and you have the
-// CLI's complete vocabulary.
+// CLI's complete vocabulary — and, on each leaf, whether the command needs a
+// session and may log in.
 var commandTree = []commandNode{
 	{
 		name:    "auth",
 		summary: "Authentication",
 		children: []commandNode{
-			{name: "login", summary: "Log in", id: cmdAuthLogin, options: []optionID{optBrowser, optEmail}},
-			{name: "logout", summary: "Log out (clear local login state)", id: cmdAuthLogout},
-			{name: "status", summary: "Report the authentication state", id: cmdAuthStatus},
+			{name: "login", summary: "Log in", id: cmdAuthLogin,
+				session: sessionExplicitLogin, options: []optionID{optBrowser, optEmail}},
+			{name: "logout", summary: "Log out (clear local login state)", id: cmdAuthLogout,
+				session: sessionNone},
+			{name: "status", summary: "Report the authentication state", id: cmdAuthStatus,
+				session: sessionNone},
 		},
 	},
 	{
 		name:    "list",
 		summary: "List account content",
 		children: []commandNode{
-			{name: "games", summary: "List owned games", id: cmdListGames, options: listGamesOptions},
-			{name: "tags", summary: "List tags", id: cmdListTags},
-			{name: "wishlist", summary: "List the wishlist", id: cmdListWishlist},
+			{name: "games", summary: "List owned games", id: cmdListGames,
+				session: sessionRequired, options: listGamesOptions},
+			{name: "tags", summary: "List tags", id: cmdListTags, session: sessionRequired},
+			{name: "wishlist", summary: "List the wishlist", id: cmdListWishlist, session: sessionRequired},
 		},
 	},
 	{
 		name:    "show",
 		summary: "Show one product's builds or endpoints",
 		children: []commandNode{
-			{name: "builds", summary: "List a product's builds", id: cmdShowBuilds, options: []optionID{optSort}},
-			{name: "manifest", summary: "Show a build's manifest", id: cmdShowManifest},
-			{name: "cdns", summary: "List a build's CDN endpoints", id: cmdShowCDNs},
+			{name: "builds", summary: "List a product's builds", id: cmdShowBuilds,
+				session: sessionRequired, options: []optionID{optSort}},
+			{name: "manifest", summary: "Show a build's manifest", id: cmdShowManifest,
+				session: sessionRequired},
+			{name: "cdns", summary: "List a build's CDN endpoints", id: cmdShowCDNs,
+				session: sessionRequired},
 		},
 	},
 	{
 		name:    "install",
 		summary: "Make the local installation match the manifest",
 		id:      cmdInstall,
+		session: sessionImplicitLogin,
 		options: joinOptions(installTargetOptions, []optionID{
 			optThreads,
 			optProgressInterval,
@@ -203,6 +273,7 @@ var commandTree = []commandNode{
 		name:    "verify",
 		summary: "Report whether the local files match the manifest",
 		id:      cmdVerify,
+		session: sessionRequired,
 		options: joinOptions(installTargetOptions, verifyOptions),
 	},
 	{
@@ -210,8 +281,10 @@ var commandTree = []commandNode{
 		summary: "Files in the installation that no manifest accounts for",
 		children: []commandNode{
 			{name: "check", summary: "List them (read-only)", id: cmdOrphansCheck,
+				session: sessionRequired,
 				options: joinOptions(installTargetOptions, orphansOptions), notes: orphanNotes},
 			{name: "remove", summary: "Delete them", id: cmdOrphansRemove,
+				session: sessionImplicitLogin,
 				options: joinOptions(installTargetOptions, orphansOptions, []optionID{optYes}), notes: orphanNotes},
 		},
 	},

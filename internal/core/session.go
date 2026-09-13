@@ -15,23 +15,59 @@ import (
 	"github.com/nekrozis/goggo/internal/webapi"
 )
 
+// SessionRequest is what a run needs from the session before its command can
+// work (review CLI1 §7).
+//
+// The two fields are independent on purpose: a read-only command needs a session
+// but must never create one, while an explicit login creates one without needing
+// anything first. Keeping them apart is what makes "this command may log in" a
+// declared property of the command rather than a side effect of how it was
+// called.
+//
+// The zero value is what a command that runs without a session asks for: no
+// missing-session failure, no login attempt.
+type SessionRequest struct {
+	// Required makes a missing session fatal: instead of handing back a run
+	// that cannot work, OpenWith reports ErrSessionRequired.
+	Required bool
+
+	// AllowLogin lets this run perform the login flow. The front end sets it
+	// for the commands that write, and only when a terminal can answer the
+	// prompts — so an implicit login can never reach the headless branch of
+	// credentials, whose diagnostic is written for an explicit login.
+	AllowLogin bool
+}
+
+// ErrSessionRequired is the one failure a session-requiring command has when
+// there is no usable session and this run may not log in.
+//
+// The wording is the hint the CLI contract promises (review CLI1 §7): the user's
+// next step is the login command, not a retry. It names no command of its own,
+// so every command reports the same sentence instead of inventing its own.
+var ErrSessionRequired = errors.New("not logged in; run `goggo auth login`")
+
 // Open prepares the run with production dependencies: it creates the
 // directories, the transport, the cookie jar, the two protocol clients and the
 // Galaxy credential store, loads the persisted cookies and token, refreshes the
-// token when it has expired and, unless allowLogin is false, runs the login flow
-// when the account is not usable.
+// token when it has expired and then answers what req asks for — it runs the
+// login flow when req.AllowLogin allows one and the account is not usable, and
+// it fails with ErrSessionRequired when req.Required says the command cannot
+// work without a session and none exists.
 //
-// allowLogin exists because the C++ front end answers --check-login-status
-// before it ever considers logging in (main.cpp:685-698).
-func Open(ctx context.Context, cfg config.Config, ui Console, allowLogin bool) (*Downloader, error) {
-	return OpenWith(ctx, cfg, ui, allowLogin, Dependencies{})
+// req exists because the C++ front end has callers with different needs: it
+// answers --check-login-status before it ever considers logging in
+// (main.cpp:685-698), and a command that is not allowed to log in must fail
+// instead of starting an interactive login on a machine that cannot answer it
+// (review CLI1 §7).
+func Open(ctx context.Context, cfg config.Config, ui Console, req SessionRequest) (*Downloader, error) {
+	return OpenWith(ctx, cfg, ui, req, Dependencies{})
 }
 
 // OpenWith is Open with the outside pieces supplied (see Dependencies). The
 // sequence and every decision below are the ones the C++ front end makes; only
 // the network exit of the transport can differ, which is what makes this seam
 // worth having.
-func OpenWith(ctx context.Context, cfg config.Config, ui Console, allowLogin bool,
+func OpenWith(ctx context.Context, cfg config.Config, ui Console, req SessionRequest,
 	deps Dependencies) (*Downloader, error) {
 	// Directories first: every persistence path below writes into them.
 	if err := ensureDirectories(cfg); err != nil {
@@ -74,11 +110,19 @@ func OpenWith(ctx context.Context, cfg config.Config, ui Console, allowLogin boo
 	}
 
 	d.loggedIn = d.checkLoggedIn(ctx)
-	if allowLogin && (cfg.Login || !d.loggedIn) {
+	if req.AllowLogin && (cfg.Login || !d.loggedIn) {
 		if err := d.Login(ctx); err != nil {
 			return nil, err
 		}
 		d.loggedIn = true
+	}
+	// A command that needs a session and was not allowed to create one fails
+	// here, once, with the action the user can take. Letting the command fail
+	// on its own would report a protocol error that reads like a network
+	// fault, mixing "no local session" with "the API is broken" (review S4,
+	// ruling 4).
+	if req.Required && !d.loggedIn {
+		return nil, ErrSessionRequired
 	}
 	return d, nil
 }
@@ -211,7 +255,7 @@ func credentials(cfg config.Config, ui Console, interactive bool) (email, passwo
 // cookie file and the token file it would have used are printed to stdout and
 // the login gives up.
 //
-// Intentional differences, both review rulings:
+// Intentional differences, all review rulings:
 //
 //   - Q1=b: where the C++ source goes on to log in with the empty credential
 //     pair when both files exist, this port stops. An empty credential pair is
@@ -219,13 +263,21 @@ func credentials(cfg config.Config, ui Console, interactive bool) (email, passwo
 //   - ①: the failure message is the same whether or not the two files exist,
 //     because both cases leave the caller with the same job — supply
 //     credentials. The behavioural difference the C++ source attached to the
-//     file check lives in the code above, not in the wording. ② keeps the hint
-//     actionable: --login cannot prompt here either, so the flags are named.
+//     file check lives in the code above, not in the wording.
+//   - S4 ruling 2 replaces ②: the hint names `goggo auth login` only. The flags
+//     the C++ wording pointed at (--login, --login-email, --login-password) are
+//     not part of this CLI, so a diagnostic that kept naming them would send the
+//     user straight into a usage error. Saying "in a terminal" keeps ②'s point —
+//     the hint has to be something the reader can actually do — since there is no
+//     configuration-file credential source yet.
+//
+// Only an explicit login request reaches this branch: an implicit login is
+// allowed solely when a terminal can answer it (see SessionRequest.AllowLogin).
 func headlessCredentials(cfg config.Config, ui Console) error {
 	fmt.Fprintln(ui.Out(), cfg.Curl.CookiePath)
 	fmt.Fprintln(ui.Out(), TokenPath(cfg))
 	return errors.New("no credentials available in a non-interactive session; " +
-		"run --login in a terminal, or pass --login-email/--login-password")
+		"run `goggo auth login` in a terminal")
 }
 
 // Login runs the login flow (downloader.cpp:243-326), reporting progress on

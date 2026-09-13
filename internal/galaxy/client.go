@@ -22,16 +22,22 @@ const DefaultContentSystemHost = "https://content-system.gog.com"
 // DefaultCDNHost serves the manifests themselves (galaxyapi.cpp:199,216,218).
 const DefaultCDNHost = "https://cdn.gog.com"
 
+// DefaultAPIHost serves the product documents (galaxyapi.cpp:356,375). It is a
+// different host from the content system, and the two are not interchangeable
+// in the C++ source either.
+const DefaultAPIHost = "https://api.gog.com"
+
 // endpoints groups the per-host URL prefixes of one Client.
 //
-// Fields are ordered to minimise padding: the two strings (16B each).
+// Fields are ordered to minimise padding: the three strings (16B each).
 type endpoints struct {
 	contentSystem string
 	cdn           string
+	api           string
 }
 
 func defaultEndpoints() endpoints {
-	return endpoints{contentSystem: DefaultContentSystemHost, cdn: DefaultCDNHost}
+	return endpoints{contentSystem: DefaultContentSystemHost, cdn: DefaultCDNHost, api: DefaultAPIHost}
 }
 
 // Client drives the Galaxy content API over an httpx transport.
@@ -146,21 +152,51 @@ func (c *Client) getResponseJSON(ctx context.Context, target string) (map[string
 // its error stays a single ErrNotJSON. Inflation failures are not reported
 // separately — the body was not a usable JSON object either way, and the first
 // error describes what the caller asked for.
+//
+// The object assertion is what makes this the object-shaped entry point;
+// decodeDocument below is the same pipeline without it.
 func decodeJSONObject(body string) (map[string]any, error) {
-	obj, err := decodeObject(body)
+	v, err := decodeDocument(body)
+	if err != nil {
+		return nil, err
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonval.Kind(v))
+	}
+	return obj, nil
+}
+
+// decodeDocument decodes any JSON document — object, array or scalar — with the
+// zlib retry decodeJSONObject used to own.
+//
+// It exists because the Galaxy product documents carry a top-level ARRAY in two
+// places: the response of dlcs.expanded_all_products_url and that of
+// products?ids=… (galaxyapi.cpp:369,395). Upstream reads every one of those
+// through the same Json::Value, which holds an array just as happily as an
+// object; the object-only convenience function is this port's own split, so the
+// value-typed half has to be reachable again.
+//
+// The shape contract above still holds where it always did: callers that need
+// an object assert one on the result (decodeJSONObject does exactly that), and
+// the array failure keeps the same message it always had. Only the location of
+// the assertion moved.
+func decodeDocument(body string) (any, error) {
+	v, err := decodeAny(body)
 	if err == nil {
-		return obj, nil
+		return v, nil
 	}
 	if plain, ok := inflateZlibBody(body); ok {
-		if obj, retryErr := decodeObject(string(plain)); retryErr == nil {
-			return obj, nil
+		if v, retryErr := decodeAny(string(plain)); retryErr == nil {
+			return v, nil
 		}
 	}
 	return nil, err
 }
 
-// decodeObject decodes one JSON object body, with no compression handling.
-func decodeObject(body string) (map[string]any, error) {
+// decodeAny decodes one JSON document of any type, with no compression
+// handling and no shape opinion.
+func decodeAny(body string) (any, error) {
 	if strings.TrimSpace(body) == "" {
 		return nil, fmt.Errorf("%w: empty body", ErrNotJSON)
 	}
@@ -168,11 +204,7 @@ func decodeObject(body string) (map[string]any, error) {
 	if err := json.Unmarshal([]byte(body), &v); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNotJSON, err)
 	}
-	obj, ok := v.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonval.Kind(v))
-	}
-	return obj, nil
+	return v, nil
 }
 
 // inflateZlibBody inflates body when it starts with a zlib stream header, and

@@ -58,3 +58,14 @@ type Console interface {
 type transferEventSink interface {
 	OnEvent(transfer.Event)
 }
+
+// installRootSetter is the optional ability UI1-R2 added: a front end that
+// renders task rows wants the plan's semantic install root so it can display
+// task paths relative to it. The install run hands res.InstallPath over after
+// BuildPlan — the ONE root with the right semantics (the %install_dir%
+// template resolved; not cfg.Directories.Directory, which a subdir template
+// can differ from). Like transferEventSink the interface itself stays
+// unexported; the method is exported so the CLI can satisfy it structurally.
+type installRootSetter interface {
+	SetInstallRoot(path string)
+}

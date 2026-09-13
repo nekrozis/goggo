@@ -33,6 +33,14 @@ func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 	if err != nil {
 		return err
 	}
+	// Hand the plan's semantic install root to a front end that renders task
+	// rows (UI1-R2): the rows display paths relative to this root, never a
+	// guessed one (cfg.Directories.Directory and the resolved %install_dir%
+	// are not the same when a subdir template is in play). Plain consoles
+	// simply do not answer the assertion.
+	if setter, ok := d.ui.(installRootSetter); ok {
+		setter.SetInstallRoot(res.InstallPath)
+	}
 
 	failures, err := d.ApplyPlanChanges(ctx, res.Plan)
 	d.emitNotices(failures)

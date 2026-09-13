@@ -165,3 +165,38 @@ func TestCheckOrphanedFilesSkipped(t *testing.T) {
 		t.Errorf("output = %q, want only the true leftover counted", consoleText(t, d))
 	}
 }
+
+// TestCheckOrphanedFilesDeleteListsObjects locks the UI1-R2 amendment: a
+// destructive delete names its objects. The header aggregates the scale, each
+// removed file gets one indented line relative to the install root, and a
+// zero-orphan run prints no header at all (the count line above already said
+// so). A failed delete stays its own stderr diagnostic.
+func TestCheckOrphanedFilesDeleteListsObjects(t *testing.T) {
+	f := newOrphansFixture(t)
+	// Add a nested orphan to prove the relative display path.
+	if err := os.MkdirAll(filepath.Join(f.root, "mods", "hd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.root, "mods", "hd", "patch.dll"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := planTestConfig(t)
+	cfg.DownloadConfig.DeleteOrphans = true
+	d := newOfflineDownloader(t, noopServer(t), cfg, newFakeConsole())
+
+	if err := d.CheckOrphanedFiles(context.Background(), f.res); err != nil {
+		t.Fatalf("CheckOrphanedFiles: %v", err)
+	}
+	out := consoleText(t, d)
+	if !strings.Contains(out, "Deleting 2 orphaned files") {
+		t.Errorf("output = %q, want the scale header", out)
+	}
+	if !strings.Contains(out, "  mods/hd/patch.dll") {
+		t.Errorf("output = %q, want the relative per-object line", out)
+	}
+	if strings.Contains(out, filepath.Join(f.root, "mods")) {
+		t.Errorf("output = %q, want no absolute per-object lines", out)
+	}
+	assertFileAbsent(t, filepath.Join(f.root, "mods", "hd", "patch.dll"))
+	assertFileAbsent(t, filepath.Join(f.root, "leftover.bin"))
+}

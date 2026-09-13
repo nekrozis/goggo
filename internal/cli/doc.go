@@ -126,6 +126,16 @@ func (c *console) OnEvent(ev transfer.Event) {
 	}
 }
 
+// SetInstallRoot is core's UI1-R2 seam: the install run reports the plan's
+// semantic install root right after BuildPlan, and the renderer displays task
+// rows relative to it. A console without a live renderer ignores it — the
+// root only matters to the progress display.
+func (c *console) SetInstallRoot(path string) {
+	if c.renderer != nil {
+		c.renderer.SetInstallRoot(path)
+	}
+}
+
 // terminalFd returns the descriptor of the input stream when that stream is a
 // real terminal. It is the single place that answers "can a prompt be answered
 // here?", so the password prompt and the login flow cannot disagree.

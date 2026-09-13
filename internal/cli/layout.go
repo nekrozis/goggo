@@ -114,7 +114,14 @@ func layoutFrame(vm viewModel, width, height int, bar func(cells int, fraction f
 	}
 
 	var lines []string
-	lines = add(lines, fmt.Sprintf("Downloading · %d active · %d queued", vm.active, vm.queued))
+	head := fmt.Sprintf("Downloading · %d active · %d queued", vm.active, vm.queued)
+	if vm.resumed > 0 {
+		// The answer to "why only these tasks?" (review UI1-R2 §5 scene ③):
+		// the resume count rides the summary row rather than becoming a
+		// third dynamic fixed row.
+		head += fmt.Sprintf(" · %d resuming", vm.resumed)
+	}
+	lines = add(lines, head)
 	summary := "Rate " + util.RateString(vm.rate, unit) +
 		" · " + util.SizeString(uint64(vm.remaining), unit) + " remaining"
 	if vm.etaValid {
@@ -155,10 +162,52 @@ func layoutFrame(vm viewModel, width, height int, bar func(cells int, fraction f
 	return lines
 }
 
-// taskLine renders one task row, degrading by priority (D31): the bar goes
-// first, then the full path gives way to its base name, then the byte counts,
-// then the rate. The percentage and the row number survive everything short
-// of a truncation.
+// compactPath narrows an install-relative path to maxCells terminal cells
+// (review UI1-R2 §2, amended): the ladder keeps the identity the user needs
+// before it chases width. The deepest directory keeps its FULL name first —
+// a basename alone is not an identity (Data/Heroes3.exe and Patch/Heroes3.exe
+// would collide). As much context as fits is kept, from the richest form
+// down:
+//
+//	Data/Campaign/Shadow of Death/foo.h3m          full relative path (fits ⇒ untouched)
+//	…/Campaign/Shadow of Death/foo.h3m            three components, full names
+//	…/Shadow of Death/foo.h3m                     deepest dir + name
+//	foo.h3m                                       last escape only; then truncated
+//
+// Compaction exists only because of width — a wide row never loses directory
+// semantics for looks, and a basename is never a normal-width result.
+func compactPath(path string, maxCells int) string {
+	if maxCells <= 0 {
+		return ""
+	}
+	if visibleWidth(path) <= maxCells {
+		return path
+	}
+	parts := strings.Split(path, "/")
+	base := parts[len(parts)-1]
+	dirs := parts[:len(parts)-1]
+
+	// Richest context first: at most three trailing components (a longer tail
+	// is strictly wider and could not have been the next rung anyway), then
+	// down to the single deepest dir.
+	for tail := min(3, len(dirs)); tail >= 1; tail-- {
+		cand := "…/" + strings.Join(dirs[len(dirs)-tail:], "/") + "/" + base
+		if visibleWidth(cand) <= maxCells {
+			return cand
+		}
+	}
+	// Last escape: the bare name, truncated only if even that overflows.
+	if visibleWidth(base) <= maxCells {
+		return base
+	}
+	return truncateVisible(base, maxCells)
+}
+
+// taskLine renders one task row, degrading by priority (D31 + UI1-R2 §2):
+// the bar goes first, then the path compacts (hierarchy-preserving), then
+// the byte counts, then the rate. The percentage and the row number survive
+// everything short of a truncation. t.path is the display path — already
+// relative to the install root at the model layer.
 func taskLine(t taskRow, maxCells int, bar func(cells int, fraction float64) string, unit uint32) string {
 	prefix := fmt.Sprintf("#%d ", t.index)
 	pct := fmt.Sprintf("%3.0f%%", t.pct*100)
@@ -179,26 +228,22 @@ func taskLine(t taskRow, maxCells int, bar func(cells int, fraction float64) str
 	if visibleWidth(base) <= maxCells {
 		return base
 	}
-	// Full path does not fit: the base name answers "which file" first.
-	short := prefix + baseName(t.path) + " " + pct + " " + bytes + " " + rate
+	// Width pressure: compact the path, then shed the numeric columns.
+	// Leave two cells for the "#N " prefix at minimum.
+	pathCells := max(1, maxCells-visibleWidth(pct)-visibleWidth(bytes)-visibleWidth(rate)-4)
+	short := prefix + compactPath(t.path, pathCells) + " " + pct + " " + bytes + " " + rate
 	if visibleWidth(short) <= maxCells {
 		return short
 	}
-	noBytes := prefix + baseName(t.path) + " " + pct + " " + rate
+	pathCells = max(1, maxCells-visibleWidth(pct)-visibleWidth(rate)-3)
+	noBytes := prefix + compactPath(t.path, pathCells) + " " + pct + " " + rate
 	if visibleWidth(noBytes) <= maxCells {
 		return noBytes
 	}
-	noRate := prefix + baseName(t.path) + " " + pct
+	pathCells = max(1, maxCells-visibleWidth(pct)-2)
+	noRate := prefix + compactPath(t.path, pathCells) + " " + pct
 	if visibleWidth(noRate) <= maxCells {
 		return noRate
 	}
-	return truncateVisible(prefix+baseName(t.path), maxCells)
-}
-
-// baseName is the last path element — the file's own name.
-func baseName(path string) string {
-	if i := strings.LastIndexByte(path, '/'); i >= 0 {
-		return path[i+1:]
-	}
-	return path
+	return truncateVisible(prefix+compactPath(t.path, maxCells-visibleWidth(prefix)), maxCells)
 }

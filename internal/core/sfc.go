@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -30,7 +32,9 @@ import (
 //
 // A container that is not on disk is still passed over silently, the way the
 // exists check does upstream; its members are then simply absent, which is a
-// convergence gap of its own (registered, not fixed here).
+// convergence gap of its own (registered, not fixed here). That exemption covers
+// "not there" only: a container that IS there and cannot be opened is an
+// observation failure like a failed read, and fails the run (D43, D49).
 func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanResult) ([]model.FileTask, error) {
 	var pending []model.FileTask
 	for _, group := range res.Plan.SFC {
@@ -39,8 +43,14 @@ func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanRe
 		}
 		container := res.InstallPath + "/" + group.Container.Path
 		f, err := os.Open(container)
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
+		}
+		if err != nil {
+			// A permission problem, a path that is not a file, a name the
+			// filesystem refuses: the members cannot be read, so the install
+			// must not report that it converged (D49, three failure classes).
+			return pending, fmt.Errorf("%s: %w", container, err)
 		}
 		extracted, missed, err := d.extractContainer(ctx, f, group, res.InstallPath)
 		f.Close()

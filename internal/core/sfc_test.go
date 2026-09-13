@@ -260,6 +260,37 @@ func TestExtractFailsAndKeepsTheContainerWhenReadingItFails(t *testing.T) {
 	assertFileAbsent(t, filepath.Join(f.root, "game", "one.txt"))
 }
 
+// TestExtractTreatsANonMissingOpenFailureAsFatal covers the other half of the
+// container-access rule (review S9-R): "not on disk" is the only open failure
+// that may be passed over. A path the filesystem refuses — here one carrying a
+// NUL byte, the project's environment-independent way to make a path unopenable
+// — is an observation failure like a failed read, and nothing may be extracted
+// from it (D43, D49).
+//
+// Without the distinction this case became "the container is missing", and the
+// install carried on as if nothing had happened.
+func TestExtractTreatsANonMissingOpenFailureAsFatal(t *testing.T) {
+	f := newSFCFixture(t)
+	f.res.Plan.SFC[0].Container.Path = "galaxy_smallfilescontainer_" + string(rune(0)) + "42"
+	console := newFakeConsole()
+	d := newOfflineDownloader(t, noopServer(t), planTestConfig(t), console)
+
+	pending, err := d.ExtractSmallFilesContainers(context.Background(), f.res)
+	if err == nil {
+		t.Fatal("an open failure that is not 'not found' must fail the extraction")
+	}
+	if !strings.Contains(err.Error(), "galaxy_smallfilescontainer_") {
+		t.Errorf("error = %v, want it to name the container", err)
+	}
+	if len(pending) != 0 {
+		t.Errorf("pending = %+v, want none: nothing could be decided", pending)
+	}
+	if strings.Contains(consoleText(t, d), "Extracting small files container") {
+		t.Error("a failed extraction must not print the summary line")
+	}
+	assertFileAbsent(t, filepath.Join(f.root, "game", "one.txt"))
+}
+
 // failingReader hands out perRead bytes at a time and fails once limit bytes
 // have been served, the way a container whose medium gives up mid-read does. The
 // per-read size matters: the stream reads through a 64 KiB buffer, so a reader

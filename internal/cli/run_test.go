@@ -60,30 +60,40 @@ func TestRunHelpAndVersion(t *testing.T) {
 	}
 }
 
-// TestRunFailures locks the exit-code policy: nothing unimplemented or invalid
-// may report success.
 // TestRunFailures locks the failure contract (review CLI1 §8): anything the
 // parser or the command tree refuses is a usage failure and exits 2, with the
 // diagnostic on stderr and nothing on stdout. Removed upstream commands are
 // unknown commands now, not "not implemented" options (D1/D14).
+//
+// secret is the value a case hands to an option, when that value is something
+// that must not come back out: the refusal may name the option, never what was
+// offered as its value (D19).
 func TestRunFailures(t *testing.T) {
 	cases := []struct {
-		name string
-		args []string
-		want string
+		name   string
+		args   []string
+		want   string
+		secret string
 	}{
-		{"unknown option", []string{"--nonsense"}, "unknown option"},
-		{"unknown command", []string{"frobnicate"}, "unknown command"},
-		{"removed command", []string{"download"}, "unknown command"},
-		{"removed option", []string{"--download"}, "unknown option"},
-		{"removed list option", []string{"--list", "details"}, "unknown option"},
-		{"missing value", []string{"list", "games", "--tag"}, "requires a value"},
-		{"invalid platform", []string{"install", "123", "--platform", "nope"}, "invalid value for --platform"},
-		{"unaccepted option", []string{"list", "games", "--threads", "8"}, "not accepted"},
-		{"missing game", []string{"install"}, "needs a game"},
-		{"malformed target", []string{"install", "/2"}, "the game is empty"},
-		{"show builds with a build", []string{"show", "builds", "123/2"}, "not a build"},
-		{"bare invocation", nil, "Usage:"},
+		{"unknown option", []string{"--nonsense"}, "unknown option", ""},
+		{"unknown command", []string{"frobnicate"}, "unknown command", ""},
+		{"removed command", []string{"download"}, "unknown command", ""},
+		{"removed option", []string{"--download"}, "unknown option", ""},
+		{"removed list option", []string{"--list", "details"}, "unknown option", ""},
+		{"missing value", []string{"list", "games", "--tag"}, "requires a value", ""},
+		{"invalid platform", []string{"install", "123", "--platform", "nope"}, "invalid value for --platform", ""},
+		{"unaccepted option", []string{"list", "games", "--threads", "8"}, "not accepted", ""},
+		{"missing game", []string{"install"}, "needs a game", ""},
+		{"malformed target", []string{"install", "/2"}, "the game is empty", ""},
+		{"show builds with a build", []string{"show", "builds", "123/2"}, "not a build", ""},
+		{"bare invocation", nil, "Usage:", ""},
+		// D19 at the exit-code level: the parser's refusal is not enough on its
+		// own — the run must fail as a usage error and keep the value out of
+		// both streams.
+		{"password argument", []string{"auth", "login", "--password", "hunter2"}, "unknown option", "hunter2"},
+		{"password stdin", []string{"auth", "login", "--password-stdin"}, "unknown option", ""},
+		{"token stdin", []string{"auth", "login", "--token-stdin"}, "unknown option", ""},
+		{"non-interactive", []string{"auth", "login", "--non-interactive"}, "unknown option", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -96,6 +106,11 @@ func TestRunFailures(t *testing.T) {
 			}
 			if !strings.Contains(errOut, c.want) {
 				t.Errorf("stderr = %q, want it to contain %q", errOut, c.want)
+			}
+			if c.secret != "" {
+				if strings.Contains(out, c.secret) || strings.Contains(errOut, c.secret) {
+					t.Errorf("the refusal echoed the supplied value: stdout %q / stderr %q", out, errOut)
+				}
 			}
 		})
 	}

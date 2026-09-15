@@ -47,13 +47,29 @@ type WebsiteDownloadResult struct {
 	// Empty means the run may exit zero: successes and the skips the
 	// worker semantics authorise (GD4 aggregate exit contract).
 	Failures []WebsiteTaskFailure
+	// Saved is the GD5 write side's ledger: every save-* artifact the run
+	// evaluated, in upstream order (base artifacts first, then each DLC).
+	// ArtifactFailed entries join the aggregate verdict; the rest render.
+	Saved []SavedArtifact
 	// Notices carries the run's non-progress messages (blacklist
 	// diagnostics) for the front end to render.
 	Notices []Notice
 }
 
-// Failed reports whether any task ended in an operational failure.
-func (r WebsiteDownloadResult) Failed() bool { return len(r.Failures) > 0 }
+// Failed reports whether any task ended in an operational failure. Artifact
+// failures count too — a requested save that could not be written is not a
+// success (GD5 Gate 1 approval: continue per item, never hide a failure).
+func (r WebsiteDownloadResult) Failed() bool {
+	if len(r.Failures) > 0 {
+		return true
+	}
+	for _, a := range r.Saved {
+		if a.Action == ArtifactFailed {
+			return true
+		}
+	}
+	return false
+}
 
 // DownloadWebsite builds and runs the website queue of the named games
 // (Downloader::download, downloader.cpp:682-840, without the --save-* section
@@ -78,6 +94,7 @@ func (d *Downloader) DownloadWebsite(ctx context.Context, products []string) (We
 	var (
 		tasks   []model.WebsiteTask
 		notices []Notice
+		saved   []SavedArtifact
 	)
 	bl, err := blacklist.LoadBlacklist(d.cfg.BlacklistFilePath)
 	if err != nil {
@@ -88,12 +105,16 @@ func (d *Downloader) DownloadWebsite(ctx context.Context, products []string) (We
 	}
 	for i := range details {
 		details[i].MakeFilepaths(d.cfg.Directories)
+		// The save section runs per game BEFORE the queue grows, the upstream
+		// order (downloader.cpp:694-760 precedes 762-778): a flagged artifact
+		// is written even when the transfer later fails, and vice versa.
+		saved = append(saved, d.saveGameArtifacts(ctx, &details[i])...)
 		for _, gf := range details[i].GetGameFileVectorFiltered(d.cfg.DownloadConfig.Include) {
 			tasks = append(tasks, websiteTaskFor(gf))
 		}
 	}
 
-	res := WebsiteDownloadResult{Tasks: len(tasks), Notices: notices}
+	res := WebsiteDownloadResult{Tasks: len(tasks), Notices: notices, Saved: saved}
 	for _, t := range tasks {
 		res.TotalSize += parseWebsiteSize(t.Size)
 	}

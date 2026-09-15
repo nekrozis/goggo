@@ -38,17 +38,21 @@ type gameInfoFixture struct {
 	// Unset means today's behaviour: 404 for files, the default document.
 	files  map[string]string
 	dlDocs map[string]string
+	// gameDetails serves the /account/gameDetails/<id>.json documents the
+	// GD5 save-* acquisition fetches.
+	gameDetails map[string]string
 }
 
 func newGameInfoFixture(t *testing.T) *gameInfoFixture {
 	t.Helper()
 	f := &gameInfoFixture{
-		products: map[string]string{},
-		owned:    `{"owned":[]}`,
-		list:     `{"page":1,"totalPages":1,"products":[]}`,
-		failures: map[string]int{},
-		files:    map[string]string{},
-		dlDocs:   map[string]string{},
+		products:    map[string]string{},
+		owned:       `{"owned":[]}`,
+		list:        `{"page":1,"totalPages":1,"products":[]}`,
+		failures:    map[string]int{},
+		files:       map[string]string{},
+		dlDocs:      map[string]string{},
+		gameDetails: map[string]string{},
 	}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -59,6 +63,7 @@ func newGameInfoFixture(t *testing.T) *gameInfoFixture {
 		doc, isProduct := f.products[productDocumentID(path)]
 		file, hasFile := f.files[path]
 		dlDoc, hasDL := f.dlDocs[path]
+		gdDoc, hasGD := f.gameDetails[path]
 		expanded, owned, list, probe := f.expanded, f.owned, f.list, f.probe
 		f.mu.Unlock()
 
@@ -81,6 +86,8 @@ func newGameInfoFixture(t *testing.T) *gameInfoFixture {
 			_, _ = w.Write([]byte(doc))
 		case hasFile:
 			_, _ = w.Write([]byte(file))
+		case hasGD:
+			_, _ = w.Write([]byte(gdDoc))
 		case strings.HasPrefix(path, "/dl/"):
 			if hasDL {
 				_, _ = w.Write([]byte(dlDoc))
@@ -164,6 +171,14 @@ func (f *gameInfoFixture) setDownlinkDoc(name, doc string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.dlDocs["/dl/"+name] = doc
+}
+
+// setGameDetails serves the per-game details document for a product id
+// (the /account/gameDetails/<id>.json endpoint).
+func (f *gameInfoFixture) setGameDetails(id, doc string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.gameDetails["/www/account/gameDetails/"+id+".json"] = doc
 }
 
 func (f *gameInfoFixture) setProbe(p *requestProbe) {

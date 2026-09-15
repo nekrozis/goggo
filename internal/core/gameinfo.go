@@ -8,8 +8,11 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/nekrozis/goggo/internal/catalog"
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/gamedetails"
+	"github.com/nekrozis/goggo/internal/jsonval"
+	"github.com/nekrozis/goggo/internal/util"
 )
 
 // defaultInfoThreads is the default of the info-threads setting
@@ -152,6 +155,44 @@ func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([
 	return results, nil
 }
 
+// ListGameDetails acquires the download face for `list details` / `list json`.
+// An empty products list means the WHOLE account — the read-only upstream
+// behaviour (the listGames details branch runs getGameDetails over every
+// game, downloader.cpp:580-593; GD5 ruling 7). Unlike GD4's download there
+// is no transfer behind it, so the implicit enumeration is allowed here and
+// only here: acquisition reads, it never writes and never downloads.
+func (d *Downloader) ListGameDetails(ctx context.Context, products []string) ([]gamedetails.GameDetails, error) {
+	games, err := d.acquireForList(ctx, products)
+	if err != nil {
+		return nil, err
+	}
+	// Upstream's acquisition thread derives the filepaths before answering
+	// (downloader.cpp:3795) — the text format's blacklist filter compares
+	// against those destinations, so they must exist at display time.
+	for i := range games {
+		games[i].MakeFilepaths(d.cfg.Directories)
+	}
+	return games, nil
+}
+
+func (d *Downloader) acquireForList(ctx context.Context, products []string) ([]gamedetails.GameDetails, error) {
+	if len(products) > 0 {
+		return d.GameDetails(ctx, GameDetailsRequest{Products: products})
+	}
+	res, err := catalog.List(ctx, d.web, d.gameListOptions(""))
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(res.Games))
+	for _, g := range res.Games {
+		ids = append(ids, g.ID)
+	}
+	if len(ids) == 0 {
+		return nil, errors.New("galaxy: no products to list")
+	}
+	return d.GameDetails(ctx, GameDetailsRequest{Products: ids})
+}
+
 // infoThreadCount is the worker count of a run: the request's value, else the
 // run's setting, else that setting's default. The last step exists because
 // nothing writes the setting yet (the option is not registered), and zero
@@ -213,7 +254,64 @@ func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[st
 	}
 	gd.FilterWithPriorities(cfg.PlatformPriority, cfg.LanguagePriority)
 	gd.FilterWithType(cfg.Include)
+
+	// The save-* acquisition gate (downloader.cpp:3773-3792): the per-game
+	// details document is fetched ONCE when any of its three consumers is
+	// asked for and still empty, and never otherwise — with all flags off
+	// this whole branch issues no request, which is GD3's zero-extra-request
+	// regression contract (GD5 test C6). A failed fetch is recorded, not
+	// swallowed (GD5 Gate 2: MetadataDiag); the acquisition itself continues,
+	// the way upstream's empty-document fallback does.
+	if (cfg.SaveSerials && gd.Serials == "") ||
+		(cfg.SaveChangelogs && gd.Changelog == "") ||
+		(cfg.SaveGameDetailsJSON && gd.GameDetailsJson == "") {
+		details, err := d.web.GameDetailsJSON(ctx, id)
+		if err != nil {
+			gd.MetadataDiag = err.Error()
+			return gd, nil
+		}
+		if cfg.SaveGameDetailsJSON && gd.GameDetailsJson == "" {
+			rendered, err := util.StyledJSON(details)
+			if err != nil {
+				gd.MetadataDiag = err.Error()
+			} else {
+				gd.GameDetailsJson = rendered
+			}
+		}
+		if cfg.SaveSerials && gd.Serials == "" {
+			gd.Serials, gd.SerialsDiag = serialsFromDetails(details)
+		}
+		if cfg.SaveChangelogs && gd.Changelog == "" {
+			cl, err := gamedetails.ChangelogFromJSON(details)
+			switch {
+			case err != nil:
+				gd.MetadataDiag = err.Error()
+			case cl != "":
+				gd.Changelog = cl
+			}
+		}
+	}
 	return gd, nil
+}
+
+// serialsFromDetails reads the cdKey member the way getSerialsFromJSON's
+// caller does — a missing or null member is no serials, a wrong shape is a
+// diagnostic — and hands the text to the extraction (ruling 1's fail-closed
+// travels as the second return value).
+func serialsFromDetails(details map[string]any) (text, diag string) {
+	raw, ok := details["cdKey"]
+	if !ok || raw == nil {
+		return "", ""
+	}
+	cdKey, err := jsonval.Str(raw)
+	if err != nil {
+		return "", "game details: cdKey: " + err.Error()
+	}
+	text, unsupported := gamedetails.SerialsFromCDKey(cdKey)
+	if unsupported {
+		return "", "cdKey carries <span> markup this build does not parse (GD5 ruling 1): serials not written"
+	}
+	return text, ""
 }
 
 // effectiveInclude is the type mask an acquisition run consumes: the request's

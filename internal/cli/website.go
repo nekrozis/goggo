@@ -41,6 +41,7 @@ func (c *console) runWebsiteDownload(ctx context.Context, d *core.Downloader, in
 	c.endInstallScope()
 
 	renderNotices(stdout, stderr, res.Notices)
+	renderArtifacts(stdout, stderr, res.Saved)
 	// The "Total size" line (downloader.cpp:783) prints whenever a queue
 	// existed — including the run the free-space gate then refused. Upstream
 	// prints it before the queue starts; this CLI renders it after the frame

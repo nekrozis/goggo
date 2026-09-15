@@ -267,7 +267,18 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 		return nil
 	}
 
-	// The download loop (downloader.cpp:3264-3354).
+	// The download loop (downloader.cpp:3264-3354) — the attempt/retry/cleanup
+	// contract shared with the GD5 direct artifact download.
+	return downloadWithRetries(ctx, task, opts, deps, downlink, bResume, emit)
+}
+
+// downloadWithRetries is the ONE attempt loop: retry classification, the
+// resume handoff between attempts, the success timestamp and the failure
+// cleanup live here once. RunWebsite's tasks and DownloadArtifact's logos
+// and icons both run through it — GD5 ruling 3 forbids a second HTTP stack,
+// so the artifact path synthesizes a task carrying only its destination.
+func downloadWithRetries(ctx context.Context, task model.WebsiteTask, opts Options, deps WebsiteDeps, downlink string, bResume bool, emit func(Event)) error {
+	name := filepath.Base(task.Destination)
 	var lastErr error
 	var lastKeep bool
 	var reason string
@@ -282,7 +293,7 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 		}
 		if attempt > 0 {
 			emit(Event{Path: task.Destination,
-				Text: fmt.Sprintf("Retry %d/%d: %s (%s)", attempt, opts.Retries, name, reason),
+				Text: fmt.Sprintf("Retry %d/%d: %s (%s)", attempt, opts.Retries, filepath.Base(task.Destination), reason),
 				Kind: EventMessageInfo})
 		}
 

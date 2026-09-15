@@ -603,3 +603,45 @@ func TestWebsiteTaskResultVerdicts(t *testing.T) {
 		t.Errorf("blacklisted skip = %v, want nil (an authorised skip)", err)
 	}
 }
+
+// TestDownloadArtifact locks the GD5 direct-link primitive: served bytes
+// land at the destination with the server timestamp attempt semantics, a 404
+// fails and leaves nothing, and there is NO exists-skip — the second run
+// re-downloads, the way upstream re-fetches logos and icons every run.
+func TestDownloadArtifact(t *testing.T) {
+	f := newWebsiteFixture(t)
+	f.set("/logo.jpg", "jpeg-bytes")
+	hx, err := httpx.New(httpx.Config{UserAgent: "goggo-test/1.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "logo_game.jpg")
+
+	if err := DownloadArtifact(context.Background(), f.url("/logo.jpg"), dest, Options{Retries: 0}, ArtifactDeps{HTTP: hx}); err != nil {
+		t.Fatalf("DownloadArtifact: %v", err)
+	}
+	body, err := os.ReadFile(dest)
+	if err != nil || string(body) != "jpeg-bytes" {
+		t.Fatalf("artifact body = %q (%v)", body, err)
+	}
+
+	// No exists-skip: a second run hits the server again.
+	if err := DownloadArtifact(context.Background(), f.url("/logo.jpg"), dest, Options{Retries: 0}, ArtifactDeps{HTTP: hx}); err != nil {
+		t.Fatalf("second DownloadArtifact: %v", err)
+	}
+	if hits := f.hitCount("/logo.jpg"); hits != 2 {
+		t.Errorf("requests = %d, want the artifact re-downloaded", hits)
+	}
+
+	// A 404 fails and removes the file the attempt truncated.
+	if err := DownloadArtifact(context.Background(), f.url("/gone.jpg"), dest, Options{Retries: 0}, ArtifactDeps{HTTP: hx}); err == nil {
+		t.Fatal("404 err = nil, want failure")
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Error("the failed attempt left a truncated file behind")
+	}
+
+	if err := DownloadArtifact(context.Background(), "https://x/y", "z", Options{}, ArtifactDeps{}); err == nil {
+		t.Error("nil HTTP client accepted, want the dependency refusal")
+	}
+}

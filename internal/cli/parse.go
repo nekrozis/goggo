@@ -78,6 +78,17 @@ const (
 	// download file only.
 	optOutputFile
 
+	// GD5 save-* artifacts (download writes them; list details/json let them
+	// gate what the acquisition fetches and the display shows) and the
+	// acquisition worker count.
+	optSaveSerials
+	optSaveChangelogs
+	optSaveLogo
+	optSaveIcon
+	optSaveGameDetailsJSON
+	optSaveProductJSON
+	optInfoThreads
+
 	// Destructive confirmation (orphans remove only, D16).
 	optYes
 
@@ -468,6 +479,52 @@ var optionTable = append([]optionSpec{
 			return nil
 		},
 	},
+	// The six save-* switches (main.cpp:301-310, all zero_tokens default
+	// false). Their meaning differs per command and the topics say so: on
+	// download they fetch AND write; on list details/json they only gate the
+	// fetch and the display — list never writes (GD5 ruling 9).
+	{
+		id: optSaveSerials, long: "save-serials",
+		summary: "Save serial numbers",
+		parse:   func(inv *invocation, _ string) error { inv.cfg.DownloadConfig.SaveSerials = true; return nil },
+	},
+	{
+		id: optSaveChangelogs, long: "save-changelogs",
+		summary: "Save changelogs",
+		parse:   func(inv *invocation, _ string) error { inv.cfg.DownloadConfig.SaveChangelogs = true; return nil },
+	},
+	{
+		id: optSaveLogo, long: "save-logo",
+		summary: "Save logo images",
+		parse:   func(inv *invocation, _ string) error { inv.cfg.DownloadConfig.SaveLogo = true; return nil },
+	},
+	{
+		id: optSaveIcon, long: "save-icon",
+		summary: "Save icon images",
+		parse:   func(inv *invocation, _ string) error { inv.cfg.DownloadConfig.SaveIcon = true; return nil },
+	},
+	{
+		id: optSaveGameDetailsJSON, long: "save-game-details-json",
+		summary: "Save the per-game details JSON documents",
+		parse:   func(inv *invocation, _ string) error { inv.cfg.DownloadConfig.SaveGameDetailsJSON = true; return nil },
+	},
+	{
+		id: optSaveProductJSON, long: "save-product-json",
+		summary: "Save the product JSON documents",
+		parse:   func(inv *invocation, _ string) error { inv.cfg.DownloadConfig.SaveProductJSON = true; return nil },
+	},
+	{
+		id: optInfoThreads, long: "info-threads", value: valueRequired, arg: "<n>",
+		summary: "Number of concurrent game-details fetches (default: 4)",
+		parse: func(inv *invocation, v string) error {
+			n, err := strconv.Atoi(v)
+			if err != nil || n <= 0 {
+				return usagef("invalid value for --info-threads: %q", v)
+			}
+			inv.cfg.InfoThreads = uint32(n)
+			return nil
+		},
+	},
 }, subdirOptionSpecs()...)
 
 // subdirOptionIDs maps each config.SubdirOptions name onto its option id.
@@ -784,7 +841,7 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 	switch {
 	case count == 0 && len(rest) != 0:
 		return invocation{}, usagef("%s takes no arguments", strings.Join(path, " "))
-	case count != 0 && len(rest) == 0:
+	case (count == 1 || count == -1) && len(rest) == 0:
 		return invocation{}, usagef("%s needs a %s", strings.Join(path, " "), argName)
 	case count == 1 && len(rest) != 1:
 		return invocation{}, usagef("%s takes one %s, got %d", strings.Join(path, " "), argName, len(rest))
@@ -795,6 +852,9 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 		}
 		inv.target = tgt
 	case count < 0:
+		// -1 requires at least one (checked above), -2 (GD5's list
+		// details/json) accepts none — the empty set means "the whole
+		// account", a read-only default the download commands refuse (ruling 7).
 		inv.args = append([]string{}, rest...)
 	}
 
@@ -890,7 +950,8 @@ func childNames(node commandNode) string {
 
 // commandArity says what a command takes after its path: the argument's name
 // and how many — 0 for none, 1 for exactly one, -1 for one or more (GD4's
-// download commands are variadic; the rest keep CLI1's single target).
+// download commands), -2 for zero or more (GD5's list details/json, where the
+// empty set means the whole account, read-only).
 func commandArity(id commandID) (string, int) {
 	switch id {
 	case cmdInstall, cmdVerify, cmdShowBuilds, cmdShowManifest, cmdShowCDNs,
@@ -900,6 +961,8 @@ func commandArity(id commandID) (string, int) {
 		return "game", -1
 	case cmdDownloadFile:
 		return "spec", -1
+	case cmdListDetails, cmdListJSON:
+		return "game", -2
 	}
 	return "", 0
 }

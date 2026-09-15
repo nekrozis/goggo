@@ -114,16 +114,24 @@ func TestProductSkipsExpansionWithoutDLCInformation(t *testing.T) {
 	}
 }
 
-// TestProductRejectsAMalformedDLCsMember locks the other half: a member that is
-// present and says something other than "here are the DLCs" is an error, not a
-// silently skipped expansion. Upstream's isObject() check would pass it over
-// (galaxyapi.cpp:360); this port prefers the failure.
-func TestProductRejectsAMalformedDLCsMember(t *testing.T) {
+// TestProductSkipsExpansionForNonObjectDLCs locks the isObject() guard of
+// galaxyapi.cpp:360 (DEFECT-GD3-2 / ruling D52): a dlcs member that is present
+// but not an object — the empty array the live API really sends for products
+// without DLC information (dev/audit/evidence/D52-dlcs-census.txt), a filled
+// array, or any scalar — does not enter the expansion block: no request, no
+// expanded_dlcs, and the product document comes back as the API answered it.
+//
+// This test REVERSES the earlier TestProductRejectsAMalformedDLCsMember, which
+// asserted an error here. That behavior rejected 8 of 14 probed account
+// products at the Product() call; the guard upstream applies to those shapes
+// is a silent skip, and the live API proved the difference is not academic.
+func TestProductSkipsExpansionForNonObjectDLCs(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		dlcs any
 	}{
-		{"array", []any{map[string]any{"id": "2"}}},
+		{"empty array", []any{}},
+		{"non-empty array", []any{map[string]any{"id": "2"}}},
 		{"string", "oops"},
 		{"number", float64(123)},
 		{"boolean", true},
@@ -131,16 +139,24 @@ func TestProductRejectsAMalformedDLCsMember(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newProductFixture(t)
 			f.setServe(func(string) (string, int) {
-				return mustJSON(t, map[string]any{"id": "1", "dlcs": tc.dlcs}), http.StatusOK
+				return mustJSON(t, map[string]any{"id": "1", "slug": "game", "dlcs": tc.dlcs}), http.StatusOK
 			})
 
-			if _, err := newProductClient(t, f.Server).Product(context.Background(), "1"); err == nil {
-				t.Fatal("a malformed dlcs member must fail")
-			} else if !strings.Contains(err.Error(), "dlcs") {
-				t.Errorf("error = %v, want it to name the member", err)
+			got, err := newProductClient(t, f.Server).Product(context.Background(), "1")
+			if err != nil {
+				t.Fatalf("Product must skip a non-object dlcs, not fail: %v", err)
+			}
+			if _, present := got["expanded_dlcs"]; present {
+				t.Errorf("expanded_dlcs = %v, want the member absent (nothing was expanded)", got["expanded_dlcs"])
+			}
+			// The document is untouched apart from the missing injection: that
+			// is the C++ path — the guard is skipped and product_info returns
+			// as getResponseJson built it.
+			if got["slug"] != "game" {
+				t.Errorf("slug = %v, want the original value", got["slug"])
 			}
 			if uris := f.requestURIs(); len(uris) != 1 {
-				t.Errorf("requests = %v, want no expansion attempt", uris)
+				t.Errorf("requests = %v, want only the main document", uris)
 			}
 		})
 	}

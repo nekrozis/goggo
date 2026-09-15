@@ -325,6 +325,85 @@ func windowsInstaller(file string) []string {
 	return []string{gameInfoNode(file, "windows", "en")}
 }
 
+// gameInfoDocArrayDLCs is the DEFECT-GD3-2 shape: "dlcs":[] (what the live API
+// sends for most products of a probed account), spelled through the same
+// numeric-id wire format as every other acquisition fixture.
+func gameInfoDocArrayDLCs(id, slug, title string, installers []string) string {
+	return `{"id":` + id + `,"slug":"` + slug + `","title":"` + title + `",` +
+		`"images":{"icon":"//images.gog.com/icon.png","logo":"//images.gog.com/logo.jpg"},` +
+		`"downloads":{"installers":[` + strings.Join(installers, ",") + `],` +
+		`"bonus_content":[],"patches":[],"language_packs":[]},` +
+		`"dlcs":[]}`
+}
+
+// TestGameDetailsSkipsAnArrayShapedDLCsMember locks D52 end-to-end: a product
+// whose dlcs is the empty array acquires like any DLC-less product — no error,
+// no expansion request, zero DLCs — instead of failing the run at Product().
+// This is the exact live shape (heroes_of_might_and_magic_3_complete_edition)
+// that the pre-fix build rejected.
+func TestGameDetailsSkipsAnArrayShapedDLCsMember(t *testing.T) {
+	f := newGameInfoFixture(t)
+	f.setProduct("111", gameInfoDocArrayDLCs("111", "some_game", "Some Game", windowsInstaller("setup.exe")))
+
+	d := newGameInfoDownloader(t, f, gameInfoConfig(t))
+	res, err := d.GameDetails(context.Background(), GameDetailsRequest{Products: []string{"111"}})
+	if err != nil {
+		t.Fatalf("GameDetails: %v", err)
+	}
+	if len(res) != 1 || len(res[0].DLCs) != 0 {
+		t.Fatalf("results = %+v, want the product with zero dlcs", res)
+	}
+	if len(res[0].Installers) != 1 {
+		t.Errorf("installers = %d, want the one file", len(res[0].Installers))
+	}
+	if got := f.count("/dlc-expanded"); got != 0 {
+		t.Errorf("expansion requests = %d, want none: nothing enters the block", got)
+	}
+}
+
+// TestGameDetailsMixesDLCBearingAndArrayProducts locks that one array-shaped
+// product in a batch is neither a failure nor a contagion: the dict-shaped
+// product still expands and filters through its DLCs, the array-shaped one
+// comes back DLC-less, and the fail-fast pool leaves the completed siblings in
+// the result set (a skipped expansion is not an error to cancel).
+func TestGameDetailsMixesDLCBearingAndArrayProducts(t *testing.T) {
+	f := newGameInfoFixture(t)
+	f.setOwned("200")
+	f.setProduct("100", gameInfoDoc("100", "base_game", "Base Game", windowsInstaller("base.exe"), nil,
+		[]string{"200"}, f.URL+"/dlc-expanded"))
+	f.setExpanded(gameInfoDoc("200", "base_game_dlc", "Base Game DLC", windowsInstaller("dlc.exe"), nil, nil, ""))
+	f.setProduct("300", gameInfoDocArrayDLCs("300", "array_game", "Array Game", windowsInstaller("setup.exe")))
+
+	d := newGameInfoDownloader(t, f, gameInfoConfig(t))
+	res, err := d.GameDetails(context.Background(), GameDetailsRequest{Products: []string{"100", "300"}})
+	if err != nil {
+		t.Fatalf("GameDetails: %v", err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("results = %d, want both products", len(res))
+	}
+	// Sorted by gamename: "array_game" < "base_game".
+	var arrayGame, dictGame *gamedetails.GameDetails
+	for i := range res {
+		switch res[i].Gamename {
+		case "array_game":
+			arrayGame = &res[i]
+		case "base_game":
+			dictGame = &res[i]
+		}
+	}
+	if arrayGame == nil || dictGame == nil {
+		t.Fatalf("gamenames = %q/%q, want array_game and base_game", res[0].Gamename, res[1].Gamename)
+	}
+	if len(dictGame.DLCs) != 1 {
+		t.Errorf("base game dlcs = %+v, want the owned DLC expanded", dictGame.DLCs)
+	}
+	if len(arrayGame.DLCs) != 0 || f.count("/dlc-expanded") != 1 {
+		t.Errorf("array game dlcs = %d, expansion requests = %d, want 0 and 1",
+			len(arrayGame.DLCs), f.count("/dlc-expanded"))
+	}
+}
+
 // TestGameDetailsSortsByGamename locks the ordering: the result follows the
 // gamename, not the request order and not the order the workers finished in
 // (downloader.cpp:499). Each product is read once, and each of its files

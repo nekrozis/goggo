@@ -204,10 +204,34 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 	}
 	gameTitle := manifestProductName(manifest)
 
-	// Install directory and path (downloader.cpp:4076-4081).
+	// Install directory and path (downloader.cpp:4076-4081). The three
+	// templates whose value comes from the product document trigger the fetch
+	// here, so the resolver itself stays a pure function of the two documents
+	// (review GD3 §3.1). The credential refresh is the run's usual one, and it
+	// happens only when a request is actually about to go out.
 	installDirectory := ""
 	if d.cfg.Directories.SubDirectories {
-		installDirectory, err = ResolveInstallSubdir(req.SubdirTemplate, manifest)
+		var product map[string]any
+		if InstallSubdirNeedsProductInfo(req.SubdirTemplate) {
+			baseID, err := documentString(manifest, "baseProductId")
+			if err != nil {
+				return res, err
+			}
+			// Definition (recorded): an empty base product id means there is
+			// no product to ask about, so no request is made and the template
+			// falls back to its literal text. The C++ source requests the
+			// empty id instead, which is a case it leaves undefined.
+			if baseID != "" {
+				refresh := tokenRefresher{refresh: d.refreshAndSave, expired: func() bool { return d.token.IsExpired() }}
+				if err := refresh.refreshIfExpired(ctx); err != nil {
+					return res, fmt.Errorf("galaxy: refresh login: %w", err)
+				}
+				if product, err = d.galaxy.Product(ctx, baseID); err != nil {
+					return res, err
+				}
+			}
+		}
+		installDirectory, err = ResolveInstallSubdir(req.SubdirTemplate, manifest, product)
 		if err != nil {
 			return res, err
 		}
@@ -580,7 +604,7 @@ func manifestArray(manifest map[string]any, key string) ([]any, error) {
 // include mask does not ask for them, add the selected dependencies, stamp
 // product ids, rename small-files containers and deduplicate by path.
 func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]any, req InstallRequest) ([]model.GalaxyDepotItem, error) {
-	baseProductID, err := manifestString(manifest, "baseProductId")
+	baseProductID, err := documentString(manifest, "baseProductId")
 	if err != nil {
 		return nil, err
 	}

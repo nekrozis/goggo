@@ -2,6 +2,7 @@ package gamedetails
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"go/parser"
 	"go/token"
@@ -355,6 +356,124 @@ func TestProductInfoToGameDetailsDuplicateHandler(t *testing.T) {
 	}
 }
 
+// TestIdentifierFieldsLiveAPIShapes locks what DEFECT-GD3-1 proved about the
+// live API: the identifier fields are NOT strings. These fixtures are parsed
+// from JSON text (not hand-built maps) so the numbers decode the way the wire
+// decodes them — a float64 — and the documents carry the exact shapes the
+// probe captured from api.gog.com (evidence dev/audit/evidence/): a main
+// document with a numeric id, a DLC with a numeric id, and the installer /
+// bonus-content vectors whose file ids are a string and a number side by side.
+// Upstream reads all of these through jsoncpp's asString() (galaxyapi.cpp:384,
+// 416, 460, 563), and this port's idString mirrors that semantics.
+func TestIdentifierFieldsLiveAPIShapes(t *testing.T) {
+	doc := mustDocumentJSON(t, `{
+		"id": 1207658991,
+		"slug": "worms_united",
+		"title": "Worms United",
+		"downloads": {
+			"installers": [{"name":"Worms United","version":"1.0","os":"windows","language":"en",
+				"total_size":167772160,"files":[
+					{"id":"en1installer0","downlink":"https://api.gog.com/products/1207658991/dl/installer","size":167772160}]}],
+			"bonus_content": [{"name":"manual","count":1,"total_size":1048576,"files":[
+					{"id":13403,"downlink":"https://api.gog.com/products/1207658991/dl/manual","size":1048576}]}],
+			"patches": [], "language_packs": []
+		}
+	}`)
+
+	gd, err := ProductInfoToGameDetails(context.Background(), doc, testConfig(), nil, stubResolver(nil))
+	if err != nil {
+		t.Fatalf("a live-API-shaped document must convert: %v", err)
+	}
+	if gd.ProductID != "1207658991" {
+		t.Errorf("ProductID = %q, want the numeric id stringified", gd.ProductID)
+	}
+	if len(gd.Installers) != 1 || gd.Installers[0].ID != "en1installer0" {
+		t.Errorf("installers = %+v, want the string file id kept as-is", gd.Installers)
+	}
+	if len(gd.Extras) != 1 || gd.Extras[0].ID != "13403" {
+		t.Errorf("extras = %+v, want the numeric file id stringified", gd.Extras)
+	}
+
+	// bool and missing: jsoncpp renders "true" (the port's locked precedent),
+	// and an absent id is the empty string — neither is an error.
+	for _, tc := range []struct {
+		name string
+		id   string // JSON literal for the id member ("" = omit it)
+		want string
+	}{
+		{name: "bool id", id: `true`, want: "true"},
+		{name: "null id", id: `null`, want: ""},
+		{name: "absent id", id: "", want: ""},
+		{name: "string id survives", id: `"42"`, want: "42"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"slug":"s","title":"t"`
+			if tc.id != "" {
+				body += `,"id":` + tc.id
+			}
+			gd, err := ProductInfoToGameDetails(context.Background(),
+				mustDocumentJSON(t, body+`}`), testConfig(), nil, stubResolver(nil))
+			if err != nil {
+				t.Fatalf("convert: %v", err)
+			}
+			if gd.ProductID != tc.want {
+				t.Errorf("ProductID = %q, want %q", gd.ProductID, tc.want)
+			}
+		})
+	}
+
+	// The structured id is the one shape the identifier reader still refuses.
+	_, err = ProductInfoToGameDetails(context.Background(),
+		mustDocumentJSON(t, `{"slug":"s","title":"t","id":{}}`), testConfig(), nil, stubResolver(nil))
+	if err == nil {
+		t.Fatal("an object id must be an error")
+	}
+	if _, err := ProductInfoToGameDetails(context.Background(),
+		mustDocumentJSON(t, `{"slug":"s","title":"t","id":[]}`), testConfig(), nil, stubResolver(nil)); err == nil {
+		t.Fatal("an array id must be an error")
+	}
+
+	// The DLC subtree through the same shapes: a numeric dlc id is converted
+	// for the ownership gate, and the owned set matches the stringified form.
+	dlcDoc := mustDocumentJSON(t, `{
+		"id": 1, "slug":"base","title":"Base",
+		"downloads":{"installers":[],"bonus_content":[],"patches":[],"language_packs":[]},
+		"expanded_dlcs": [{"id": 1523284508, "slug":"base_dlc","title":"DLC",
+			"downloads":{"installers":[{"name":"d","os":"windows","language":"en","version":"1",
+				"count":1,"total_size":1,"files":[{"id":99,"downlink":"x","size":1}]}],
+				"bonus_content":[],"patches":[],"language_packs":[]}}]
+	}`)
+	owned, err := ProductInfoToGameDetails(context.Background(), dlcDoc, testConfig(),
+		map[string]bool{"1": true, "1523284508": true}, stubResolver(nil))
+	if err != nil {
+		t.Fatalf("owned gate on a numeric dlc id: %v", err)
+	}
+	if len(owned.DLCs) != 1 || owned.DLCs[0].ProductID != "1523284508" {
+		t.Errorf("dlcs = %+v, want the numeric-id DLC matched and stringified", owned.DLCs)
+	}
+	if len(owned.DLCs) == 1 && len(owned.DLCs[0].Installers) == 1 && owned.DLCs[0].Installers[0].ID != "99" {
+		t.Errorf("dlc file id = %q, want 99", owned.DLCs[0].Installers[0].ID)
+	}
+	if dropped, err := ProductInfoToGameDetails(context.Background(), dlcDoc, testConfig(),
+		map[string]bool{"1": true}, stubResolver(nil)); err != nil {
+		t.Fatalf("unowned gate: %v", err)
+	} else if len(dropped.DLCs) != 0 {
+		t.Errorf("dlcs = %+v, want the unowned numeric-id DLC dropped", dropped.DLCs)
+	}
+}
+
+// mustDocumentJSON parses fixture text the way the wire does, so a JSON number
+// arrives as the float64 json.Unmarshal yields — the exact shape that broke
+// the strict gate on live data (DEFECT-GD3-1).
+func mustDocumentJSON(t *testing.T, body string) map[string]any {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatalf("fixture JSON: %v", err)
+	}
+	return doc
+}
+
 // dlcNode is one expanded DLC entry.
 func dlcNode(id, title string, downloads map[string]any) map[string]any {
 	return map[string]any{
@@ -519,8 +638,12 @@ func TestProductInfoToGameDetailsRejectsWrongFieldShapes(t *testing.T) {
 			},
 			"expanded_dlcs": map[string]any{},
 		})},
-		{"dlc id is missing a shape", product(map[string]any{
-			"expanded_dlcs": []any{map[string]any{"id": 7}}})},
+		// A structured dlc id is the one shape the identifier reader refuses
+		// (jsoncpp's asString crashes on it). A NUMBER id — the live API's
+		// shape, DEFECT-GD3-1 — used to sit in this list; it belongs to the
+		// identifier test instead, because upstream never gated it.
+		{"dlc id is an object", product(map[string]any{
+			"expanded_dlcs": []any{map[string]any{"id": map[string]any{}}}})},
 	}
 
 	for _, c := range cases {

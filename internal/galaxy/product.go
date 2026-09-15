@@ -168,8 +168,11 @@ func (c *Client) expandDLCsInBatches(ctx context.Context, product map[string]any
 	return nil
 }
 
-// dlcID reads one dlcs.products entry's id: an absent or null member is the
-// empty string, which is what upstream's asString() makes of it.
+// dlcID reads one dlcs.products entry's id. Upstream reads it with jsoncpp's
+// asString() (galaxyapi.cpp:384), so it is the identifier family, not a string
+// test: an absent or null member is the empty string, and a number — which is
+// what the live API actually sends here (DEFECT-GD3-1) — is stringified the
+// same way. Only a structured value is an error, where asString would crash.
 func dlcID(entry any, index int) (string, error) {
 	obj, err := jsonval.Object(entry)
 	if err != nil {
@@ -179,9 +182,9 @@ func dlcID(entry any, index int) (string, error) {
 	if !present || raw == nil {
 		return "", nil
 	}
-	id, ok := raw.(string)
-	if !ok {
-		return "", fmt.Errorf("dlcs.products[%d].id: expected a JSON string, got %s", index, jsonval.Kind(raw))
+	id, err := jsonval.Str(raw)
+	if err != nil {
+		return "", fmt.Errorf("dlcs.products[%d].id: %w", index, err)
 	}
 	return id, nil
 }

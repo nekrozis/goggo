@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/core"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -246,14 +247,23 @@ func TestValueParsersReuseTheExistingSemantics(t *testing.T) {
 		t.Errorf("default directory = %q, want %q", inv.cfg.Directories.Directory, defaultDirectory)
 	}
 
-	// --install-dir takes a directory name; the internal template language is
-	// not part of the CLI contract (review §5, constraint A).
+	// --install-dir takes a concrete directory name or one of the templates the
+	// installer resolves. Anything else carrying a "%" is a half-exposed
+	// template language and stays refused (review GD3 §3.3, ruling B).
 	if inv := mustParse(t, "install", "123", "--install-dir", "HoMM 3 Complete"); inv.cfg.Directories.GalaxyInstallSubdir != "HoMM 3 Complete" {
 		t.Error("--install-dir did not store the given directory name")
 	}
-	err := mustUsageError(t, "install", "123", "--install-dir", "%install_dir%")
-	if !strings.Contains(err.Error(), "not a template") {
-		t.Errorf("error = %v, want the template refusal", err)
+	for _, template := range core.InstallSubdirTemplates {
+		inv := mustParse(t, "install", "123", "--install-dir", template)
+		if inv.cfg.Directories.GalaxyInstallSubdir != template {
+			t.Errorf("--install-dir %s = %q, want the template stored", template, inv.cfg.Directories.GalaxyInstallSubdir)
+		}
+	}
+	for _, name := range []string{"%foo%", "%gamename%/data", "%install_dir%x", "a%b"} {
+		err := mustUsageError(t, "install", "123", "--install-dir", name)
+		if !strings.Contains(err.Error(), "known templates") {
+			t.Errorf("--install-dir %s: error = %v, want the whitelist refusal", name, err)
+		}
 	}
 
 	// --verbose selects the verbose level, and nothing else.

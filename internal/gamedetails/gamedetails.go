@@ -137,6 +137,31 @@ func filterWithType(list []GameFile, typeMask uint32) []GameFile {
 	return out
 }
 
+// FilterWithType drops the files the type mask excludes, in place, and does the
+// same for the DLC subtree (gameDetails::filterWithType, gamedetails.cpp:268-281).
+//
+// It replaces the four vectors rather than collecting a new one — that is what
+// makes it different from GetGameFileVectorFiltered, which gathers the matching
+// files of a product and leaves the tree alone. Upstream descends one level into
+// the DLCs, exactly as FilterWithPriorities does here.
+//
+// Acquisition calls it with the include mask (GD3); with a mask whose bits the
+// conversion already gated each vector by, it removes nothing — it is called for
+// upstream parity, and the mask semantics are what its own tests lock.
+func (gd *GameDetails) FilterWithType(typeMask uint32) {
+	gd.Installers = filterWithType(gd.Installers, typeMask)
+	gd.Extras = filterWithType(gd.Extras, typeMask)
+	gd.Patches = filterWithType(gd.Patches, typeMask)
+	gd.LanguagePacks = filterWithType(gd.LanguagePacks, typeMask)
+	for i := range gd.DLCs {
+		dlc := &gd.DLCs[i]
+		dlc.Installers = filterWithType(dlc.Installers, typeMask)
+		dlc.Extras = filterWithType(dlc.Extras, typeMask)
+		dlc.Patches = filterWithType(dlc.Patches, typeMask)
+		dlc.LanguagePacks = filterWithType(dlc.LanguagePacks, typeMask)
+	}
+}
+
 // MakeFilepaths derives every filepath of the tree: the six metadata paths per
 // product (named with the gamename so DLCs cannot overwrite base-game files),
 // then the four file vectors, recursing into the DLCs with their own names

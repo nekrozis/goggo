@@ -401,11 +401,17 @@ func TestRunHelpTopicsLockTheirContent(t *testing.T) {
 			t.Errorf("install topic is missing %s: %q", want, install)
 		}
 	}
-	if !strings.Contains(install, "not a template") {
-		t.Errorf("install topic must explain --install-dir is a plain name: %q", install)
+	// The install topic names the templates --install-dir accepts, because a
+	// whitelist the user cannot read is a whitelist the user cannot use
+	// (review GD3 §3.3, ruling B — this replaces the earlier wording, which
+	// said --install-dir was not a template at all).
+	for _, template := range core.InstallSubdirTemplates {
+		if !strings.Contains(install, template) {
+			t.Errorf("install topic must name the %s template: %q", template, install)
+		}
 	}
-	if strings.Contains(install, "%") {
-		t.Errorf("the help must not print template placeholders at all: %q", install)
+	if !strings.Contains(install, "matched whole") {
+		t.Errorf("install topic must explain that a template is not expanded inside a path: %q", install)
 	}
 
 	_, authTopic, _ := run(t, "", "help", "auth")

@@ -38,6 +38,17 @@ type gamedetailsResolver struct {
 // to satisfy it.
 var _ gamedetails.DownlinkResolver = (*gamedetailsResolver)(nil).Resolve
 
+// gamedetailsResolver builds the resolver this run's conversions use. It is the
+// Downloader-side constructor the type was missing while it had no consumer
+// (GD2), and its shape follows chunkURLProvider: the package's own credentials
+// and the refresh a request needs when they have expired.
+func (d *Downloader) gamedetailsResolver() *gamedetailsResolver {
+	return &gamedetailsResolver{
+		galaxy:  d.galaxy,
+		refresh: tokenRefresher{refresh: d.refreshAndSave, expired: func() bool { return d.token.IsExpired() }},
+	}
+}
+
 // Resolve implements gamedetails.DownlinkResolver.
 //
 // The path is derived by galaxy.PathFromDownlinkURL and never reimplemented

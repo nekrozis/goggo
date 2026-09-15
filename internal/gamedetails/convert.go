@@ -87,11 +87,18 @@ func convertProduct(ctx context.Context, product map[string]any, cfg config.Down
 	}
 	gd.Gamename = gamename
 
+	// The product id is one of the identifier fields and reads through
+	// idString (DEFECT-GD3-1: the live API sends it as a JSON number); title
+	// and changelog are free strings and keep the strict reader.
+	productID, err := idString(product, "id")
+	if err != nil {
+		return GameDetails{}, wrap("gamedetails", err)
+	}
+	gd.ProductID = productID
 	for _, f := range []struct {
 		name string
 		dst  *string
 	}{
-		{"id", &gd.ProductID},
 		{"title", &gd.Title},
 		{"changelog", &gd.Changelog},
 	} {
@@ -163,7 +170,7 @@ func convertProduct(ctx context.Context, product map[string]any, cfg config.Down
 		if err != nil {
 			return GameDetails{}, wrap(fmt.Sprintf("gamedetails: expanded_dlcs[%d]", i), err)
 		}
-		id, err := fieldString(dlc, "id")
+		id, err := idString(dlc, "id")
 		if err != nil {
 			return GameDetails{}, wrap(fmt.Sprintf("gamedetails: expanded_dlcs[%d]", i), err)
 		}
@@ -250,7 +257,7 @@ func gameFiles(ctx context.Context, gamename, title, label string, nodes []any, 
 				return nil, wrap(fmt.Sprintf("gamedetails: %s[%d].files[%d]", label, i, j), err)
 			}
 			where := fmt.Sprintf("gamedetails: %s[%d].files[%d]", label, i, j)
-			id, err := fieldString(entry, "id")
+			id, err := idString(entry, "id")
 			if err != nil {
 				return nil, wrap(where, err)
 			}
@@ -359,6 +366,38 @@ func fieldString(obj map[string]any, name string) (string, error) {
 		return "", fmt.Errorf("%s: expected a JSON string, got %s", name, jsonval.Kind(raw))
 	}
 	return jsonval.Str(raw)
+}
+
+// idString reads one of the API's identifier fields — the product id, a DLC
+// id, a file id — which the C++ conversion reads with jsoncpp's asString()
+// (galaxyapi.cpp:416, 460 and 563). That is a conversion, not a type test:
+// the live product documents send these ids as JSON numbers (DEFECT-GD3-1,
+// evidence dev/audit/evidence/GD3-probe-terraria.err), and the same file
+// vector even mixes the shapes — an installer's id is the string
+// "en1installer0" while a bonus-content file's id is the number 13403 —
+// so the identifier family is defined by what upstream does with it:
+//
+//	string  → as-is
+//	number  → stringified the way jsonval.Str stringifies it
+//	bool    → "true" / "false" (the port's locked precedent: id:true → "true")
+//	missing → ""
+//	null    → "" (asString on a null)
+//	object / array → error (jsoncpp would crash; this port reports)
+//
+// The split is deliberate and narrow (review GD3-R1 §4): slug, title,
+// changelog, os, language, name, version and downlink stay free strings under
+// fieldString's strict gate. This reader does not reopen GD1's field-type
+// rule; it locates `id` as the one family upstream never gated.
+func idString(obj map[string]any, name string) (string, error) {
+	raw, ok := obj[name]
+	if !ok {
+		return "", nil
+	}
+	value, err := jsonval.Str(raw)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", name, err)
+	}
+	return value, nil
 }
 
 // fieldObject reads an object field. jsonval.Object is itself a shape

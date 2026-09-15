@@ -609,3 +609,84 @@ func TestBuildPlanNothingToDownload(t *testing.T) {
 		t.Errorf("messages = %q, want a zero download total", msgs)
 	}
 }
+
+// exact counts the recorded requests whose path is exactly want, which is what
+// tells the product document apart from the build list of the same product.
+func (f *planFixture) exact(want string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var n int
+	for _, path := range f.requests {
+		if path == want {
+			n++
+		}
+	}
+	return n
+}
+
+// TestBuildPlanInstallDirTemplateNeedsProductInfo locks the one place the plan
+// fetches a product document: a template whose value comes from the product, and
+// only then (downloader.cpp:6679-6691). The three outcomes are the fetch itself,
+// the skip when the manifest names no base product, and the templates that never
+// need a document.
+func TestBuildPlanInstallDirTemplateNeedsProductInfo(t *testing.T) {
+	const slug = "the_witcher_3_wild_hunt"
+	// The title has no colon on purpose: the plan derives the install path from it,
+	// and a ":" is not a legal file name component on the development platform.
+	const title = "The Witcher 3 Wild Hunt"
+
+	productDoc := `{"id":"` + planProductID + `","slug":"` + slug + `","title":"` + title + `"}`
+
+	// A manifest without a base product id. GD3 defines this case (upstream
+	// requests the empty id): no request goes out and the name stays literal.
+	manifestWithoutBase := `{"installDirectory":"W3 GOTY","version":2,` +
+		`"products":[{"name":"` + title + `"}],` +
+		`"depots":[{"productId":"` + planProductID + `","languages":["en-US"],"osBitness":["64"],` +
+		`"manifest":"` + planDepotHashLang + `"}]}`
+
+	cases := []struct {
+		name          string
+		subdir        string
+		withoutBaseID bool
+		wantDirectory string
+		wantProduct   int
+	}{
+		{name: "gamename reads the slug", subdir: "%gamename%", wantDirectory: slug, wantProduct: 1},
+		{name: "title reads the title", subdir: "%title%", wantDirectory: title, wantProduct: 1},
+		{
+			name: "no base product id sends no request", subdir: "%gamename%", withoutBaseID: true,
+			wantDirectory: "%gamename%", wantProduct: 0,
+		},
+		{name: "install_dir needs no document", subdir: "%install_dir%", wantDirectory: "W3 GOTY", wantProduct: 0},
+		{name: "product_id needs no document", subdir: "%product_id%", wantDirectory: planProductID, wantProduct: 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newPlanFixture(t)
+			f.setDefaultBodies()
+			f.set("/products/"+planProductID, productDoc)
+			if c.withoutBaseID {
+				f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(planBuildHashNew), manifestWithoutBase)
+			}
+
+			cfg := planTestConfig(t)
+			cfg.Directories.GalaxyInstallSubdir = c.subdir
+			d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+			// The plan refreshes an expired token before it reads the document;
+			// a fresh one keeps the credential refresh (and its token file) out
+			// of a test about the install directory.
+			d.token.SetJSON(map[string]any{"access_token": "a", "refresh_token": "r", "expires_in": 3600})
+
+			res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, ""))
+			if err != nil {
+				t.Fatalf("BuildPlan: %v", err)
+			}
+			if want := cfg.Directories.Directory + c.wantDirectory; res.InstallPath != want {
+				t.Errorf("install path = %q, want %q", res.InstallPath, want)
+			}
+			if got := f.exact("/products/" + planProductID); got != c.wantProduct {
+				t.Errorf("product document requests = %d, want %d", got, c.wantProduct)
+			}
+		})
+	}
+}

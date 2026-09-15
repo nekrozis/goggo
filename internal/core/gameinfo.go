@@ -1,0 +1,209 @@
+package core
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"sync"
+	"sync/atomic"
+
+	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/gamedetails"
+)
+
+// defaultInfoThreads is the default of the info-threads setting
+// (main.cpp:312). The option is not registered yet (review GD3 §11.1 — D14
+// keeps the command tree to the surface that is actually supported), so the
+// value has no front end to live in and sits with its only consumer.
+const defaultInfoThreads = 4
+
+// GameDetailsRequest is one acquisition run's input.
+type GameDetailsRequest struct {
+	// Products are the products to fetch: a numeric id passes through, anything
+	// else is a game name looked up in the account's product list, with the
+	// interactive selection a name gets elsewhere in this package
+	// (selectProductID). An empty list is a caller error rather than an empty
+	// answer: an empty result would read as "these products have no files".
+	Products []string
+
+	// InfoThreads is how many fetches run at once; zero means the run's
+	// setting. It is NOT --threads — that one is the download concurrency, and
+	// D46's eight does not carry over (review GD3 ruling F).
+	InfoThreads int
+}
+
+// GameDetails fetches and converts the download face of every requested product
+// (Downloader::getGameDetails and Downloader::getGameDetailsThread,
+// downloader.cpp:390-503 and 3652-3790).
+//
+// The chain per product is the one GD1 and GD2 put in place: refresh the
+// credentials when they have expired, read the product document (which expands
+// its DLCs), convert it through the injected downlink resolver, then apply the
+// priority and the type filter. Upstream continues into makeFilepaths and the
+// --save-* artifacts; none of that belongs here. This is the acquisition
+// engine: it writes nothing to disk and reports no progress, because the
+// display belongs to whoever consumes the result (review GD3 §6 and the
+// progress ruling).
+//
+// The answer is COMPLETE OR NOTHING. A failure anywhere — a name that matches
+// no product, a request, the conversion — cancels the remaining workers and
+// returns an error with no results, rather than a shorter list a caller could
+// mistake for "this product has no files" (review GD3 §3). Upstream pushes an
+// empty entry and carries on (plan divergence 2).
+//
+// The result is ordered by gamename, so it does not depend on how the workers
+// were scheduled — upstream sorts after the join for the same reason
+// (downloader.cpp:499). An entry that is legitimately empty stays in the
+// result: it says "this product has no matching files", which is an answer.
+func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([]gamedetails.GameDetails, error) {
+	if len(req.Products) == 0 {
+		return nil, errors.New("galaxy: no products requested")
+	}
+
+	ids := make([]string, 0, len(req.Products))
+	for _, product := range req.Products {
+		id, notice, err := d.selectProductID(ctx, product)
+		if err != nil {
+			return nil, err
+		}
+		if id == "" || notice.Text != "" {
+			// The C++ helper prints its message and leaves the work list
+			// short. A short list is the partial answer this function refuses
+			// to hand back, so the message becomes the reason instead.
+			text := notice.Text
+			if text == "" {
+				text = msgNoProducts
+			}
+			return nil, errors.New(text)
+		}
+		ids = append(ids, id)
+	}
+
+	owned, err := d.ownedGameIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	workers := min(d.infoThreadCount(req.InfoThreads), len(ids))
+
+	// One resolver for the whole run: it carries the credential refresh the
+	// per-file resolution needs (GD2), and since it is shared, the pre-request
+	// refresh below goes through the same one — a second refresher would be a
+	// second lock and a second chance to refresh side by side. The owned set is
+	// read-only once built, so the workers share it without a lock.
+	resolver := d.gamedetailsResolver()
+
+	results := make([]gamedetails.GameDetails, len(ids))
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		cursor  atomic.Int64
+		once    sync.Once
+		failure error
+		wg      sync.WaitGroup
+	)
+	// Standard library only: no x/sync (unaudited, and this is a worker pool
+	// plus a first-error latch). A worker takes the next index and writes its
+	// own slot, so results need no lock; the first failure records itself and
+	// cancels the rest. Upstream only breaks out of its own consumer loop and
+	// keeps the other threads going (downloader.cpp:3737).
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				i := int(cursor.Add(1)) - 1
+				if i >= len(ids) || workCtx.Err() != nil {
+					return
+				}
+				gd, err := d.gameDetailsFor(workCtx, ids[i], owned, resolver)
+				if err != nil {
+					once.Do(func() {
+						failure = err
+						cancel()
+					})
+					return
+				}
+				results[i] = gd
+			}
+		}()
+	}
+	wg.Wait()
+
+	if failure != nil {
+		return nil, failure
+	}
+	// A worker that stopped because the caller's context was cancelled reports
+	// no failure of its own, so that reason is read from the context.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	sort.SliceStable(results, func(i, j int) bool { return results[i].Gamename < results[j].Gamename })
+	return results, nil
+}
+
+// infoThreadCount is the worker count of a run: the request's value, else the
+// run's setting, else that setting's default. The last step exists because
+// nothing writes the setting yet (the option is not registered), and zero
+// workers would turn "no answer" into "an empty answer".
+func (d *Downloader) infoThreadCount(requested int) int {
+	if requested > 0 {
+		return requested
+	}
+	if d.cfg.InfoThreads > 0 {
+		return int(d.cfg.InfoThreads)
+	}
+	return defaultInfoThreads
+}
+
+// ownedGameIDs reads the account's owned product ids when the include mask asks
+// for DLC content, and returns nil otherwise — an empty set means no filtering
+// at all in the conversion (gamedetails.ProductInfoToGameDetails).
+//
+// Difference (recorded, plan divergence 3): the C++ source filters DLCs against
+// the global list getGameList left behind, so a run that never listed, or one
+// that answered from its cache, filters nothing by accident. The set is fetched
+// explicitly here, and a failure to read it fails the run rather than reporting
+// an account that owns nothing.
+func (d *Downloader) ownedGameIDs(ctx context.Context) (map[string]bool, error) {
+	if d.cfg.DownloadConfig.Include&config.GFDLC == 0 {
+		return nil, nil
+	}
+	ids, err := d.web.OwnedGameIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	owned := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		owned[id] = true
+	}
+	return owned, nil
+}
+
+// gameDetailsFor is one worker's pass over one product — the body of
+// getGameDetailsThread (downloader.cpp:3731-3781) without its display.
+//
+// The refresh is the C++ source's own pre-request step (3732-3739): it is
+// idempotent, so a worker that arrives after another has refreshed pays
+// nothing. A resolver failure is NOT a failure here: GD1's contract skips that
+// one file and keeps converting (gamedetails.DownlinkResolver).
+func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[string]bool, resolver *gamedetailsResolver) (gamedetails.GameDetails, error) {
+	if err := resolver.refresh.refreshIfExpired(ctx); err != nil {
+		return gamedetails.GameDetails{}, fmt.Errorf("galaxy: refresh login: %w", err)
+	}
+	product, err := d.galaxy.Product(ctx, id)
+	if err != nil {
+		return gamedetails.GameDetails{}, err
+	}
+	cfg := d.cfg.DownloadConfig
+	gd, err := gamedetails.ProductInfoToGameDetails(ctx, product, cfg, owned, resolver.Resolve)
+	if err != nil {
+		return gamedetails.GameDetails{}, err
+	}
+	gd.FilterWithPriorities(cfg.PlatformPriority, cfg.LanguagePriority)
+	gd.FilterWithType(cfg.Include)
+	return gd, nil
+}

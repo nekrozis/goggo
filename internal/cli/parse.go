@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/core"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -188,17 +189,18 @@ var optionTable = []optionSpec{
 	{
 		id: optInstallDir, long: "install-dir", value: valueRequired, arg: "<name>",
 		summary: "Subdirectory to install the game into (default: the manifest's installation directory)",
-		detail: "A concrete directory name. It is not a template: the internal\n" +
-			"placeholder language the config layer understands is not accepted here.",
+		detail: "A concrete directory name, or one of the installation templates:\n" +
+			strings.Join(core.InstallSubdirTemplates, "\n") + "\n" +
+			"A template is matched whole: it is not expanded inside a longer path.",
 		parse: func(inv *invocation, v string) error {
-			// The user gives a concrete directory name. The internal
-			// subdirectory resolver still has a template language (the default
-			// "%install_dir%" comes from the config), and accepting that
-			// language here would hand users a half-exposed internal API, so
-			// placeholders are refused rather than interpreted (review §5,
-			// constraint A).
-			if strings.ContainsRune(v, '%') {
-				return usagef("--install-dir takes a directory name, not a template (%q)", v)
+			// A value carrying a placeholder must be one of the templates the
+			// installer actually resolves. The list comes from core so the
+			// whitelist cannot drift from the resolver (review GD3 §3.3);
+			// anything else with a "%" in it would be a half-exposed template
+			// language, and the resolver would keep it as a literal directory
+			// name (review CLI1 §5, constraint A).
+			if strings.ContainsRune(v, '%') && !core.IsInstallSubdirTemplate(v) {
+				return usagef("--install-dir takes a directory name or one of the known templates (%q)", v)
 			}
 			inv.cfg.Directories.GalaxyInstallSubdir = v
 			return nil

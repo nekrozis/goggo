@@ -258,6 +258,96 @@ func TestProductBatchesDLCIDs(t *testing.T) {
 	}
 }
 
+// TestProductExpandsNumericDLCIDs locks DEFECT-GD3-1 on the GD2 side: the live
+// API sends dlcs.products ids as JSON numbers (galaxyapi.cpp:384 reads them
+// with jsoncpp's asString), and that read only happens on the batching branch
+// — more than maxDLCBatchSize ids — so this fixture crosses the 45 boundary on
+// purpose. The ids= list must carry the numbers stringified, in order.
+func TestProductExpandsNumericDLCIDs(t *testing.T) {
+	const total = maxDLCBatchSize + 1
+	entries := make([]any, 0, total)
+	for i := 0; i < total; i++ {
+		switch i {
+		case 0:
+			entries = append(entries, map[string]any{"id": 1523284508})
+		case 1:
+			entries = append(entries, map[string]any{"id": 1523284509})
+		default:
+			entries = append(entries, map[string]any{"id": fmt.Sprintf("s%03d", i)})
+		}
+	}
+
+	f := newProductFixture(t)
+	f.setServe(func(uri string) (string, int) {
+		if strings.HasPrefix(uri, "/products?ids=") {
+			got := dlcIDs(uri)
+			docs := make([]any, len(got))
+			for i, id := range got {
+				docs[i] = map[string]any{"id": id}
+			}
+			return mustJSON(t, docs), http.StatusOK
+		}
+		return mustJSON(t, map[string]any{
+			"id": "1",
+			"dlcs": map[string]any{
+				"products": entries,
+				// Present but never used on this branch.
+				"expanded_all_products_url": "unused",
+			},
+		}), http.StatusOK
+	})
+
+	got, err := newProductClient(t, f.Server).Product(context.Background(), "1")
+	if err != nil {
+		t.Fatalf("Product with numeric dlc ids: %v", err)
+	}
+	var batches [][]string
+	for _, uri := range f.requestURIs() {
+		if strings.HasPrefix(uri, "/products?ids=") {
+			batches = append(batches, dlcIDs(uri))
+		}
+	}
+	if len(batches) != 2 || len(batches[0]) != maxDLCBatchSize || len(batches[1]) != 1 {
+		t.Fatalf("batches = %v, want %d then 1", batches, maxDLCBatchSize)
+	}
+	if batches[0][0] != "1523284508" || batches[0][1] != "1523284509" {
+		t.Errorf("first ids = %q,%q, want the numeric ids stringified", batches[0][0], batches[0][1])
+	}
+	docs, ok := got["expanded_dlcs"].([]any)
+	if !ok || len(docs) != total {
+		t.Fatalf("expanded_dlcs = %v, want %d documents", got["expanded_dlcs"], total)
+	}
+}
+
+// TestProductRejectsAStructuredDLCID locks the one shape the identifier read
+// refuses: jsoncpp's asString crashes on an object, so this port reports
+// instead of inventing a text form. The read lives on the batching branch, so
+// the entry list crosses the boundary.
+func TestProductRejectsAStructuredDLCID(t *testing.T) {
+	entries := make([]any, 0, maxDLCBatchSize+1)
+	entries = append(entries, map[string]any{"id": map[string]any{}})
+	for i := 1; i <= maxDLCBatchSize; i++ {
+		entries = append(entries, map[string]any{"id": fmt.Sprintf("s%03d", i)})
+	}
+
+	f := newProductFixture(t)
+	f.setServe(func(string) (string, int) {
+		return mustJSON(t, map[string]any{"id": "1", "dlcs": map[string]any{
+			"products": entries, "expanded_all_products_url": "unused",
+		}}), http.StatusOK
+	})
+	_, err := newProductClient(t, f.Server).Product(context.Background(), "1")
+	if err == nil {
+		t.Fatal("a structured dlc id must fail")
+	}
+	if !strings.Contains(err.Error(), "dlcs.products[0].id") {
+		t.Errorf("error = %v, want it to name the entry", err)
+	}
+	if uris := f.requestURIs(); len(uris) != 1 {
+		t.Errorf("requests = %v, want no batch attempt", uris)
+	}
+}
+
 // TestProductSkipsTheRequestForAnUnusableExpansionURL locks the case the C++
 // source leaves undefined: an empty (or missing) expanded_all_products_url is
 // not requested, it produces an empty result.

@@ -234,6 +234,68 @@ func TestFilterWithType(t *testing.T) {
 	}
 }
 
+// TestFilterWithTypeInPlace locks the exported in-place filter: it removes the
+// excluded entries from the four vectors of the product AND from those of every
+// DLC, leaving the rest of the tree alone (gamedetails.cpp:268-281). It is not
+// the collecting filter above — the tree changes.
+func TestFilterWithTypeInPlace(t *testing.T) {
+	installer := GameFile{Type: config.GFBaseInstaller}
+	extra := GameFile{Type: config.GFBaseExtra}
+	patch := GameFile{Type: config.GFBasePatch}
+	langpack := GameFile{Type: config.GFBaseLangPack}
+	dlcInstaller := GameFile{Type: config.GFDLCInstaller}
+
+	gd := GameDetails{
+		Installers:    []GameFile{installer, extra},
+		Extras:        []GameFile{extra, extra},
+		Patches:       []GameFile{patch},
+		LanguagePacks: []GameFile{langpack},
+		Gamename:      "some_game",
+		DLCs: []GameDetails{{
+			Installers: []GameFile{dlcInstaller, extra},
+			Extras:     []GameFile{extra},
+			Gamename:   "some_dlc",
+		}},
+	}
+
+	// The mask takes the two installer kinds and the two language-pack kinds:
+	// what is left is the base installer, the base language pack and the DLC
+	// installer, in their own vectors.
+	gd.FilterWithType(config.GFInstaller | config.GFLangPack)
+
+	if len(gd.Installers) != 1 || gd.Installers[0].Type != config.GFBaseInstaller {
+		t.Errorf("installers = %+v, want only the base installer", gd.Installers)
+	}
+	if len(gd.Extras) != 0 {
+		t.Errorf("extras = %+v, want none: the mask has no extras bit", gd.Extras)
+	}
+	if len(gd.Patches) != 0 {
+		t.Errorf("patches = %+v, want none: the mask has no patch bit", gd.Patches)
+	}
+	if len(gd.LanguagePacks) != 1 || gd.LanguagePacks[0].Type != config.GFBaseLangPack {
+		t.Errorf("language packs = %+v, want the base language pack kept", gd.LanguagePacks)
+	}
+	if len(gd.DLCs) != 1 {
+		t.Fatalf("dlcs = %d, want the subtree kept", len(gd.DLCs))
+	}
+	if len(gd.DLCs[0].Installers) != 1 || gd.DLCs[0].Installers[0].Type != config.GFDLCInstaller {
+		t.Errorf("dlc installers = %+v, want only the DLC installer", gd.DLCs[0].Installers)
+	}
+	if len(gd.DLCs[0].Extras) != 0 {
+		t.Errorf("dlc extras = %+v, want none", gd.DLCs[0].Extras)
+	}
+	if gd.DLCs[0].Gamename != "some_dlc" {
+		t.Errorf("the subtree's own fields must survive: %+v", gd.DLCs[0])
+	}
+
+	// An empty mask is the extreme case: upstream erases everything.
+	gd.FilterWithType(0)
+	if len(gd.Installers)+len(gd.Extras)+len(gd.Patches)+len(gd.LanguagePacks) != 0 ||
+		len(gd.DLCs[0].Installers)+len(gd.DLCs[0].Extras)+len(gd.DLCs[0].Patches)+len(gd.DLCs[0].LanguagePacks) != 0 {
+		t.Error("an empty mask must erase every vector, DLC subtree included")
+	}
+}
+
 // TestMakeCustomFilepath locks the custom metadata path: a base game's files
 // carry the custom-base type and land under the game directory without a DLC
 // segment.

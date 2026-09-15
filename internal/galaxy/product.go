@@ -63,22 +63,36 @@ func (c *Client) Product(ctx context.Context, productID string) (map[string]any,
 
 // expandDLCs fetches the DLC documents of a product document and injects them.
 //
-// The dlcs member decides whether anything happens at all:
+// The dlcs member decides whether anything happens at all, through the guard
+// the C++ source applies (galaxyapi.cpp:360):
 //
-//	absent      → nothing to expand, nothing injected
-//	null        → same: a null is how an optional member is commonly spelled, so
-//	              it carries no shape information to complain about
-//	object      → expand
-//	anything else → error: the member is there and says something other than
-//	              "here are the DLCs"
+//	if (product_info["dlcs"].isObject()) { ...expand...; inject... }
+//
+// — the expansion block is entered for an object and skipped for everything
+// else, silently:
+//
+//	absent       → nothing to expand, nothing injected
+//	null         → same; a null is how an optional member is commonly spelled
+//	object       → expand (one request, or batches above maxDLCBatchSize)
+//	non-object   → skipped: no request, no expanded_dlcs, the document returned
+//
+// The live API really does send the non-object shapes — a majority of one
+// probed account's products carry "dlcs": [] (evidence:
+// dev/audit/evidence/D52-dlcs-census.txt, DEFECT-GD3-2). A string, number or
+// boolean here is data this port has never observed; the C++ guard gives them
+// the same treatment as an array, so they get it here too: an answer that
+// cannot be expanded is skipped, not reported.
+//
+// What the guard does NOT cover stays strict (residual divergence, registered
+// by ruling D52): inside an object, dlcs.products and
+// dlcs.expanded_all_products_url keep their field-shape gates — upstream's
+// size()/asString() leniency on those members has no observed sample to
+// justify widening GD2's gate for.
 func (c *Client) expandDLCs(ctx context.Context, product map[string]any) error {
 	raw, present := product["dlcs"]
-	if !present || raw == nil {
+	dlcs, isObject := raw.(map[string]any)
+	if !present || raw == nil || !isObject {
 		return nil
-	}
-	dlcs, err := jsonval.Object(raw)
-	if err != nil {
-		return fmt.Errorf("dlcs: %w", err)
 	}
 	products, err := dlcProducts(dlcs)
 	if err != nil {

@@ -31,6 +31,12 @@ type GameDetailsRequest struct {
 	// setting. It is NOT --threads — that one is the download concurrency, and
 	// D46's eight does not carry over (review GD3 ruling F).
 	InfoThreads int
+
+	// Include overrides the run's type mask for this acquisition when set.
+	// Its only producer is GD4's download file chain, which forces "all"
+	// the way upstream's downloadFileWithId does (downloader.cpp:2394) — a
+	// file looked up by id must be findable whatever the mask says.
+	Include *uint32
 }
 
 // GameDetails fetches and converts the download face of every requested product
@@ -80,7 +86,8 @@ func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([
 		ids = append(ids, id)
 	}
 
-	owned, err := d.ownedGameIDs(ctx)
+	include := d.effectiveInclude(req)
+	owned, err := d.ownedGameIDs(ctx, include)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +125,7 @@ func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([
 				if i >= len(ids) || workCtx.Err() != nil {
 					return
 				}
-				gd, err := d.gameDetailsFor(workCtx, ids[i], owned, resolver)
+				gd, err := d.gameDetailsFor(workCtx, ids[i], owned, resolver, include)
 				if err != nil {
 					once.Do(func() {
 						failure = err
@@ -168,8 +175,8 @@ func (d *Downloader) infoThreadCount(requested int) int {
 // that answered from its cache, filters nothing by accident. The set is fetched
 // explicitly here, and a failure to read it fails the run rather than reporting
 // an account that owns nothing.
-func (d *Downloader) ownedGameIDs(ctx context.Context) (map[string]bool, error) {
-	if d.cfg.DownloadConfig.Include&config.GFDLC == 0 {
+func (d *Downloader) ownedGameIDs(ctx context.Context, include uint32) (map[string]bool, error) {
+	if include&config.GFDLC == 0 {
 		return nil, nil
 	}
 	ids, err := d.web.OwnedGameIDs(ctx)
@@ -190,7 +197,7 @@ func (d *Downloader) ownedGameIDs(ctx context.Context) (map[string]bool, error) 
 // idempotent, so a worker that arrives after another has refreshed pays
 // nothing. A resolver failure is NOT a failure here: GD1's contract skips that
 // one file and keeps converting (gamedetails.DownlinkResolver).
-func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[string]bool, resolver *gamedetailsResolver) (gamedetails.GameDetails, error) {
+func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[string]bool, resolver *gamedetailsResolver, include uint32) (gamedetails.GameDetails, error) {
 	if err := resolver.refresh.refreshIfExpired(ctx); err != nil {
 		return gamedetails.GameDetails{}, fmt.Errorf("galaxy: refresh login: %w", err)
 	}
@@ -199,6 +206,7 @@ func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[st
 		return gamedetails.GameDetails{}, err
 	}
 	cfg := d.cfg.DownloadConfig
+	cfg.Include = include
 	gd, err := gamedetails.ProductInfoToGameDetails(ctx, product, cfg, owned, resolver.Resolve)
 	if err != nil {
 		return gamedetails.GameDetails{}, err
@@ -206,4 +214,14 @@ func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[st
 	gd.FilterWithPriorities(cfg.PlatformPriority, cfg.LanguagePriority)
 	gd.FilterWithType(cfg.Include)
 	return gd, nil
+}
+
+// effectiveInclude is the type mask an acquisition run consumes: the request's
+// override when it carries one (GD4's download file forces "all"), and the
+// run's configured mask otherwise.
+func (d *Downloader) effectiveInclude(req GameDetailsRequest) uint32 {
+	if req.Include != nil {
+		return *req.Include
+	}
+	return d.cfg.DownloadConfig.Include
 }

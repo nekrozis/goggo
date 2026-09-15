@@ -63,6 +63,14 @@ func (f *providerFixture) url(path string) string { return f.Server.URL + path }
 // expires counter says how many refresh calls still see an expired token.
 func newProvider(t *testing.T, f *providerFixture, remoteXML bool, refreshes *atomic.Int32) *websiteURLProvider {
 	t.Helper()
+	return newProviderWithPolicy(t, f, remoteXML, refreshes, checksumGated)
+}
+
+// newProviderWithPolicy is newProvider with the checksum policy pinned: the
+// batch chain runs the gated policy, the single-file chain the always policy
+// (GD4 §3.5).
+func newProviderWithPolicy(t *testing.T, f *providerFixture, remoteXML bool, refreshes *atomic.Int32, policy checksumPolicy) *websiteURLProvider {
+	t.Helper()
 	hx, err := httpx.New(httpx.Config{UserAgent: "goggo-test/1.0"})
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
@@ -78,6 +86,7 @@ func newProvider(t *testing.T, f *providerFixture, remoteXML bool, refreshes *at
 	return &websiteURLProvider{
 		galaxy:    gx,
 		remoteXML: remoteXML,
+		policy:    policy,
 		refresh: tokenRefresher{
 			refresh: func(ctx context.Context) error {
 				refreshes.Add(1)

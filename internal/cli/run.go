@@ -201,12 +201,12 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome
 			"orphans remove needs --yes when the input is not a terminal"))
 	}
 
-	// The sampling surface belongs to the one command that polls it: an install
-	// run publishes its per-task byte counts into this registry and the renderer
-	// reads it back. Every other command opens without one, which is the nil
-	// case transfer skips entirely (review S-ETA2).
+	// The sampling surface belongs to the commands that poll it: an install
+	// or a download run publishes its per-task byte counts into this registry
+	// and the renderer reads it back. Every other command opens without one,
+	// which is the nil case transfer skips entirely (review S-ETA2).
 	var progress *transfer.Progress
-	if inv.cmd == cmdInstall {
+	if inv.cmd == cmdInstall || inv.cmd == cmdDownload || inv.cmd == cmdDownloadFile {
 		progress = transfer.NewProgress()
 	}
 
@@ -292,6 +292,12 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome
 	case cmdOrphansCheck:
 		return ui.runOrphansCheck(ctx, d, inv, stdout, stderr)
 
+	case cmdDownload:
+		return ui.runWebsiteDownload(ctx, d, inv, stdout, stderr, progress)
+
+	case cmdDownloadFile:
+		return ui.runWebsiteFiles(ctx, d, inv, stdout, stderr, progress)
+
 	case cmdOrphansRemove:
 		return ui.runOrphansRemove(ctx, d, inv, stdout, stderr)
 
@@ -337,7 +343,7 @@ func listFormat(id commandID) uint32 {
 // propagates — Stop cleans up, nothing is swallowed.
 func (c *console) runInstall(ctx context.Context, d *core.Downloader, req core.InstallRequest, cfg config.Config, progress *transfer.Progress) stopReason {
 	ctx, stopSignal := signal.NotifyContext(ctx, os.Interrupt)
-	c.attachInstallUI(cfg, progress)
+	c.attachInstallUI(cfg, progress, "Installation")
 
 	result := stopFailed
 	var installErr error

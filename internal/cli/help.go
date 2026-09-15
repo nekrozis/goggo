@@ -33,7 +33,7 @@ func usage(w io.Writer, path []string) {
 	switch {
 	case len(path) == 0:
 		fmt.Fprint(w, rootUsage())
-	case len(node.children) != 0:
+	case len(node.children) != 0 && node.id == cmdNone:
 		fmt.Fprint(w, namespaceUsage(node, path))
 	default:
 		fmt.Fprint(w, commandUsage(node, path))
@@ -71,8 +71,12 @@ func namespaceUsage(node commandNode, path []string) string {
 func commandUsage(node commandNode, path []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Usage: %s %s", config.ProgramName, strings.Join(path, " "))
-	if want, takes := commandArity(node.id); takes {
-		fmt.Fprintf(&b, " <%s>", want)
+	if want, count := commandArity(node.id); count != 0 {
+		ellipsis := ""
+		if count < 0 {
+			ellipsis = "..."
+		}
+		fmt.Fprintf(&b, " <%s>%s", want, ellipsis)
 	}
 	fmt.Fprintf(&b, " [options]\n\n%s\n", node.summary)
 
@@ -90,10 +94,20 @@ func commandUsage(node commandNode, path []string) string {
 		b.WriteString(detailedOptionLines(optionSet(node.options)))
 		b.WriteString("\nAlso accepted (shared with every command):\n")
 		b.WriteString(optionLines(sharedOptions))
-		return b.String()
+	} else {
+		b.WriteString("\nOptions:\n")
+		b.WriteString(detailedOptionLines(sharedOptions))
 	}
-	b.WriteString("\nOptions:\n")
-	b.WriteString(detailedOptionLines(sharedOptions))
+
+	// A node that is both leaf and namespace ("download") shows its
+	// subcommands under its own usage, so the topic says everything the word
+	// can mean (GD4 ruling 9).
+	if len(node.children) != 0 {
+		b.WriteString("\nSubcommands:\n")
+		for _, child := range node.children {
+			fmt.Fprintf(&b, "  %-16s %s\n", child.name, child.summary)
+		}
+	}
 	return b.String()
 }
 

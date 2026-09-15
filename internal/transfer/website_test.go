@@ -552,3 +552,54 @@ func md5Of(s string) string {
 	sum := md5.Sum([]byte(s))
 	return hex.EncodeToString(sum[:])
 }
+
+// TestWebsiteTaskResultVerdicts locks the GD4 aggregation seam: the callback
+// sees one verdict per task — nil for a success and for an authorised skip,
+// non-nil for the exhausted-retries failure — and the run itself still ends
+// without error so the other tasks keep their chance (the aggregate exit
+// contract rides on these verdicts, not on the event texts).
+func TestWebsiteTaskResultVerdicts(t *testing.T) {
+	f := newWebsiteFixture(t)
+	f.set("/good.bin", "payload")
+	env := newWebsiteEnv(t, func(path string) bool { return strings.Contains(path, "black.bin") }, false, true, false)
+	dir := t.TempDir()
+	// The fake provider resolves by destination base name: good.bin points
+	// at served bytes, bad.bin at a path the fixture answers with 404.
+	env.urls.set("good.bin", resolveResult{downlink: f.url("/good.bin")})
+	env.urls.set("bad.bin", resolveResult{downlink: f.url("/nope.bin")})
+
+	var (
+		mu       sync.Mutex
+		verdicts map[string]error
+	)
+	verdicts = map[string]error{}
+	env.deps.TaskResult = func(task model.WebsiteTask, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		verdicts[task.Destination] = err
+	}
+
+	tasks := []model.WebsiteTask{
+		{Destination: filepath.Join(dir, "good.bin"), DownlinkURL: f.url("/good.bin"), Gamename: "g", Size: "6"},
+		{Destination: filepath.Join(dir, "bad.bin"), DownlinkURL: f.url("/bad.bin"), Gamename: "g", Size: "6"},
+		{Destination: filepath.Join(dir, "black.bin"), DownlinkURL: f.url("/good.bin"), Gamename: "g", Size: "6"},
+	}
+	if err := RunWebsite(context.Background(), tasks, Options{Workers: 1, Retries: 0}, env.deps); err != nil {
+		t.Fatalf("RunWebsite = %v, want the run to end", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(verdicts) != 3 {
+		t.Fatalf("verdicts = %d, want one per task", len(verdicts))
+	}
+	if err := verdicts[filepath.Join(dir, "good.bin")]; err != nil {
+		t.Errorf("good task = %v, want nil", err)
+	}
+	if err := verdicts[filepath.Join(dir, "bad.bin")]; err == nil {
+		t.Error("failed task = nil, want the operational error reported")
+	}
+	if err := verdicts[filepath.Join(dir, "black.bin")]; err != nil {
+		t.Errorf("blacklisted skip = %v, want nil (an authorised skip)", err)
+	}
+}

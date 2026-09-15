@@ -288,23 +288,23 @@ func TestStopFinalizesOnce(t *testing.T) {
 // zero-transfer completed run says nothing (the plan's "Nothing to download."
 // already spoke for it).
 func TestFinalLines(t *testing.T) {
-	if got := finalLines(stopCompleted, runStats{completed: 3}); len(got) != 1 || !strings.Contains(got[0], "3") {
+	if got := finalLines(stopCompleted, runStats{completed: 3}, ""); len(got) != 1 || !strings.Contains(got[0], "3") {
 		t.Errorf("completed = %q, want the count", got)
 	}
 	// The resume aggregate line rides the terminal state (UI1-R2: markers
 	// arrive mid-run, so the count lands beside the completion line).
-	got := finalLines(stopCompleted, runStats{completed: 2, resumed: 2})
+	got := finalLines(stopCompleted, runStats{completed: 2, resumed: 2}, "")
 	if len(got) != 2 || !strings.Contains(got[0], "Resuming: 2") {
 		t.Errorf("completed+resumed = %q, want the resume line before the count", got)
 	}
-	if got := finalLines(stopCompleted, runStats{}); got != nil {
+	if got := finalLines(stopCompleted, runStats{}, ""); got != nil {
 		t.Errorf("zero-transfer completed = %q, want no final line", got)
 	}
-	cancel := finalLines(stopCanceled, runStats{completed: 3})
+	cancel := finalLines(stopCanceled, runStats{completed: 3}, "")
 	if len(cancel) != 1 || strings.Contains(cancel[0], "3") || !strings.Contains(cancel[0], "resume") {
 		t.Errorf("canceled = %q, want the resume guidance without a count", cancel)
 	}
-	if got := finalLines(stopFailed, runStats{completed: 3}); len(got) != 1 {
+	if got := finalLines(stopFailed, runStats{completed: 3}, ""); len(got) != 1 {
 		t.Errorf("failed = %q, want one state line", got)
 	}
 }
@@ -616,7 +616,20 @@ func TestZeroTransferEmitsNothing(t *testing.T) {
 	if s.stats[0].completed != 0 {
 		t.Errorf("completed = %d, want 0", s.stats[0].completed)
 	}
-	if got := finalLines(stopCompleted, s.stats[0]); got != nil {
+	if got := finalLines(stopCompleted, s.stats[0], ""); got != nil {
 		t.Errorf("finalLines = %q, want none for a zero-transfer run", got)
+	}
+}
+
+// TestFinalLinesSubject locks the GD4 closing-line rule: the frame names the
+// command it closed. An empty subject keeps the install wording, which is what
+// every pre-GD4 evidence log shows.
+func TestFinalLinesSubject(t *testing.T) {
+	got := finalLines(stopFailed, runStats{}, "Download")
+	if len(got) != 1 || got[0] != "Download failed." {
+		t.Errorf("download close = %q, want the download wording", got)
+	}
+	if got := finalLines(stopFailed, runStats{}, ""); len(got) != 1 || got[0] != "Installation failed." {
+		t.Errorf("default close = %q, want the install wording", got)
 	}
 }

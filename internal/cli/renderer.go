@@ -43,7 +43,11 @@ const (
 // never shows a completion count: its active tasks were interrupted, not
 // finished (review UI1 v2 §E). A zero-transfer run shows no count line — the
 // plan's "Nothing to download." already said it (review UI1-R2 §3, scene ②).
-func finalLines(reason stopReason, st runStats) []string {
+// The subject names what the run was: an install closes as "Installation
+// failed.", a download as "Download failed." — the closing line must not
+// misname the command it closes (GD4). An empty subject keeps the install
+// wording, which is what every pre-GD4 evidence log shows.
+func finalLines(reason stopReason, st runStats, subject string) []string {
 	switch reason {
 	case stopCompleted:
 		var lines []string
@@ -57,7 +61,10 @@ func finalLines(reason stopReason, st runStats) []string {
 	case stopCanceled:
 		return []string{"Interrupted. Partial files kept for resume."}
 	default:
-		return []string{"Installation failed."}
+		if subject == "" {
+			subject = "Installation"
+		}
+		return []string{subject + " failed."}
 	}
 }
 
@@ -520,6 +527,8 @@ type ttySink struct {
 	width  func() int
 	height func() int
 	unit   uint32
+	// subject names the run for the closing line ("Installation", "Download").
+	subject string
 }
 
 func (s *ttySink) info(string)            {} // the frame's message row shows it
@@ -533,17 +542,18 @@ func (s *ttySink) tick(vm viewModel) {
 }
 
 func (s *ttySink) finalize(reason stopReason, st runStats) {
-	s.coord.finalize(finalLines(reason, st))
+	s.coord.finalize(finalLines(reason, st, s.subject))
 }
 
 // logSink is the non-TTY back end: append-only stable lines, no ANSI, no
 // cursor sequences, no progress frames (review UI1 v3 §6.C). Progress events
 // never become lines; only lifecycle and message events do.
 type logSink struct {
-	out    io.Writer
-	errOut io.Writer
-	unit   uint32
-	now    func() time.Time
+	out     io.Writer
+	errOut  io.Writer
+	unit    uint32
+	now     func() time.Time
+	subject string // names the run for the closing line
 
 	lastSummary   time.Time
 	finishedSince int
@@ -580,7 +590,7 @@ func (s *logSink) tick(vm viewModel) {
 }
 
 func (s *logSink) finalize(reason stopReason, st runStats) {
-	for _, line := range finalLines(reason, st) {
+	for _, line := range finalLines(reason, st, s.subject) {
 		if reason == stopCompleted {
 			fmt.Fprintln(s.out, line)
 		} else {

@@ -82,7 +82,7 @@ func TestCommandTreeResolution(t *testing.T) {
 // have are absent from the tree, and the ones whose capability moved somewhere
 // else are diagnosed with a hint (review S1 checkpoint 6).
 func TestRemovedCommandsAreUnknown(t *testing.T) {
-	for _, name := range []string{"download", "repair", "xml", "cache", "cloud", "config"} {
+	for _, name := range []string{"repair", "xml", "cache", "cloud", "config"} {
 		err := mustUsageError(t, name)
 		if !strings.Contains(err.Error(), "unknown command") {
 			t.Errorf("parseArgs(%s) error = %v, want an unknown command", name, err)

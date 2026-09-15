@@ -77,7 +77,7 @@ func TestRunFailures(t *testing.T) {
 	}{
 		{"unknown option", []string{"--nonsense"}, "unknown option", ""},
 		{"unknown command", []string{"frobnicate"}, "unknown command", ""},
-		{"removed command", []string{"download"}, "unknown command", ""},
+		{"removed command", []string{"repair"}, "unknown command", ""},
 		{"removed option", []string{"--download"}, "unknown option", ""},
 		{"removed list option", []string{"--list", "details"}, "unknown option", ""},
 		{"missing value", []string{"list", "games", "--tag"}, "requires a value", ""},

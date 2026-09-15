@@ -341,3 +341,117 @@ func TestMakeFilepathsCachesAndDLCNames(t *testing.T) {
 		t.Error("the dlc installer did not get a cached filepath")
 	}
 }
+
+// --- GD4 §3.1: the recursive file vector is the single source of truth ---
+
+// dlcFile is a DLC-shaped file with the fields the conversion fills.
+func dlcFile(base, dlc, path string, typ uint32) GameFile {
+	return GameFile{
+		Gamename:         dlc,
+		GamenameBasegame: base,
+		Path:             path,
+		Title:            "Title of " + dlc,
+		TitleBasegame:    "Title of " + base,
+		Type:             typ,
+		Version:          "1.0",
+	}
+}
+
+// TestGetGameFileVectorRecursiveDLC locks the traversal contract: base vectors
+// in goggo order (installers, extras, patches, language packs — the upstream
+// order swaps extras and patches; GD4 ruling keeps the current order, plan
+// §9), then each DLC recursively, DLCs in declaration order, depth-first,
+// stable, no sorting.
+func TestGetGameFileVectorRecursiveDLC(t *testing.T) {
+	nested := GameDetails{
+		Installers: []GameFile{dlcFile("dlc_one", "dlc_one_one", "n.exe", config.GFDLCInstaller)},
+	}
+	gd := GameDetails{
+		Installers:    []GameFile{baseFile("base", "i1.exe", config.PlatformWindows)},
+		Extras:        []GameFile{{Gamename: "base", Path: "e1.zip", Type: config.GFBaseExtra}},
+		Patches:       []GameFile{{Gamename: "base", Path: "p1.zip", Type: config.GFBasePatch}},
+		LanguagePacks: []GameFile{{Gamename: "base", Path: "l1.zip", Type: config.GFBaseLangPack}},
+		DLCs: []GameDetails{
+			{
+				Installers: []GameFile{dlcFile("base", "dlc_one", "d1.exe", config.GFDLCInstaller)},
+				Extras:     []GameFile{dlcFile("base", "dlc_one", "d2.zip", config.GFDLCExtra)},
+				DLCs:       []GameDetails{nested},
+			},
+			{
+				Patches: []GameFile{dlcFile("base", "dlc_two", "d3.zip", config.GFDLCPatch)},
+			},
+		},
+	}
+
+	got := gd.GetGameFileVector()
+	wantOrder := []string{"i1.exe", "e1.zip", "p1.zip", "l1.zip", "d1.exe", "d2.zip", "n.exe", "d3.zip"}
+	if len(got) != len(wantOrder) {
+		t.Fatalf("vector = %d files, want %d (%v)", len(got), len(wantOrder), got)
+	}
+	for i, want := range wantOrder {
+		if got[i].Path != want {
+			t.Errorf("vector[%d] = %q, want %q (depth-first stable order)", i, got[i].Path, want)
+		}
+	}
+
+	// The filtered view must be exactly the mask-filtered complete vector —
+	// same files, same relative order (gamedetails.cpp:258-268).
+	filtered := gd.GetGameFileVectorFiltered(config.GFInstaller)
+	if len(filtered) != 3 {
+		t.Fatalf("filtered installers = %d, want the base plus two DLC installers", len(filtered))
+	}
+	for i, want := range []string{"i1.exe", "d1.exe", "n.exe"} {
+		if filtered[i].Path != want {
+			t.Errorf("filtered[%d] = %q, want %q", i, filtered[i].Path, want)
+		}
+	}
+	if got := gd.GetGameFileVectorFiltered(config.GFPatch); len(got) != 2 {
+		t.Errorf("filtered patches = %d, want p1.zip and d3.zip", len(got))
+	}
+	if got := gd.GetGameFileVectorFiltered(config.GFDLC); len(got) != 4 {
+		t.Errorf("filtered dlc = %d, want every file of the DLC subtree", len(got))
+	}
+}
+
+// TestMakeFilepathsRecursiveDestinations locks that every file the recursive
+// vector can reach also gets a destination, and that the base and first-level
+// DLC paths match the pre-GD4 rendering exactly.
+func TestMakeFilepathsRecursiveDestinations(t *testing.T) {
+	conf := testDirConf()
+	nested := GameDetails{
+		Gamename:         "dlc_one",
+		GamenameBasegame: "base",
+		Extras:           []GameFile{dlcFile("dlc_one", "dlc_one_one", "n.zip", config.GFDLCExtra)},
+	}
+	gd := GameDetails{
+		Gamename:   "base",
+		Installers: []GameFile{baseFile("base", "bin/i1.exe", config.PlatformWindows)},
+		DLCs: []GameDetails{
+			{
+				Gamename:         "base",
+				GamenameBasegame: "",
+			},
+		},
+	}
+	d := &gd.DLCs[0]
+	d.Gamename = "dlc_one"
+	d.GamenameBasegame = "base"
+	d.Extras = []GameFile{dlcFile("base", "dlc_one", "d.zip", config.GFDLCExtra)}
+	d.DLCs = []GameDetails{nested}
+
+	gd.MakeFilepaths(conf)
+
+	if got, want := gd.Installers[0].GetFilepath(), "/install/base/windows/i1.exe"; got != want {
+		t.Errorf("base installer = %q, want %q (unchanged by GD4)", got, want)
+	}
+	// A first-level DLC extra: dlc subdir + extras subdir under the base
+	// game's directory (the %gamename% placeholder renders the basegame).
+	if got, want := d.Extras[0].GetFilepath(), "/install/base/dlc/extras/d.zip"; got != want {
+		t.Errorf("dlc extra = %q, want %q", got, want)
+	}
+	// The nested DLC file gets a destination too: its %gamename% renders the
+	// nesting parent, which is what the conversion fills in GamenameBasegame.
+	if got, want := nested.Extras[0].GetFilepath(), "/install/dlc_one/dlc/extras/n.zip"; got != want {
+		t.Errorf("nested dlc extra = %q, want %q", got, want)
+	}
+}

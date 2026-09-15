@@ -103,25 +103,36 @@ func filterListWithPriorities(list []GameFile, platformPriority, languagePriorit
 	return kept
 }
 
-// GetGameFileVector collects every file of this product without the DLC
-// subtree (gamedetails.cpp:233-253).
+// GetGameFileVector collects every file of this product including the DLC
+// subtree, depth-first in vector order (gamedetails.cpp:233-255). The
+// concatenation order is goggo's own (installers, extras, patches, language
+// packs — upstream swaps extras and patches; GD4 ruling keeps the current
+// order and locks it with tests, plan §9). FilterWithPriorities and
+// FilterWithType stay one level deep like upstream: acquisition never nests
+// DLCs, so the recursion here is the single source of truth for consumers.
 func (gd *GameDetails) GetGameFileVector() []GameFile {
 	vector := make([]GameFile, 0, len(gd.Installers)+len(gd.Extras)+len(gd.Patches)+len(gd.LanguagePacks))
 	vector = append(vector, gd.Installers...)
 	vector = append(vector, gd.Extras...)
 	vector = append(vector, gd.Patches...)
 	vector = append(vector, gd.LanguagePacks...)
+	for i := range gd.DLCs {
+		vector = append(vector, gd.DLCs[i].GetGameFileVector()...)
+	}
 	return vector
 }
 
-// GetGameFileVectorFiltered collects the files whose type matches the mask
-// (gamedetails.cpp:255-266).
+// GetGameFileVectorFiltered collects the files whose type matches the mask.
+// It filters the complete recursive vector — one source of truth, no second
+// traversal (gamedetails.cpp:258-268).
 func (gd *GameDetails) GetGameFileVectorFiltered(typeMask uint32) []GameFile {
-	vector := make([]GameFile, 0, len(gd.Installers)+len(gd.Extras)+len(gd.Patches)+len(gd.LanguagePacks))
-	vector = append(vector, filterWithType(gd.Installers, typeMask)...)
-	vector = append(vector, filterWithType(gd.Extras, typeMask)...)
-	vector = append(vector, filterWithType(gd.Patches, typeMask)...)
-	vector = append(vector, filterWithType(gd.LanguagePacks, typeMask)...)
+	full := gd.GetGameFileVector()
+	vector := make([]GameFile, 0, len(full))
+	for i := range full {
+		if full[i].Type&typeMask != 0 {
+			vector = append(vector, full[i])
+		}
+	}
 	return vector
 }
 
@@ -162,10 +173,10 @@ func (gd *GameDetails) FilterWithType(typeMask uint32) {
 	}
 }
 
-// MakeFilepaths derives every filepath of the tree: the six metadata paths per
-// product (named with the gamename so DLCs cannot overwrite base-game files),
-// then the four file vectors, recursing into the DLCs with their own names
-// (gamedetails.cpp:80-168).
+// MakeFilepaths derives every filepath of the tree: the metadata paths for
+// the base game and each DLC (named with the gamename so DLCs cannot
+// overwrite base-game files), and the file vectors of the whole subtree via
+// the recursive helper (gamedetails.cpp:80-168).
 func (gd *GameDetails) MakeFilepaths(dirConf config.DirectoryConfig) {
 	logoExt := ".jpg"
 	iconExt := ".png"
@@ -181,10 +192,7 @@ func (gd *GameDetails) MakeFilepaths(dirConf config.DirectoryConfig) {
 	gd.IconFilepath = gd.makeCustomFilepath("icon_"+gd.Gamename+iconExt, dirConf)
 	gd.ChangelogFilepath = gd.makeCustomFilepath("changelog_"+gd.Gamename+".html", dirConf)
 
-	makeVectorPaths(gd.Installers, dirConf)
-	makeVectorPaths(gd.Extras, dirConf)
-	makeVectorPaths(gd.Patches, dirConf)
-	makeVectorPaths(gd.LanguagePacks, dirConf)
+	gd.makeVectorFilepaths(dirConf)
 
 	for i := range gd.DLCs {
 		dlc := &gd.DLCs[i]
@@ -192,11 +200,21 @@ func (gd *GameDetails) MakeFilepaths(dirConf config.DirectoryConfig) {
 		dlc.LogoFilepath = gd.makeCustomFilepath("logo_"+dlc.Gamename+logoExt, dirConf)
 		dlc.IconFilepath = gd.makeCustomFilepath("icon_"+dlc.Gamename+iconExt, dirConf)
 		dlc.ChangelogFilepath = gd.makeCustomFilepath("changelog_"+dlc.Gamename+".html", dirConf)
+	}
+}
 
-		makeVectorPaths(dlc.Installers, dirConf)
-		makeVectorPaths(dlc.Extras, dirConf)
-		makeVectorPaths(dlc.Patches, dirConf)
-		makeVectorPaths(dlc.LanguagePacks, dirConf)
+// makeVectorFilepaths derives the destination of every file vector of the
+// whole subtree. Upstream renders the base and one DLC level flat
+// (gamedetails.cpp:105-168); the recursion is GD4's approved superset that
+// keeps paths consistent with the recursive file vector (plan §3.1/§9) —
+// real products never nest DLCs, so behaviour at existing depths is unchanged.
+func (gd *GameDetails) makeVectorFilepaths(dirConf config.DirectoryConfig) {
+	makeVectorPaths(gd.Installers, dirConf)
+	makeVectorPaths(gd.Extras, dirConf)
+	makeVectorPaths(gd.Patches, dirConf)
+	makeVectorPaths(gd.LanguagePacks, dirConf)
+	for i := range gd.DLCs {
+		gd.DLCs[i].makeVectorFilepaths(dirConf)
 	}
 }
 

@@ -34,6 +34,26 @@ func (t *tokenRefresher) refreshIfExpired(ctx context.Context) error {
 	return t.refresh(ctx)
 }
 
+// checksumPolicy decides when the provider reads a downlink document's
+// "checksum" url. The two chains of GD4 have DIFFERENT upstream gates and
+// must not borrow each other's:
+//
+//   - checksumGated is the batch worker's rule — installers and patches only,
+//     and only with remote XML enabled (downloader.cpp:3100). Extras carry a
+//     checksum url on the real API and are still not read (GD4 Gate 1
+//     ruling 3).
+//   - checksumAlways is the single-file rule of downloadFileWithId — any
+//     matched file whose document carries a non-empty checksum url is read,
+//     with no type gate and no remote-XML gate (downloader.cpp:2508-2513).
+//     A failed or empty fetch is not a failure: the download continues with
+//     no document, the way upstream only warns (2517-2522).
+type checksumPolicy int
+
+const (
+	checksumGated checksumPolicy = iota
+	checksumAlways
+)
+
 // websiteURLProvider resolves a website file's download url through the Galaxy
 // API: the downlink JSON document carries the "downlink" url and, for
 // installers and patches, a "checksum" url whose document holds the md5 the
@@ -41,6 +61,7 @@ func (t *tokenRefresher) refreshIfExpired(ctx context.Context) error {
 type websiteURLProvider struct {
 	galaxy    *galaxy.Client
 	remoteXML bool
+	policy    checksumPolicy
 	refresh   tokenRefresher
 }
 
@@ -68,18 +89,28 @@ func (p *websiteURLProvider) Resolve(ctx context.Context, task model.WebsiteTask
 		return "", "", fmt.Errorf("downlink: %w", err)
 	}
 
-	// Only installers and patches consult the checksum document
-	// (downloader.cpp:3110-3114).
+	// The checksum document is read per the chain's policy: the batch gate
+	// is type and configuration (downloader.cpp:3100), the single-file gate
+	// is presence alone (downloader.cpp:2508-2513).
 	checksumXML := ""
-	if p.remoteXML && task.Checksummed {
+	readChecksum := p.policy == checksumAlways || (p.remoteXML && task.Checksummed)
+	if readChecksum {
 		if raw, ok := doc["checksum"]; ok && raw != nil {
 			checksumURL, err := jsonval.Str(raw)
 			if err != nil {
+				if p.policy == checksumAlways {
+					// The single-file chain never fails on the checksum
+					// document; it downloads without it (upstream warning).
+					return downlink, "", nil
+				}
 				return "", "", fmt.Errorf("checksum: %w", err)
 			}
 			if checksumURL != "" {
 				checksumXML, err = p.galaxy.Response(ctx, checksumURL)
 				if err != nil {
+					if p.policy == checksumAlways {
+						return downlink, "", nil
+					}
 					return "", "", err
 				}
 			}

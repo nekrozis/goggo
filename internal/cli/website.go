@@ -1,0 +1,119 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+
+	"github.com/nekrozis/goggo/internal/core"
+	"github.com/nekrozis/goggo/internal/transfer"
+	"github.com/nekrozis/goggo/internal/util"
+)
+
+// This file maps the two download commands onto the install lifecycle the UI1
+// review froze: signal context around the run, renderer frame around the
+// transfer, one classification of the terminal state. Core returns structured
+// results and never writes to a stream; every line here is the front end
+// rendering its own command (GD4 Gate 1 rulings 6-8).
+
+// runWebsiteDownload drives "download <game>...". The aggregate exit contract:
+// every task ran or was authorised-skipped ⇒ 0; any operational failure —
+// visible as events during the run and enumerated after the frame — ⇒ 1;
+// cancellation ⇒ 130; a core error before or instead of the queue ⇒ 1.
+func (c *console) runWebsiteDownload(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer, progress *transfer.Progress) outcome {
+	ctx, stopSignal := signal.NotifyContext(ctx, os.Interrupt)
+	c.attachInstallUI(inv.cfg, progress, "Download")
+
+	var (
+		res    core.WebsiteDownloadResult
+		runErr error
+	)
+	result := stopFailed
+	c.renderer.Start()
+	func() {
+		defer func() { c.renderer.Stop(result) }()
+		res, runErr = d.DownloadWebsite(ctx, inv.args)
+		result = classifyInstallResult(runErr, ctx)
+	}()
+	stopSignal()
+	c.endInstallScope()
+
+	renderNotices(stdout, stderr, res.Notices)
+	// The "Total size" line (downloader.cpp:783) prints whenever a queue
+	// existed — including the run the free-space gate then refused. Upstream
+	// prints it before the queue starts; this CLI renders it after the frame
+	// because the renderer owns the terminal while it lives. The number is
+	// core's, the placement is the front end's (ruling 7).
+	if res.Tasks > 0 {
+		fmt.Fprintf(stdout, "Total size: %s\n", util.SizeString(uint64(res.TotalSize), inv.cfg.UnitFormat))
+	}
+
+	if result == stopCanceled {
+		return outcomeInterrupted
+	}
+	if runErr != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", runErr)
+		return outcomeOperationFailure
+	}
+	for _, f := range res.Failures {
+		fmt.Fprintf(stderr, "Failed: %s: %v\n", f.Destination, f.Err)
+	}
+	if res.Failed() {
+		return outcomeOperationFailure
+	}
+	return outcomeOK
+}
+
+// runWebsiteFiles drives "download file <spec>...". Every spec runs to the end
+// whatever its siblings do; a successful download is kept even when another
+// spec fails; the command exits 1 iff any spec failed (ruling 8). Cancellation
+// outranks the aggregate: a stopped run reports 130, not the per-spec noise of
+// the specs it never reached.
+func (c *console) runWebsiteFiles(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer, progress *transfer.Progress) outcome {
+	// -o must not name an existing directory (downloader.cpp:2404). Upstream
+	// fails it as an operational error; this CLI classifies it as what it
+	// is — a wrong argument — and answers before any network work (GD4 §9).
+	if inv.outputFile != "" {
+		if fi, err := os.Stat(inv.outputFile); err == nil && fi.IsDir() {
+			return reportError(stderr, usagef("-o names a directory: %s", inv.outputFile))
+		}
+	}
+
+	ctx, stopSignal := signal.NotifyContext(ctx, os.Interrupt)
+	c.attachInstallUI(inv.cfg, progress, "Download")
+
+	var res core.WebsiteFileResult
+	result := stopFailed
+	c.renderer.Start()
+	func() {
+		defer func() { c.renderer.Stop(result) }()
+		res = d.DownloadWebsiteFiles(ctx, inv.args, inv.outputFile)
+		switch {
+		case ctx.Err() != nil:
+			result = stopCanceled
+		case res.Failed():
+			result = stopFailed
+		default:
+			result = stopCompleted
+		}
+	}()
+	stopSignal()
+	c.endInstallScope()
+
+	if result == stopCanceled {
+		return outcomeInterrupted
+	}
+	failed := false
+	for _, o := range res.Outcomes {
+		if o.Err != nil {
+			failed = true
+			fmt.Fprintf(stderr, "Failed: %s: %v\n", o.Spec, o.Err)
+		}
+	}
+	if failed {
+		return outcomeOperationFailure
+	}
+	return outcomeOK
+}

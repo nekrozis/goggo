@@ -24,6 +24,8 @@ func TestCommandTreeDeclaresASessionClass(t *testing.T) {
 		cmdShowCDNs:      sessionRequired,
 		cmdInstall:       sessionImplicitLogin,
 		cmdVerify:        sessionRequired,
+		cmdDownload:      sessionImplicitLogin,
+		cmdDownloadFile:  sessionImplicitLogin,
 		cmdOrphansCheck:  sessionRequired,
 		cmdOrphansRemove: sessionImplicitLogin,
 	}
@@ -32,17 +34,20 @@ func TestCommandTreeDeclaresASessionClass(t *testing.T) {
 	var walk func([]commandNode)
 	walk = func(nodes []commandNode) {
 		for _, n := range nodes {
+			// A node can be leaf and namespace at once ("download", GD4
+			// ruling 9): the leaf check and the recursion are independent.
+			if n.id != cmdNone {
+				if n.session == sessionUnset {
+					t.Errorf("%s does not declare a session class", n.name)
+					continue
+				}
+				seen[n.id] = true
+				if got := want[n.id]; got != n.session {
+					t.Errorf("%s session = %s, want %s", n.name, n.session, got)
+				}
+			}
 			if len(n.children) != 0 {
 				walk(n.children)
-				continue
-			}
-			if n.session == sessionUnset {
-				t.Errorf("%s does not declare a session class", n.name)
-				continue
-			}
-			seen[n.id] = true
-			if got := want[n.id]; got != n.session {
-				t.Errorf("%s session = %s, want %s", n.name, n.session, got)
 			}
 		}
 	}
@@ -122,30 +127,31 @@ func TestSessionRequestPanicsOnAnUndeclaredClass(t *testing.T) {
 }
 
 // TestOnlyWritingCommandsMayLogIn states the contract as a property of the whole
-// tree rather than as individual mappings (review CLI1 §7): outside install,
+// tree rather than as individual mappings (review CLI1 §7): outside the
+// downloading commands (install, download, download file), the destructive
 // orphans remove and an explicit login, no command may ever be handed a request
 // that lets it log in.
 func TestOnlyWritingCommandsMayLogIn(t *testing.T) {
 	may := map[commandID]bool{
 		cmdInstall:       true,
+		cmdDownload:      true,
+		cmdDownloadFile:  true,
 		cmdOrphansRemove: true,
 		cmdAuthLogin:     true,
 	}
 	var walk func([]commandNode)
 	walk = func(nodes []commandNode) {
 		for _, n := range nodes {
+			if n.id != cmdNone && !may[n.id] {
+				for _, interactive := range []bool{true, false} {
+					if req := sessionRequest(n.session, interactive); req.AllowLogin {
+						t.Errorf("%s may log in (interactive=%v): it does not write and is not a login",
+							n.name, interactive)
+					}
+				}
+			}
 			if len(n.children) != 0 {
 				walk(n.children)
-				continue
-			}
-			if may[n.id] {
-				continue
-			}
-			for _, interactive := range []bool{true, false} {
-				if req := sessionRequest(n.session, interactive); req.AllowLogin {
-					t.Errorf("%s may log in (interactive=%v): it does not write and is not a login",
-						n.name, interactive)
-				}
 			}
 		}
 	}

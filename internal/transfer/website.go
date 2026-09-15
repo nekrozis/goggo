@@ -72,6 +72,14 @@ type WebsiteDeps struct {
 	RemoteXML         bool
 	TrustAPIForExtras bool
 	SizeOnly          bool
+	// TaskResult, when set, receives the run's terminal outcome for every
+	// task: nil for a success and for each skip the worker semantics
+	// authorise, non-nil for an operational failure. The event stream
+	// carries the same facts as messages; this seam exists because a
+	// message kind is not a result code — counting failures must not
+	// infer from an event sequence (the UI1-R2 rule), and GD4's aggregate
+	// exit contract needs the per-task verdict (plan §5, transfer row).
+	TaskResult func(task model.WebsiteTask, err error)
 }
 
 // RunWebsite executes the website download path: the single-file downloads with
@@ -94,7 +102,11 @@ func RunWebsite(ctx context.Context, tasks []model.WebsiteTask, opts Options, de
 	return schedule(ctx, tasks, opts.Workers,
 		func(ev Event) { deps.Observer.OnEvent(ev) },
 		func(ctx context.Context, task model.WebsiteTask, emit func(Event)) error {
-			return runWebsiteTask(ctx, task, opts, deps, emit)
+			err := runWebsiteTask(ctx, task, opts, deps, emit)
+			if deps.TaskResult != nil {
+				deps.TaskResult(task, err)
+			}
+			return err
 		})
 }
 
@@ -319,7 +331,11 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 		}
 	}
 	emit(Event{Path: task.Destination, Kind: EventTaskFinish})
-	return nil
+	// The exhausted retries are this task's operational failure: the events
+	// say what happened, the verdict rides on the return value (the
+	// documented contract of this function, and what RunWebsite's TaskResult
+	// seam reports for the aggregate exit code).
+	return lastErr
 }
 
 // websiteDownloadAttempt performs one attempt of the file download: open, GET

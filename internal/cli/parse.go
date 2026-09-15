@@ -66,6 +66,18 @@ const (
 	// show builds.
 	optSort
 
+	// website subdirectory layout (GD4, the download commands only). The
+	// whitelist for each lives in config.SubdirOptions.
+	optSubdirInstallers
+	optSubdirExtras
+	optSubdirPatches
+	optSubdirLanguagePacks
+	optSubdirDLC
+	optSubdirGame
+
+	// download file only.
+	optOutputFile
+
 	// Destructive confirmation (orphans remove only, D16).
 	optYes
 
@@ -117,8 +129,10 @@ type optionSpec struct {
 	parse  func(inv *invocation, value string) error
 }
 
-// optionTable is the CLI's complete option vocabulary (CLI1 v8 §5).
-var optionTable = []optionSpec{
+// optionTable is the CLI's complete option vocabulary (CLI1 v8 §5). The six
+// website subdirectory options are generated from config.SubdirOptions so the
+// whitelist, the defaults and the help text cannot drift from that table.
+var optionTable = append([]optionSpec{
 	{id: optHelp, long: "help", aliases: []string{"h"}, summary: "Show help"},
 	{id: optVersion, long: "version", summary: "Show version"},
 	{
@@ -436,6 +450,17 @@ var optionTable = []optionSpec{
 		parse:   func(inv *invocation, _ string) error { inv.cfg.ForceBrowserLogin = true; return nil },
 	},
 	{
+		id: optOutputFile, long: "output-file", aliases: []string{"o"},
+		value: valueRequired, arg: "<path>",
+		summary: "Output file name for a single download file spec",
+		detail: "Only valid with exactly one spec; with several specs it is a\n" +
+			"usage error, and it must not name an existing directory.",
+		parse: func(inv *invocation, v string) error {
+			inv.outputFile = v
+			return nil
+		},
+	},
+	{
 		id: optEmail, long: "email", value: valueRequired, arg: "<address>",
 		summary: "Account e-mail address (the password is asked for interactively)",
 		parse: func(inv *invocation, v string) error {
@@ -443,6 +468,58 @@ var optionTable = []optionSpec{
 			return nil
 		},
 	},
+}, subdirOptionSpecs()...)
+
+// subdirOptionIDs maps each config.SubdirOptions name onto its option id.
+var subdirOptionIDs = map[string]optionID{
+	"installers":     optSubdirInstallers,
+	"extras":         optSubdirExtras,
+	"patches":        optSubdirPatches,
+	"language-packs": optSubdirLanguagePacks,
+	"dlc":            optSubdirDLC,
+	"game":           optSubdirGame,
+}
+
+// subdirOptionSpecs generates the six --subdir-* options from the config
+// table: same long names, same defaults (declared in the summary), same
+// per-field whole-template whitelist (GD4 plan 3.3). The defaults themselves
+// are applied by applyParseDefaults, which reads the same table.
+func subdirOptionSpecs() []optionSpec {
+	specs := make([]optionSpec, 0, len(config.SubdirOptions))
+	for _, opt := range config.SubdirOptions {
+		opt := opt
+		id, ok := subdirOptionIDs[opt.Name]
+		if !ok {
+			panic("cli: config.SubdirOptions carries a name the option table does not declare: " + opt.Name)
+		}
+		def := opt.Default
+		if def == "" {
+			def = "none"
+		}
+		templates := strings.Join(opt.Templates, "\n")
+		specs = append(specs, optionSpec{
+			id:      id,
+			long:    "subdir-" + opt.Name,
+			value:   valueRequired,
+			arg:     "<name>",
+			summary: "Subdirectory for " + opt.Name + " (default: " + def + ")",
+			detail: "A concrete directory name, or one of the whole templates:\n" +
+				templates + "\n" +
+				"A template is matched whole: it is not expanded inside a longer path.",
+			parse: func(inv *invocation, v string) error {
+				// A value carrying a placeholder must be one of the whole
+				// templates this field renders; anything else with a "%" in
+				// it is a half-exposed template language (review GD3 3.3,
+				// same rule as --install-dir, own table per GD4 ruling 3).
+				if !config.SubdirValueAccepted(opt, v) {
+					return usagef("--subdir-%s takes a directory name or one of the known templates (%q)", opt.Name, v)
+				}
+				opt.Set(&inv.cfg.Directories, v)
+				return nil
+			},
+		})
+	}
+	return specs
 }
 
 // The parser keeps the two option name shapes apart.
@@ -503,6 +580,8 @@ var removedOptions = map[string]string{
 	"galaxy-cdn-priority":    "goggo install <game> --cdn-priority <a,b>",
 	"galaxy-no-dependencies": "goggo install <game> --no-dependencies",
 	"galaxy-builds-sort":     "goggo show builds <game> --sort <order>",
+	"download":               "goggo download <game>",
+	"download-file":          "goggo download file <game>/<fileid>",
 	"platform":               "goggo list games --installer-platform <spec>",
 	"language":               "goggo list games --installer-language <spec>",
 	"list":                   "goggo list games (also: list tags, list wishlist)",
@@ -701,20 +780,39 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 		inv.cfg.DownloadConfig.Include = inc &^ exc
 	}
 
-	want, takes := commandArity(node.id)
+	argName, count := commandArity(node.id)
 	switch {
-	case !takes && len(rest) != 0:
+	case count == 0 && len(rest) != 0:
 		return invocation{}, usagef("%s takes no arguments", strings.Join(path, " "))
-	case takes && len(rest) == 0:
-		return invocation{}, usagef("%s needs a %s", strings.Join(path, " "), want)
-	case takes && len(rest) != 1:
-		return invocation{}, usagef("%s takes one %s, got %d", strings.Join(path, " "), want, len(rest))
-	case takes:
+	case count != 0 && len(rest) == 0:
+		return invocation{}, usagef("%s needs a %s", strings.Join(path, " "), argName)
+	case count == 1 && len(rest) != 1:
+		return invocation{}, usagef("%s takes one %s, got %d", strings.Join(path, " "), argName, len(rest))
+	case count == 1:
 		tgt, err := parseTarget(rest[0])
 		if err != nil {
 			return invocation{}, err
 		}
 		inv.target = tgt
+	case count < 0:
+		inv.args = append([]string{}, rest...)
+	}
+
+	// A batch game is a name, never a spec: a slash means the user meant the
+	// subcommand, and guessing which half is a file id is not the parser's to do.
+	if node.id == cmdDownload {
+		for _, game := range inv.args {
+			if strings.Contains(game, "/") {
+				return invocation{}, usagef("download takes game names; to fetch one file use %q", "download file "+game+"/<fileid>")
+			}
+		}
+	}
+
+	// -o names one output file, so it belongs to exactly one spec. Upstream
+	// refuses it at dispatch (main.cpp:563); this CLI refuses it where the
+	// shape is known — the parser (GD4 Gate 1 ruling 5).
+	if node.id == cmdDownloadFile && inv.outputFile != "" && len(inv.args) > 1 {
+		return invocation{}, usagef("download file takes -o with exactly one spec, got %d", len(inv.args))
 	}
 
 	// "show builds" lists the builds of a product; a build in the argument is
@@ -769,13 +867,16 @@ func resolveCommand(words []string) (commandNode, []string, []string, error) {
 	if len(path) == 0 {
 		return commandNode{}, nil, nil, unknownCommand(words[0])
 	}
-	if len(node.children) != 0 {
-		// The path stopped inside a namespace.
+	if len(node.children) != 0 && node.id == cmdNone {
+		// The path stopped inside a pure namespace.
 		if idx == len(words) {
 			return commandNode{}, nil, nil, usagef("command %q needs a subcommand (%s)", strings.Join(path, " "), childNames(node))
 		}
 		return commandNode{}, nil, nil, usagef("unknown subcommand %q for %q (%s)", words[idx], strings.Join(path, " "), childNames(node))
 	}
+	// A node that is both leaf and namespace ("download") that got here with
+	// a first word no child matched dispatches as the leaf: the leftover
+	// words are its arguments (GD4 ruling 9).
 	return node, path, words[idx:], nil
 }
 
@@ -787,15 +888,20 @@ func childNames(node commandNode) string {
 	return strings.Join(names, ", ")
 }
 
-// commandArity says what a command takes after its path: the argument's name,
-// or false when it takes none.
-func commandArity(id commandID) (string, bool) {
+// commandArity says what a command takes after its path: the argument's name
+// and how many — 0 for none, 1 for exactly one, -1 for one or more (GD4's
+// download commands are variadic; the rest keep CLI1's single target).
+func commandArity(id commandID) (string, int) {
 	switch id {
 	case cmdInstall, cmdVerify, cmdShowBuilds, cmdShowManifest, cmdShowCDNs,
 		cmdOrphansCheck, cmdOrphansRemove:
-		return "game", true
+		return "game", 1
+	case cmdDownload:
+		return "game", -1
+	case cmdDownloadFile:
+		return "spec", -1
 	}
-	return "", false
+	return "", 0
 }
 
 // parseTarget splits "<product id or gamename>[/<build id or index>]".
@@ -828,10 +934,11 @@ func parseTarget(arg string) (target, error) {
 //
 //	no words                  → the root topic
 //	longest resolvable prefix → that node's topic
-//	namespace with leftovers  → usage error: unknown subcommand
+//	pure namespace with leftovers → usage error: unknown subcommand
 //	leaf with at most one argument → its topic (help does NOT require the
 //	                                  argument the command would need to run)
-//	leaf with more leftovers  → usage error
+//	leaf with more leftovers  → usage error, except the variadic download
+//	                           commands, which take one or more
 //	nothing resolvable        → usage error: unknown command
 //
 // The alternative — printing the root help for anything unrecognised — would
@@ -863,14 +970,14 @@ func resolveHelpTopic(words []string) ([]string, error) {
 	if len(path) == 0 {
 		return nil, unknownCommand(words[0])
 	}
-	if len(node.children) != 0 {
+	if len(node.children) != 0 && node.id == cmdNone {
 		if idx < len(words) {
 			return nil, usagef("unknown subcommand %q for %q (%s)", words[idx], strings.Join(path, " "), childNames(node))
 		}
 		return path, nil
 	}
-	if want, takes := commandArity(node.id); takes {
-		if len(words)-idx > 1 {
+	if want, count := commandArity(node.id); count != 0 {
+		if count == 1 && len(words)-idx > 1 {
 			return nil, usagef("%s takes one %s, got %d", strings.Join(path, " "), want, len(words)-idx)
 		}
 		return path, nil
@@ -926,7 +1033,35 @@ func applyParseDefaults(cfg *config.Config) {
 	cfg.DownloadConfig.GalaxyLanguage = util.OptionValue(defaultGalaxyLanguage, config.Languages, true)
 	cfg.DownloadConfig.GalaxyArch = util.OptionValue(defaultGalaxyArch, config.GalaxyArchs, false)
 	cfg.DownloadConfig.GalaxyCDNPriority = util.Split(defaultGalaxyCDNPriority, ",")
+	// The installer platform/language the website conversion gates on.
+	// Upstream declares them as front-end default_values ("w+l" and "en",
+	// main.cpp:280-281) and parses each into the priority list AND the
+	// installer mask (Util::parseOptionString, util.cpp:312). Leaving them
+	// zero made every non-extras vector drop silently — GD4's download
+	// commands are the conversion's first production consumers and exposed
+	// it on the real account (audit GD4, DEFECT-GD4-1). The parser declares
+	// the defaults from the same constants config.NewConfig installs, and
+	// the --installer-platform/--installer-language closures are the single
+	// override path.
+	platformPriority, installerPlatform := util.ParseOptionString(config.DefaultPlatformPriority, config.Platforms)
+	cfg.DownloadConfig.PlatformPriority = platformPriority
+	cfg.DownloadConfig.InstallerPlatform = installerPlatform
+	languagePriority, installerLanguage := util.ParseOptionString(config.DefaultLanguagePriority, config.Languages)
+	cfg.DownloadConfig.LanguagePriority = languagePriority
+	cfg.DownloadConfig.InstallerLanguage = installerLanguage
+	// Remote XML is on unless --no-remote-xml says otherwise (main.cpp:282
+	// and 541: bRemoteXML = !bNoRemoteXML, default false). With it off the
+	// installer/patch version check silently disappears, so the parser
+	// declares the upstream default (the option itself is not registered —
+	// D14 keeps the surface to what is wired; the field is settable by a
+	// future config layer).
+	cfg.DownloadConfig.RemoteXML = true
 	cfg.Directories.GalaxyInstallSubdir = defaultGalaxyInstallSubdir
+	// The six website subdirectory defaults come from the config table —
+	// the same single source the whitelist and the help text read (GD4 3.3).
+	for _, opt := range config.SubdirOptions {
+		opt.Set(&cfg.Directories, opt.Default)
+	}
 	cfg.Threads = defaultThreads
 	// --no-subdirectories and --no-dependencies are negations of their
 	// settings, so the parser's default is the positive value.

@@ -88,6 +88,9 @@ const (
 	cmdInstall
 	cmdVerify
 
+	cmdDownload
+	cmdDownloadFile
+
 	cmdOrphansCheck
 	cmdOrphansRemove
 )
@@ -127,6 +130,14 @@ type invocation struct {
 	// policy the dispatcher applies are the same value (review S4).
 	session sessionClass
 	target  target
+	// args carries the one-or-more positional arguments of the variadic
+	// commands (download, download file). The fixed-arity commands use
+	// target instead; the two are never both filled.
+	args []string
+	// outputFile is the -o value of download file, kept raw: the parser
+	// refuses it with several specs, and the dispatcher refuses a
+	// directory (upstream main.cpp:563, downloader.cpp:2404).
+	outputFile string
 	// yes carries the destructive-confirmation flag. Only the destructive
 	// commands accept it (D16).
 	yes bool
@@ -136,7 +147,10 @@ type invocation struct {
 //
 // options lists what the node ADDS to the shared set (sharedOptions): the parser
 // checks an option against common ∪ node, so "global" means shared semantics,
-// not "every command accepts it" (D15). id is cmdNone for namespaces.
+// not "every command accepts it" (D15). id is cmdNone for pure namespaces;
+// "download" is the one node that is both a leaf and a namespace — a first
+// word matching a child dispatches the subcommand, anything else is an
+// argument of the leaf itself (GD4 ruling 9).
 //
 // session is what the command needs from the session before it can run. Every
 // leaf declares one; namespaces and the meta commands do not, because nothing
@@ -218,6 +232,19 @@ var orphansOptions = []optionID{
 	optBlacklist,
 }
 
+// subdirOptions are the six website subdirectory layout options. They belong
+// to the download commands only: the install face resolves its own root
+// through --install-dir, and these fill DirectoryConfig for MakeFilepaths
+// (GD4 §3.3).
+var subdirOptions = []optionID{
+	optSubdirInstallers,
+	optSubdirExtras,
+	optSubdirPatches,
+	optSubdirLanguagePacks,
+	optSubdirDLC,
+	optSubdirGame,
+}
+
 // commandTree is the product surface: read it top to bottom and you have the
 // CLI's complete vocabulary — and, on each leaf, whether the command needs a
 // session and may log in.
@@ -268,6 +295,39 @@ var commandTree = []commandNode{
 			optNoDependencies,
 			optCheckFreeSpace,
 		}),
+	},
+	{
+		// "download" is both a leaf (batch download of games) and a
+		// namespace (download file). The word "file" after "download"
+		// always selects the subcommand — a game literally named "file"
+		// cannot be batch-downloaded by name (GD4 ruling 9).
+		name:    "download",
+		summary: "Download website files (installers, patches, extras, language packs)",
+		id:      cmdDownload,
+		session: sessionImplicitLogin,
+		options: joinOptions([]optionID{optDirectory, optNoSubdirectories}, subdirOptions,
+			[]optionID{
+				optInclude, optExclude, optBlacklist,
+				optInstallerPlatform, optInstallerLanguage,
+				optThreads, optProgressInterval, optCheckFreeSpace,
+			}),
+		notes: []string{
+			"Every selected game's files are queued and run to the end: a failing",
+			"file does not stop the others, but the command exits 1 if any failed.",
+			"Nothing is downloaded without an explicit game argument.",
+		},
+		children: []commandNode{
+			{name: "file", summary: "Download single files by game/file id", id: cmdDownloadFile,
+				session: sessionImplicitLogin,
+				options: joinOptions([]optionID{optDirectory, optNoSubdirectories, optOutputFile},
+					subdirOptions, []optionID{optThreads, optProgressInterval}),
+				notes: []string{
+					"Specs are <gamename>/<fileid> or <gamename>/<dlc_gamename>/<fileid>;",
+					"the gogdownloader:// prefix is accepted and stripped.",
+					"All specs run to the end and successful downloads are kept;",
+					"-o names the output file for exactly one spec.",
+				}},
+		},
 	},
 	{
 		name:    "verify",
@@ -352,6 +412,8 @@ var commandPaths = map[commandID]string{
 	cmdShowCDNs:      "show cdns",
 	cmdInstall:       "install",
 	cmdVerify:        "verify",
+	cmdDownload:      "download",
+	cmdDownloadFile:  "download file",
 	cmdOrphansCheck:  "orphans check",
 	cmdOrphansRemove: "orphans remove",
 }

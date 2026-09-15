@@ -74,7 +74,10 @@ func (c *console) ErrOut() io.Writer {
 // otherwise the append-only log sink (review UI1 v3 §6.C, D8). The width and
 // height come from the stdout descriptor, the side actually being drawn on —
 // not stdin, which stays reserved for the prompts (review UI1 v3 §6.B).
-func (c *console) attachInstallUI(cfg config.Config, source progressSource) {
+// attachInstallUI builds the renderer for one transferring run. The subject
+// names the command for the closing line ("Installation", "Download"): the
+// frame must not misname what it just ran (GD4).
+func (c *console) attachInstallUI(cfg config.Config, source progressSource, subject string) {
 	bar := progress.NewBar(cfg.Unicode, cfg.Color)
 	interval := time.Duration(cfg.ProgressInterval) * time.Millisecond
 
@@ -96,11 +99,12 @@ func (c *console) attachInstallUI(cfg config.Config, source progressSource) {
 		}
 		c.coord = newTerminalCoordinator(c.out, c.errOut)
 		c.renderer = newRenderer(&ttySink{
-			coord:  c.coord,
-			bar:    bar.Create,
-			width:  width,
-			height: height,
-			unit:   cfg.UnitFormat,
+			coord:   c.coord,
+			bar:     bar.Create,
+			width:   width,
+			height:  height,
+			unit:    cfg.UnitFormat,
+			subject: subject,
 		}, bar, interval, source)
 		return
 	}
@@ -109,6 +113,7 @@ func (c *console) attachInstallUI(cfg config.Config, source progressSource) {
 		errOut:      c.errOut,
 		unit:        cfg.UnitFormat,
 		now:         time.Now,
+		subject:     subject,
 		lastSummary: time.Now(),
 	}, bar, interval, source)
 }

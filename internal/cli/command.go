@@ -80,6 +80,8 @@ const (
 	cmdListGames
 	cmdListTags
 	cmdListWishlist
+	cmdListDetails
+	cmdListJSON
 
 	cmdShowBuilds
 	cmdShowManifest
@@ -215,6 +217,36 @@ var listGamesOptions = []optionID{
 	optInstallerLanguage,
 }
 
+// saveOptions are the six GD5 artifact switches. On download they fetch AND
+// write; on list details/json they gate the fetch and the display only —
+// list never writes (GD5 ruling 9). download file accepts none of them:
+// upstream's single-file chain has no save section, and an option that does
+// nothing is not offered (D14).
+var saveOptions = []optionID{
+	optSaveSerials,
+	optSaveChangelogs,
+	optSaveLogo,
+	optSaveIcon,
+	optSaveGameDetailsJSON,
+	optSaveProductJSON,
+}
+
+// detailsOptions are what the two GD5 list leaves accept: the account
+// filters, the conversion mask, the blacklist the text renderer honours,
+// the save flags as fetch/display gates, and the acquisition worker count.
+var detailsOptions = joinOptions(listGamesOptions,
+	[]optionID{optInclude, optExclude, optBlacklist},
+	saveOptions,
+	[]optionID{optInfoThreads})
+
+// listDetailsNotes is shared by both list leaves: the two facts a reader
+// must have before trusting the output.
+var listDetailsNotes = []string{
+	"Read-only: this command writes no files and downloads nothing.",
+	"Serials and changelog appear only with the matching --save-* flag,",
+	"which gates the fetch upstream-style (GD5 ruling 9) — not the display.",
+}
+
 // verifyOptions are what a read-only verification honours. Upstream's
 // --status filters by the include mask and honours the blacklist, so verify
 // follows it; the orphan walk does not (D2 in the CLI1 plan, §13①).
@@ -269,6 +301,10 @@ var commandTree = []commandNode{
 				session: sessionRequired, options: listGamesOptions},
 			{name: "tags", summary: "List tags", id: cmdListTags, session: sessionRequired},
 			{name: "wishlist", summary: "List the wishlist", id: cmdListWishlist, session: sessionRequired},
+			{name: "details", summary: "Show each game's download face", id: cmdListDetails,
+				session: sessionRequired, options: detailsOptions, notes: listDetailsNotes},
+			{name: "json", summary: "Print the download face as JSON", id: cmdListJSON,
+				session: sessionRequired, options: detailsOptions, notes: listDetailsNotes},
 		},
 	},
 	{
@@ -309,8 +345,8 @@ var commandTree = []commandNode{
 			[]optionID{
 				optInclude, optExclude, optBlacklist,
 				optInstallerPlatform, optInstallerLanguage,
-				optThreads, optProgressInterval, optCheckFreeSpace,
-			}),
+				optThreads, optProgressInterval, optCheckFreeSpace, optInfoThreads,
+			}, saveOptions),
 		notes: []string{
 			"Every selected game's files are queued and run to the end: a failing",
 			"file does not stop the others, but the command exits 1 if any failed.",
@@ -319,7 +355,7 @@ var commandTree = []commandNode{
 		children: []commandNode{
 			{name: "file", summary: "Download single files by game/file id", id: cmdDownloadFile,
 				session: sessionImplicitLogin,
-				options: joinOptions([]optionID{optDirectory, optNoSubdirectories, optOutputFile},
+				options: joinOptions([]optionID{optDirectory, optNoSubdirectories, optOutputFile, optInfoThreads},
 					subdirOptions, []optionID{optThreads, optProgressInterval}),
 				notes: []string{
 					"Specs are <gamename>/<fileid> or <gamename>/<dlc_gamename>/<fileid>;",
@@ -407,6 +443,8 @@ var commandPaths = map[commandID]string{
 	cmdListGames:     "list games",
 	cmdListTags:      "list tags",
 	cmdListWishlist:  "list wishlist",
+	cmdListDetails:   "list details",
+	cmdListJSON:      "list json",
 	cmdShowBuilds:    "show builds",
 	cmdShowManifest:  "show manifest",
 	cmdShowCDNs:      "show cdns",

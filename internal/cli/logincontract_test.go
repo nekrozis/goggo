@@ -19,6 +19,8 @@ func TestCommandTreeDeclaresASessionClass(t *testing.T) {
 		cmdListGames:     sessionRequired,
 		cmdListTags:      sessionRequired,
 		cmdListWishlist:  sessionRequired,
+		cmdListDetails:   sessionRequired,
+		cmdListJSON:      sessionRequired,
 		cmdShowBuilds:    sessionRequired,
 		cmdShowManifest:  sessionRequired,
 		cmdShowCDNs:      sessionRequired,

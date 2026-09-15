@@ -232,6 +232,9 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome
 		}
 		return outcomeOK
 
+	case cmdListDetails, cmdListJSON:
+		return runListDetails(ctx, d, inv, stdout, stderr)
+
 	case cmdShowBuilds, cmdShowManifest:
 		// "show builds" lists a product's builds; "show manifest" shows one
 		// build's manifest. Upstream folded both into one option whose meaning

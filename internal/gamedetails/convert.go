@@ -124,6 +124,18 @@ func convertProduct(ctx context.Context, product map[string]any, cfg config.Down
 	}
 	gd.Logo = strings.ReplaceAll(httpsPrefix+logo, logoNameInAPI, logoNameFinal)
 
+	// The save-product-json artifact is rendered from the document the
+	// conversion already holds — for a DLC that is the inline expanded
+	// document, so GD5 adds no request of its own (ruling 5, the approved
+	// divergence from upstream's per-DLC getProductInfo).
+	if cfg.SaveProductJSON {
+		rendered, err := util.StyledJSON(product)
+		if err != nil {
+			return GameDetails{}, wrap("gamedetails: product json", err)
+		}
+		gd.ProductJson = rendered
+	}
+
 	downloads, err := fieldObject(product, "downloads")
 	if err != nil {
 		return GameDetails{}, wrap("gamedetails", err)

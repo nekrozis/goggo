@@ -37,10 +37,25 @@ type GameDetails struct {
 	Changelog        string
 	Logo             string
 
-	SerialsFilepath   string
-	LogoFilepath      string
-	IconFilepath      string
-	ChangelogFilepath string
+	// GD5 output-face data: the rendered JSON documents the save-* flags
+	// request, and the diagnostics the extraction refused to guess at.
+	// ProductJson is rendered from the document acquisition already holds
+	// (zero extra requests, GD5 ruling 5); GameDetailsJson is the rendered
+	// per-game details document; SerialsDiag says WHY serials stayed empty
+	// when the cdKey shape is unsupported (ruling 1 fail-closed);
+	// MetadataDiag carries a failed details fetch (GD5 Gate 2: a swallowed
+	// fetch would hide a failure from the exit code).
+	ProductJson     string
+	GameDetailsJson string
+	SerialsDiag     string
+	MetadataDiag    string
+
+	SerialsFilepath         string
+	LogoFilepath            string
+	IconFilepath            string
+	ChangelogFilepath       string
+	GameDetailsJSONFilepath string
+	ProductJsonFilepath     string
 }
 
 // FilterWithPriorities removes the entries whose platform/language rank worse
@@ -191,6 +206,11 @@ func (gd *GameDetails) MakeFilepaths(dirConf config.DirectoryConfig) {
 	gd.LogoFilepath = gd.makeCustomFilepath("logo_"+gd.Gamename+logoExt, dirConf)
 	gd.IconFilepath = gd.makeCustomFilepath("icon_"+gd.Gamename+iconExt, dirConf)
 	gd.ChangelogFilepath = gd.makeCustomFilepath("changelog_"+gd.Gamename+".html", dirConf)
+	// The two GD5 JSON paths: game-details.json carries NO gamename prefix
+	// (gamedetails.cpp:102) and belongs to the base game only; the product
+	// json is named with the gamename (gamedetails.cpp:96,135).
+	gd.GameDetailsJSONFilepath = gd.makeCustomFilepath("game-details.json", dirConf)
+	gd.ProductJsonFilepath = gd.makeCustomFilepath("product_"+gd.Gamename+".json", dirConf)
 
 	gd.makeVectorFilepaths(dirConf)
 
@@ -200,6 +220,9 @@ func (gd *GameDetails) MakeFilepaths(dirConf config.DirectoryConfig) {
 		dlc.LogoFilepath = gd.makeCustomFilepath("logo_"+dlc.Gamename+logoExt, dirConf)
 		dlc.IconFilepath = gd.makeCustomFilepath("icon_"+dlc.Gamename+iconExt, dirConf)
 		dlc.ChangelogFilepath = gd.makeCustomFilepath("changelog_"+dlc.Gamename+".html", dirConf)
+		// A DLC gets a product json but no game-details.json
+		// (gamedetails.cpp:135-141).
+		dlc.ProductJsonFilepath = gd.makeCustomFilepath("product_"+dlc.Gamename+".json", dirConf)
 	}
 }
 

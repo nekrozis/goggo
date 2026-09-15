@@ -72,11 +72,15 @@ func commandUsage(node commandNode, path []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Usage: %s %s", config.ProgramName, strings.Join(path, " "))
 	if want, count := commandArity(node.id); count != 0 {
-		ellipsis := ""
-		if count < 0 {
-			ellipsis = "..."
+		switch {
+		case count == -2:
+			// Zero-or-more reads as an optional list in the usage line.
+			fmt.Fprintf(&b, " [%s]...", want)
+		case count < 0:
+			fmt.Fprintf(&b, " <%s>...", want)
+		default:
+			fmt.Fprintf(&b, " <%s>", want)
 		}
-		fmt.Fprintf(&b, " <%s>%s", want, ellipsis)
 	}
 	fmt.Fprintf(&b, " [options]\n\n%s\n", node.summary)
 

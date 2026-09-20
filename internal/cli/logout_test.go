@@ -135,7 +135,7 @@ func TestLogoutOnMissingDirectoryIsSuccess(t *testing.T) {
 // neither a success nor "already gone" stops the run and prints no success
 // line, so the output never claims more than happened.
 //
-// It also pins the non-transactional behaviour: the token file is removed
+// It also pins the non-transactional behaviour: the credential file is removed
 // before the cookie path is attempted, so it is already gone when the second
 // removal fails. The caller learns about the failure from the error, not from
 // the resulting state.
@@ -153,7 +153,7 @@ func TestLogoutPropagatesRemovalFailure(t *testing.T) {
 		t.Errorf("stdout = %q, want no success line when the run failed", out.String())
 	}
 	if _, statErr := os.Stat(auth.StorePath(cfg)); !errors.Is(statErr, fs.ErrNotExist) {
-		t.Errorf("token file must already be gone (stat err = %v)", statErr)
+		t.Errorf("credential file must already be gone (stat err = %v)", statErr)
 	}
 }
 

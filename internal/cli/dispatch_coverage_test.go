@@ -194,14 +194,14 @@ func TestAuthLoginSucceedsAndExitsZero(t *testing.T) {
 	if strings.Contains(errOut.String(), "has no handler") {
 		t.Fatalf("auth login reported the no-handler default: %s", errOut.String())
 	}
-	// The login really happened: the token file the production writer stores is
+	// The login really happened: the credential file the production writer stores is
 	// on disk under the isolated root.
 	cfg, err := newConfig()
 	if err != nil {
 		t.Fatalf("newConfig: %v", err)
 	}
 	if _, err := os.Stat(auth.StorePath(cfg)); err != nil {
-		t.Errorf("token file %q was not written: %v", auth.StorePath(cfg), err)
+		t.Errorf("credential file %q was not written: %v", auth.StorePath(cfg), err)
 	}
 	if _, err := os.Stat(cfg.Curl.CookiePath); err != nil {
 		t.Errorf("cookie file %q was not written: %v", cfg.Curl.CookiePath, err)

@@ -56,7 +56,7 @@ func tokenResponse(extra ...map[string]any) map[string]any {
 	return m
 }
 
-// readStoredFile reads the token file back as the JSON tree it is. The surface
+// readStoredFile reads the credential file back as the JSON tree it is. The surface
 // hands out no copy of the store, so a test that needs to see what was written
 // reads the file the store owns.
 func readStoredFile(t *testing.T, path string) map[string]any {
@@ -547,7 +547,7 @@ func TestSavedFileModeIs0600(t *testing.T) {
 	if got := fi.Mode().Perm(); got != 0o600 {
 		t.Errorf("mode = %o, want 0600", got)
 	}
-	leftovers, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".goggo-token-*"))
+	leftovers, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".goggo-credentials-*"))
 	if err != nil {
 		t.Fatal(err)
 	}

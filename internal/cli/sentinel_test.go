@@ -237,7 +237,7 @@ func seedSentinelCookie(t *testing.T, path string) {
 	}
 }
 
-// sentinelExpiry is the token file's expires_at: a live token for the classes
+// sentinelExpiry is the credential file's expires_at: a live token for the classes
 // that need a session, and a passed one for the class that drives the refresh
 // a run performs on an expired store.
 func sentinelExpiry(expired bool) int64 {

@@ -56,8 +56,8 @@ func TestEncodedLayout(t *testing.T) {
 	data := Encode(testMagic, testVersion, testObfuscation(), payload)
 	hl := headerLenForTest()
 
-	if len(data) != hl+len(payload)+CRCLen {
-		t.Fatalf("len = %d, want %d", len(data), hl+len(payload)+CRCLen)
+	if len(data) != hl+len(payload)+crcLen {
+		t.Fatalf("len = %d, want %d", len(data), hl+len(payload)+crcLen)
 	}
 	if string(data[:len(testMagic)]) != testMagic {
 		t.Errorf("file starts with %q, want the magic", data[:len(testMagic)])

@@ -745,3 +745,23 @@ func TestProductInfoToGameDetailsAbsentOptionalFields(t *testing.T) {
 		t.Errorf("file = %+v, want empty version and size", gd.Installers[0])
 	}
 }
+
+func TestSizeString(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{"hello", "hello"},
+		{float64(42), "42"},
+		{float64(-1), ""},
+		{float64(1.5), ""},
+		{int64(7), "7"},
+		{uint64(9), "9"},
+		{true, ""},
+	}
+	for _, c := range cases {
+		if got := sizeString(c.in); got != c.want {
+			t.Errorf("sizeString(%#v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

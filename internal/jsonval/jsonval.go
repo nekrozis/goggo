@@ -1,9 +1,10 @@
 // Package jsonval provides the JSON value readers the rest of goggo uses: strings,
 // integers, floats, booleans, objects, arrays and iteration.
 //
-// It is a shared value layer for webapi, catalog and util, which all read decoded
-// JSON with the same semantics. Every reader performs exactly one conversion and
-// returns an error rather than coercing a value into something plausible.
+// It is a shared value-inspection layer for already-decoded JSON: callers that read
+// the same value shape get the same semantics, so a field means the same thing
+// wherever it is read. Every reader performs exactly one conversion and returns an
+// error rather than coercing a value into something plausible.
 package jsonval
 
 import (

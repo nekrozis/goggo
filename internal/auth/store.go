@@ -40,7 +40,7 @@ type Store struct {
 	redirect string
 }
 
-// StorePath is where the session's token store lives. It is defined here
+// StorePath is where the session's credential store lives. It is defined here
 // because the seam owns the location as well as the contents.
 //
 // The name is deliberately not the one an earlier build used: a file called
@@ -88,19 +88,19 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
-// RemoveStore deletes the token store at path, treating "already gone" as
+// RemoveStore deletes the credential store at path, treating "already gone" as
 // success: logout clears state that may not be there, and must not fail because
 // of it.
 //
 // This is a path-level operation rather than a Store method on purpose. A logout
-// must not first parse the file it is about to delete — a corrupt token file
+// must not first parse the file it is about to delete — a corrupt credential file
 // would then make clearing it impossible.
 func RemoveStore(path string) error {
 	err := os.Remove(path)
 	if err == nil || errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	return fmt.Errorf("auth: remove token file %q: %w", path, err)
+	return fmt.Errorf("auth: remove credential file %q: %w", path, err)
 }
 
 // AuthorizationValue returns the value for an Authorization header ("Bearer
@@ -238,7 +238,7 @@ func (s *Store) Save() error {
 		return nil
 	}
 	if path == "" {
-		return errors.New("auth: no token file path set")
+		return errors.New("auth: no credential file path set")
 	}
 	data, err := encodeStore(store)
 	if err != nil {
@@ -280,7 +280,7 @@ var errStorePayload = errors.New("store payload is not a JSON object")
 func encodeStore(store map[string]any) ([]byte, error) {
 	plain, err := json.Marshal(store)
 	if err != nil {
-		return nil, fmt.Errorf("auth: marshal token store: %w", err)
+		return nil, fmt.Errorf("auth: marshal credential store: %w", err)
 	}
 	return secretfile.Encode(storeMagic, storeVersion, storeObfuscation, plain), nil
 }
@@ -300,43 +300,43 @@ func decodeStore(data []byte) (map[string]any, error) {
 	return obj, nil
 }
 
-// tokenFileMode is the permission mode for token files. 0600 is Unix semantics;
-// on Windows no equivalent ACL behaviour is claimed.
-const tokenFileMode = 0o600
+// privateFileMode is the permission mode for the private store files. 0600 is Unix
+// semantics; on Windows no equivalent ACL behaviour is claimed.
+const privateFileMode = 0o600
 
 // writeAtomic writes data to path via a 0600 temp file plus rename: a crash never
-// leaves a truncated token file, and the secret never exists with looser
+// leaves a truncated credential file, and the secret never exists with looser
 // permissions.
 func writeAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".goggo-token-*")
+	tmp, err := os.CreateTemp(dir, ".goggo-credentials-*")
 	if err != nil {
-		return fmt.Errorf("auth: create temp token file in %q: %w", dir, err)
+		return fmt.Errorf("auth: create temp credential file in %q: %w", dir, err)
 	}
 	// Enforce 0600 immediately after creation, before any content is written,
 	// so the secret never sits at looser permissions.
-	if err := tmp.Chmod(tokenFileMode); err != nil {
+	if err := tmp.Chmod(privateFileMode); err != nil {
 		tmp.Close()
 		os.Remove(tmp.Name())
-		return fmt.Errorf("auth: chmod temp token file: %w", err)
+		return fmt.Errorf("auth: chmod temp credential file: %w", err)
 	}
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmp.Name())
-		return fmt.Errorf("auth: write temp token file: %w", err)
+		return fmt.Errorf("auth: write temp credential file: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		os.Remove(tmp.Name())
-		return fmt.Errorf("auth: sync temp token file: %w", err)
+		return fmt.Errorf("auth: sync temp credential file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmp.Name())
-		return fmt.Errorf("auth: close temp token file: %w", err)
+		return fmt.Errorf("auth: close temp credential file: %w", err)
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		os.Remove(tmp.Name())
-		return fmt.Errorf("auth: replace token file %q: %w", path, err)
+		return fmt.Errorf("auth: replace credential file %q: %w", path, err)
 	}
 	return nil
 }

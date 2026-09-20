@@ -457,7 +457,7 @@ func TestLoginStreamsAndStatus(t *testing.T) {
 			cfg := config.NewConfig(t.TempDir(), t.TempDir())
 			cfg.Email = "user@example.com"
 			cfg.ForceBrowserLogin = c.browser
-			// The token file lives under the configuration directory, which Open
+			// The credential file lives under the configuration directory, which Open
 			// normally creates; this test drives login directly.
 			if err := os.MkdirAll(cfg.ConfigDirectory, 0o700); err != nil {
 				t.Fatal(err)
@@ -597,7 +597,7 @@ func TestEnsureDirectories(t *testing.T) {
 
 // TestInitRefreshesAndSavesExpiredToken covers the boundary:
 // load, notice the token is expired, refresh it and save the result — without
-// binding to the token file format. The store is seeded through the production
+// binding to the credential file format. The store is seeded through the production
 // writer and the result is read back through the production reader, so nothing
 // here depends on how the file is laid out.
 //
@@ -862,7 +862,7 @@ func TestOpenWithInjectedTransportWithoutToken(t *testing.T) {
 
 	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), SessionRequest{}, injectedDeps(t, srv.Server))
 	if err != nil {
-		t.Fatalf("OpenWith without a token file: %v", err)
+		t.Fatalf("OpenWith without a credential file: %v", err)
 	}
 	if d.LoggedIn() {
 		t.Error("LoggedIn = true, want false without a token")

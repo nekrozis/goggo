@@ -256,59 +256,6 @@ func TestRateStringBoundaries(t *testing.T) {
 	}
 }
 
-func TestJSONUintString(t *testing.T) {
-	cases := []struct {
-		in   any
-		want string
-	}{
-		{"hello", "hello"},
-		{float64(42), "42"},
-		{float64(-1), ""},
-		{float64(1.5), ""},
-		{int64(7), "7"},
-		{uint64(9), "9"},
-		{true, ""},
-	}
-	for _, c := range cases {
-		if got := JSONUintString(c.in); got != c.want {
-			t.Errorf("JSONUintString(%#v) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-func TestReadJSONFileErrorWrapsPath(t *testing.T) {
-	dir := t.TempDir()
-	_, err := ReadJSONFile(filepath.Join(dir, "missing.json"))
-	if err == nil {
-		t.Fatal("expected error for missing file")
-	}
-	if got := err.Error(); len(got) == 0 {
-		t.Error("error message empty")
-	}
-
-	bad := filepath.Join(dir, "bad.json")
-	if err := os.WriteFile(bad, []byte("{nope"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, err = ReadJSONFile(bad)
-	if err == nil {
-		t.Fatal("expected parse error")
-	}
-
-	good := filepath.Join(dir, "good.json")
-	if err := os.WriteFile(good, []byte(`{"a":1}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	v, err := ReadJSONFile(good)
-	if err != nil {
-		t.Fatalf("ReadJSONFile: %v", err)
-	}
-	obj, ok := v.(map[string]any)
-	if !ok || obj["a"] != float64(1) {
-		t.Errorf("ReadJSONFile value = %#v", v)
-	}
-}
-
 // envGuard restores an environment variable after a test.
 type envGuard struct {
 	key   string

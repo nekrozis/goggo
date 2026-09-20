@@ -21,10 +21,10 @@ import (
 	"hash/crc32"
 )
 
-// CRCLen is the size of the trailing checksum. The checksum covers truncation,
+// crcLen is the size of the trailing checksum. The checksum covers truncation,
 // random corruption and a partial write; it is an integrity check, not a
 // security measure, since rewriting the payload lets an attacker rewrite it too.
-const CRCLen = 4
+const crcLen = 4
 
 // The five ways the framing itself can fail. A payload that fails to parse at
 // the caller's layer is the caller's own error, not one of these.
@@ -67,7 +67,7 @@ func headerLen(magic string) int {
 func Encode(magic string, version byte, obf Obfuscator, payload []byte) []byte {
 	stored := obf(payload)
 
-	out := make([]byte, 0, headerLen(magic)+len(stored)+CRCLen)
+	out := make([]byte, 0, headerLen(magic)+len(stored)+crcLen)
 	out = append(out, magic...)
 	out = append(out, version)
 	out = binary.BigEndian.AppendUint32(out, uint32(len(stored)))
@@ -95,7 +95,7 @@ func Decode(magic string, version byte, obf Obfuscator, data []byte) ([]byte, er
 		return nil, ErrVersion
 	}
 	length := int(binary.BigEndian.Uint32(data[len(magic)+1:]))
-	if len(data) != hl+length+CRCLen {
+	if len(data) != hl+length+crcLen {
 		return nil, ErrLength
 	}
 

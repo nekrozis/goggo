@@ -78,7 +78,7 @@ func TestReferenceModeIsWhatTheFlagSays(t *testing.T) {
 // newReferenceFixture answers a session and an account with two products whose
 // slugs share the word "Game", so the two readings of one reference differ
 // observably: the exact read finds no product called "Game", the expression
-// matches both and has to ask. It writes the token file itself, because a
+// matches both and has to ask. It writes the credential file itself, because a
 // reference is only read after a session exists.
 func newReferenceFixture(t *testing.T) core.Dependencies {
 	t.Helper()

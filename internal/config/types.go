@@ -45,12 +45,6 @@ type DownloadConfig struct {
 	GalaxyLowercasePath bool
 }
 
-// GameSpecificConfig groups the per-game directory and download settings.
-type GameSpecificConfig struct {
-	Directory DirectoryConfig
-	Download  DownloadConfig
-}
-
 // CurlConfig holds the transport options. Timeouts are in seconds.
 type CurlConfig struct {
 	CACertPath          string
@@ -60,7 +54,6 @@ type CurlConfig struct {
 	LowSpeedTimeout     int64
 	LowSpeedTimeoutRate int64
 	VerifyPeer          bool
-	Verbose             bool
 }
 
 // Config is the complete configuration value passed down through the
@@ -95,14 +88,12 @@ type Config struct {
 
 	Login                 bool
 	ForceBrowserLogin     bool
-	Download              bool
 	Updated               bool
 	New                   bool
 	IncludeHiddenProducts bool
 	SizeOnly              bool
 	Unicode               bool
 	Color                 bool
-	Report                bool
 	PlatformDetection     bool
 	TrustAPIForExtras     bool
 	UpdateCache           bool

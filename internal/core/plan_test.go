@@ -724,7 +724,7 @@ func TestBuildPlanInstallDirTemplateNeedsProductInfo(t *testing.T) {
 			cfg.Directories.GalaxyInstallSubdir = c.subdir
 			d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
 			// The plan refreshes an expired token before it reads the document;
-			// a fresh one keeps the credential refresh (and its token file) out
+			// a fresh one keeps the credential refresh (and the file it rewrites) out
 			// of a test about the install directory.
 			d.token.StoreLoginResponse(map[string]any{"access_token": "a", "refresh_token": "r", "expires_in": 3600})
 

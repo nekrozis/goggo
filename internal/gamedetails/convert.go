@@ -2,7 +2,9 @@ package gamedetails
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/nekrozis/goggo/internal/config"
@@ -278,7 +280,7 @@ func gameFiles(ctx context.Context, gamename, title, label string, nodes []any, 
 				ID:                    id,
 				Name:                  name,
 				Path:                  resolved.Path,
-				Size:                  util.JSONUintString(entry["size"]),
+				Size:                  sizeString(entry["size"]),
 				Version:               version,
 				Title:                 title,
 				GalaxyDownlinkJSONURL: downlink,
@@ -427,4 +429,47 @@ func fieldInt(obj map[string]any, name string) (int64, error) {
 		return 0, wrap(name, err)
 	}
 	return value, nil
+}
+
+// sizeString renders a file entry's size as the decimal text GameFile.Size carries: a
+// string value is taken verbatim, and any other value becomes its unsigned decimal text
+// when it is representable as one. A negative value, a non-integral number and a
+// boolean have no unsigned form and render as "" — a missing size must not turn into a
+// plausible-looking number.
+//
+// Values arrive decoded, so the shapes below are what encoding/json produces (float64,
+// json.Number) plus native integers.
+func sizeString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	var u uint64
+	switch n := v.(type) {
+	case float64:
+		if n < 0 || n != float64(uint64(n)) {
+			return ""
+		}
+		u = uint64(n)
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil || i < 0 {
+			return ""
+		}
+		u = uint64(i)
+	case int:
+		if n < 0 {
+			return ""
+		}
+		u = uint64(n)
+	case int64:
+		if n < 0 {
+			return ""
+		}
+		u = uint64(n)
+	case uint64:
+		u = n
+	default:
+		return ""
+	}
+	return strconv.FormatUint(u, 10)
 }

@@ -2,9 +2,11 @@ package auth
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,7 +14,6 @@ import (
 	"time"
 
 	"github.com/nekrozis/goggo/internal/config"
-	"github.com/nekrozis/goggo/internal/util"
 )
 
 // defaultExpiresIn is the token lifetime assumed when the server response
@@ -42,20 +43,24 @@ type Store struct {
 
 // StorePath is where the session's token store lives. It is defined here
 // because the seam owns the location as well as the contents.
+//
+// The name is deliberately not the one an earlier build used: a file called
+// credentials.bin cannot be mistaken for the JSON token file this program wrote
+// before, and that file is never read, migrated, overwritten or deleted.
 func StorePath(cfg config.Config) string {
-	return cfg.ConfigDirectory + "/galaxy_tokens.json"
+	return cfg.ConfigDirectory + "/credentials.bin"
 }
 
 // Open returns the store at path: an empty one when no file exists yet (a fresh
 // install is normal, not an error), an error when a file exists but cannot be
-// read or is not a JSON object.
+// read or does not decode.
 //
 // An empty path is also an empty store, and no error: a store may exist before a
 // location is chosen for it, and Save already refuses to persist one without a
 // path, so nothing can be written by accident.
 //
-// A token file that lacks expires_at has it derived from the file's modification
-// time plus expires_in, which preserves the lifetime of a file written earlier.
+// A store that lacks expires_at has it derived from the file's modification time
+// plus expires_in, which preserves the lifetime of a file written earlier.
 func Open(path string) (*Store, error) {
 	s := &Store{path: path, token: map[string]any{}, redirect: config.DefaultRedirectURI}
 	if path == "" {
@@ -67,15 +72,15 @@ func Open(path string) (*Store, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			return s, nil
 		}
-		return nil, fmt.Errorf("auth: stat token file %q: %w", path, err)
+		return nil, fmt.Errorf("auth: stat store file %q: %w", path, err)
 	}
-	v, err := util.ReadJSONFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("auth: read store file %q: %w", path, err)
 	}
-	obj, ok := v.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("auth: token file %q: not a JSON object", path)
+	obj, err := decodeStore(data)
+	if err != nil {
+		return nil, fmt.Errorf("auth: store file %q: %w", path, err)
 	}
 	if _, has := obj["expires_at"]; !has {
 		obj["expires_at"] = fi.ModTime().Unix() + jsonInt64Value(obj["expires_in"])
@@ -236,11 +241,108 @@ func (s *Store) Save() error {
 	if path == "" {
 		return errors.New("auth: no token file path set")
 	}
-	data, err := json.Marshal(store)
+	data, err := encodeStore(store)
 	if err != nil {
-		return fmt.Errorf("auth: marshal token store: %w", err)
+		return err
 	}
 	return writeAtomic(path, data)
+}
+
+// The on-disk envelope. It is a NON-PLAINTEXT, NON-ENCRYPTED format: the
+// payload is obfuscated with a fixed keystream that anyone holding this source
+// can recover. It provides no cryptographic confidentiality and is not meant to
+// resist malware, EDR or anyone analysing the machine. Its only effect is that
+// the file is no longer text, so a plain grep or a text index does not pick up
+// the credential fields.
+//
+//	crc32 covers truncation, random corruption and a partial write. It is an
+//	integrity check, not a security measure: rewriting the payload lets an
+//	attacker rewrite the checksum too.
+const (
+	storeMagic     = "GOGGOAUTH"
+	storeVersion   = 1
+	storeHeaderLen = len(storeMagic) + 1 + 4
+	storeCRCLen    = 4
+)
+
+// storeKeystream is the obfuscation key. It is a constant, not a secret.
+var storeKeystream = []byte("goggo-credential-store-v1")
+
+// storeEncodeError names the six ways a store file can fail to decode. They are
+// separate values so Open's failures stay distinguishable: a truncated payload
+// reported as a checksum failure would hide the real cause.
+var (
+	errStoreTruncated = errors.New("store header is truncated")
+	errStoreMagic     = errors.New("store magic does not match")
+	errStoreVersion   = errors.New("store version is not supported")
+	errStoreLength    = errors.New("store length does not match the file")
+	errStoreCRC       = errors.New("store checksum does not match")
+	errStorePayload   = errors.New("store payload is not a JSON object")
+)
+
+// encodeStore serialises a token tree into the on-disk envelope.
+func encodeStore(store map[string]any) ([]byte, error) {
+	plain, err := json.Marshal(store)
+	if err != nil {
+		return nil, fmt.Errorf("auth: marshal token store: %w", err)
+	}
+	return frameStore(xorKeystream(plain)), nil
+}
+
+// frameStore wraps an obfuscated payload in the header and checksum. It is the
+// one place the framing is built, so a test that needs a payload the framing
+// accepts and the JSON layer rejects can reuse it instead of restating the
+// layout.
+func frameStore(payload []byte) []byte {
+	out := make([]byte, 0, storeHeaderLen+len(payload)+storeCRCLen)
+	out = append(out, storeMagic...)
+	out = append(out, storeVersion)
+	out = binary.BigEndian.AppendUint32(out, uint32(len(payload)))
+	out = append(out, payload...)
+	return binary.BigEndian.AppendUint32(out, crc32.ChecksumIEEE(payload))
+}
+
+// decodeStore parses the envelope. The checks run in the order the failures can
+// be told apart:
+//
+//	header completeness -> magic -> version -> declared length -> checksum -> JSON
+//
+// The length check comes before the checksum on purpose: a truncated file is a
+// length failure, and reporting it as a checksum failure would lose the reason.
+func decodeStore(data []byte) (map[string]any, error) {
+	if len(data) < storeHeaderLen {
+		return nil, errStoreTruncated
+	}
+	if string(data[:len(storeMagic)]) != storeMagic {
+		return nil, errStoreMagic
+	}
+	if data[len(storeMagic)] != storeVersion {
+		return nil, errStoreVersion
+	}
+	length := int(binary.BigEndian.Uint32(data[len(storeMagic)+1:]))
+	if len(data) != storeHeaderLen+length+storeCRCLen {
+		return nil, errStoreLength
+	}
+
+	payload := data[storeHeaderLen : storeHeaderLen+length]
+	if got, want := binary.BigEndian.Uint32(data[storeHeaderLen+length:]), crc32.ChecksumIEEE(payload); got != want {
+		return nil, errStoreCRC
+	}
+
+	var obj map[string]any
+	if err := json.Unmarshal(xorKeystream(payload), &obj); err != nil || obj == nil {
+		return nil, errStorePayload
+	}
+	return obj, nil
+}
+
+// xorKeystream applies the obfuscation, which is its own inverse.
+func xorKeystream(data []byte) []byte {
+	out := make([]byte, len(data))
+	for i := range data {
+		out[i] = data[i] ^ storeKeystream[i%len(storeKeystream)]
+	}
+	return out
 }
 
 // tokenFileMode is the permission mode for token files. 0600 is Unix semantics;

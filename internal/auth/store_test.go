@@ -64,8 +64,10 @@ func readStoredFile(t *testing.T, path string) map[string]any {
 	if err != nil {
 		t.Fatalf("read %q: %v", path, err)
 	}
-	var obj map[string]any
-	if err := json.Unmarshal(data, &obj); err != nil {
+	// Through the same decoder the store uses: a test that parsed the file its
+	// own way would keep passing after the on-disk format changed underneath it.
+	obj, err := decodeStore(data)
+	if err != nil {
 		t.Fatalf("decode %q: %v", path, err)
 	}
 	return obj
@@ -110,21 +112,67 @@ func TestOpenMissingFileIsAnEmptyStore(t *testing.T) {
 	}
 }
 
-// TestOpenRejectsAnUnusableFile: a file that exists but is not a JSON object is
-// an error, never a silently empty store.
+// TestOpenRejectsAnUnusableFile: every way a store file can be unusable is an
+// error, never a silently empty store — and each way is reported as itself. The
+// order the checks run in is what makes that true: a truncated file is a length
+// failure, and reporting it as a checksum failure would hide the reason.
 func TestOpenRejectsAnUnusableFile(t *testing.T) {
-	for _, tc := range []struct{ name, body string }{
-		{"truncated", `{"access_token":`},
-		{"array", `["a","b"]`},
-		{"scalar", `"at"`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "bad.json")
-			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+	valid := func(t *testing.T) []byte {
+		t.Helper()
+		data, err := encodeStore(map[string]any{"access_token": "at"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+
+	cases := []struct {
+		name string
+		body func(*testing.T) []byte
+		want error
+	}{
+		{"an empty file", func(*testing.T) []byte { return nil }, errStoreTruncated},
+		{"a header cut short", func(*testing.T) []byte { return []byte("GOGGO") }, errStoreTruncated},
+		{"a foreign file", func(t *testing.T) []byte {
+			return append([]byte("NOTGOGGO"), valid(t)[len(storeMagic):]...)
+		}, errStoreMagic},
+		{"a version this build does not know", func(t *testing.T) []byte {
+			data := valid(t)
+			data[len(storeMagic)] = 99
+			return data
+		}, errStoreVersion},
+		{"a payload shorter than the header declares", func(t *testing.T) []byte {
+			data := valid(t)
+			return data[:len(data)-2]
+		}, errStoreLength},
+		{"trailing bytes after the checksum", func(t *testing.T) []byte {
+			return append(valid(t), 0x00)
+		}, errStoreLength},
+		{"a payload the checksum rejects", func(t *testing.T) []byte {
+			data := valid(t)
+			data[len(data)-1] ^= 0xff
+			return data
+		}, errStoreCRC},
+		{"a payload that is not JSON", func(*testing.T) []byte {
+			return frameStore(xorKeystream([]byte("not json at all")))
+		}, errStorePayload},
+		{"a payload that is JSON but not an object", func(*testing.T) []byte {
+			return frameStore(xorKeystream([]byte(`["a","b"]`)))
+		}, errStorePayload},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "bad.bin")
+			if err := os.WriteFile(path, c.body(t), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := Open(path); err == nil {
-				t.Errorf("Open(%s file) = nil, want an error", tc.name)
+			_, err := Open(path)
+			if err == nil {
+				t.Fatalf("Open(%s) = nil, want an error", c.name)
+			}
+			if !errors.Is(err, c.want) {
+				t.Errorf("error = %v, want %v", err, c.want)
 			}
 		})
 	}
@@ -403,16 +451,20 @@ func TestSaveOpenRoundTrip(t *testing.T) {
 func TestOpenDerivesMissingExpiresAtFromTheFileMtime(t *testing.T) {
 	cases := []struct {
 		name     string
-		body     string
+		token    map[string]any
 		lifetime int64
 	}{
-		{"with a lifetime", `{"access_token":"at-old","refresh_token":"rt-old","expires_in":3600}`, 3600},
-		{"without a lifetime", `{"access_token":"at-old","refresh_token":"rt-old"}`, 0},
+		{"with a lifetime", map[string]any{"access_token": "at-old", "refresh_token": "rt-old", "expires_in": 3600}, 3600},
+		{"without a lifetime", map[string]any{"access_token": "at-old", "refresh_token": "rt-old"}, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "legacy.json")
-			if err := os.WriteFile(path, []byte(c.body), 0o600); err != nil {
+			path := filepath.Join(t.TempDir(), "stale.bin")
+			data, err := encodeStore(c.token)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0o600); err != nil {
 				t.Fatal(err)
 			}
 			mt := time.Date(2020, 4, 15, 12, 30, 0, 0, time.Local)

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -180,8 +181,20 @@ func sentinelRoots(t *testing.T, expiresAt int64) string {
 	}
 	token := fmt.Sprintf(`{"access_token":%q,"refresh_token":%q,"expires_at":%d,"user_id":"u1"}`,
 		sentinel, sentinel, expiresAt)
-	if err := os.WriteFile(auth.StorePath(cfg), []byte(token), 0o600); err != nil {
+	// Seeded through the seam: the store's path and on-disk format are its own
+	// business, and a guard that hard-coded either would not survive a change to
+	// them — which is exactly the change this round makes.
+	seed, err := auth.Open(auth.StorePath(cfg))
+	if err != nil {
+		t.Fatalf("auth.Open: %v", err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(token), &fields); err != nil {
 		t.Fatal(err)
+	}
+	seed.StoreLoginResponse(fields)
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed the session: %v", err)
 	}
 	// One session cookie, in the Netscape shape the cookie store reads back.
 	cookies := "# Netscape HTTP Cookie File\n.gog.com\tTRUE\t/\tFALSE\t0\tSID\t" + sentinel + "\n"
@@ -281,7 +294,7 @@ func TestCredentialsNeverReachTheOutput(t *testing.T) {
 			args:    []string{"auth", "login"},
 			stdin:   "user@example.com\n" + sentinel + "\n",
 			wantErr: []string{"no credentials available in a non-interactive session"},
-			wantOut: []string{"cookies.txt", "galaxy_tokens.json"},
+			wantOut: []string{"cookies.txt", "credentials.bin"},
 		},
 	}
 

@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/nekrozis/goggo/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -91,8 +93,20 @@ func newReferenceFixture(t *testing.T) core.Dependencies {
 	}
 	token := fmt.Sprintf(`{"access_token":"at","refresh_token":"rt","expires_at":%d,"user_id":"u1"}`,
 		time.Now().Add(time.Hour).Unix())
-	if err := os.WriteFile(filepath.Join(dir, "galaxy_tokens.json"), []byte(token), 0o600); err != nil {
+	// Seeded through the seam, not by writing a file: the store's path and format
+	// are the seam's business, and a test that hard-coded either would have to be
+	// edited every time they change.
+	seed, err := auth.Open(auth.StorePath(config.Config{ConfigDirectory: dir}))
+	if err != nil {
+		t.Fatalf("auth.Open: %v", err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(token), &fields); err != nil {
 		t.Fatal(err)
+	}
+	seed.StoreLoginResponse(fields)
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed the session: %v", err)
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

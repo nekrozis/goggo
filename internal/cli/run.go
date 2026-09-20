@@ -85,6 +85,15 @@ func newConfig() (config.Config, error) {
 // codes are the ones the parser and the command tree define; this function only
 // decides which command runs (review CLI1 §6).
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return runWithDeps(args, stdin, stdout, stderr, core.Dependencies{})
+}
+
+// runWithDeps is Run with the one seam core already exposes: the network exit
+// (Dependencies.HTTPTransport). Production passes the zero value; a test points
+// every command at a local server and drives the real dispatcher end to end.
+// The seam is what makes dispatch coverage observable without a network — the
+// gap that let `auth login` fall into the no-handler default unnoticed.
+func runWithDeps(args []string, stdin io.Reader, stdout, stderr io.Writer, deps core.Dependencies) int {
 	cfg, err := newConfig()
 	if err != nil {
 		return fail(stderr, err)
@@ -93,7 +102,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	return exitCode(dispatch(inv, stdin, stdout, stderr))
+	return exitCode(dispatch(inv, stdin, stdout, stderr, deps))
 }
 
 // fail prints one diagnostic and returns the exit code its class implies.
@@ -133,7 +142,7 @@ func sessionRequest(class sessionClass, interactive bool) core.SessionRequest {
 // dispatch runs one parsed invocation. The order below is the CLI's own: meta
 // answers first (D18), then the commands that need no session, then everything
 // that does.
-func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome {
+func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps core.Dependencies) outcome {
 	ui := newConsole(stdin, stdout, stderr)
 	ctx := context.Background()
 
@@ -213,7 +222,13 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome
 	// What this command asks of the session, decided once for every command
 	// that opens one (review CLI1 §7).
 	req := sessionRequest(inv.session, ui.IsTerminal())
-	d, err := core.OpenWith(ctx, inv.cfg, ui, req, core.Dependencies{Progress: progress})
+	// The sampling surface is the CLI's own, so it only fills the field when
+	// this command publishes samples; an injected Progress (a test's) is left
+	// alone otherwise.
+	if progress != nil {
+		deps.Progress = progress
+	}
+	d, err := core.OpenWith(ctx, inv.cfg, ui, req, deps)
 	if err != nil {
 		return reportError(stderr, err)
 	}
@@ -226,6 +241,20 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer) outcome
 	}
 
 	switch inv.cmd {
+	case cmdAuthLogin:
+		// The login already happened: the tree declares sessionExplicitLogin,
+		// sessionRequest turned that into AllowLogin, and OpenWith ran the flow
+		// before this switch was reached. Reaching here therefore means the
+		// session is usable, so the command's work is done.
+		//
+		// This case exists because its absence was invisible: `auth login`
+		// completed the login, stored the credentials, and then fell through
+		// to the no-handler default below — reporting failure for a command
+		// that had just succeeded (CLI1 S2 gap, found 2026-09-20). The
+		// coverage test in dispatch_coverage_test.go now walks the tree so no
+		// command can reach that default again.
+		return outcomeOK
+
 	case cmdListGames, cmdListTags, cmdListWishlist:
 		if err := renderList(ctx, d, listFormat(inv.cmd), stdout); err != nil {
 			return reportError(stderr, err)

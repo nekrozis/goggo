@@ -6,6 +6,7 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -490,7 +491,7 @@ func TestDecodeDocumentTakesArraysWhileResponseJSONRefusesThem(t *testing.T) {
 		t.Fatalf("decodeDocument(array) = %v, want success", err)
 	}
 	if v.Kind() != jsontext.KindBeginArray {
-		t.Errorf("decodeDocument(array) = %s, want an array", jsonKind(v))
+		t.Errorf("decodeDocument(array) = %s, want an array", jsonread.Kind(v))
 	}
 
 	if _, err := decodeJSONObject(body); !errors.Is(err, ErrNotJSON) {
@@ -513,7 +514,7 @@ func TestDecodeDocumentHandlesZlibArraysAndObjects(t *testing.T) {
 		t.Fatalf("decodeDocument(zlib array) = %v, want success", err)
 	}
 	if v.Kind() != jsontext.KindBeginArray {
-		t.Errorf("decodeDocument(zlib array) = %s, want an array", jsonKind(v))
+		t.Errorf("decodeDocument(zlib array) = %s, want an array", jsonread.Kind(v))
 	}
 
 	if _, err := decodeJSONObject(zlibBody(t, `[{"id":"2"}]`)); !errors.Is(err, ErrNotJSON) {
@@ -525,6 +526,6 @@ func TestDecodeDocumentHandlesZlibArraysAndObjects(t *testing.T) {
 		t.Fatalf("decodeDocument(zlib object) = %v, want success", err)
 	}
 	if obj.Kind() != jsontext.KindBeginObject {
-		t.Errorf("decodeDocument(zlib object) = %s, want an object", jsonKind(obj))
+		t.Errorf("decodeDocument(zlib object) = %s, want an object", jsonread.Kind(obj))
 	}
 }

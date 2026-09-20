@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"fmt"
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"strings"
 )
 
@@ -57,7 +58,7 @@ func (c *Client) expandDLCs(ctx context.Context, product map[string]jsontext.Val
 	if product["dlcs"].Kind() != jsontext.KindBeginObject {
 		return nil
 	}
-	dlcs, err := memberObject(product["dlcs"])
+	dlcs, err := jsonread.Object(product["dlcs"])
 	if err != nil {
 		return fmt.Errorf("dlcs: %w", err)
 	}
@@ -75,7 +76,7 @@ func (c *Client) expandDLCs(ctx context.Context, product map[string]jsontext.Val
 // which takes the single-request branch; a present member that is not an array
 // is an error.
 func dlcProducts(dlcs map[string]jsontext.Value) ([]jsontext.Value, error) {
-	items, err := memberArray(dlcs["products"])
+	items, err := jsonread.Array(dlcs["products"])
 	if err != nil {
 		return nil, fmt.Errorf("dlcs.products: %w", err)
 	}
@@ -97,14 +98,14 @@ func (c *Client) expandDLCsInOneRequest(ctx context.Context, product, dlcs map[s
 	if err != nil {
 		return err
 	}
-	product[expandedDLCsKey] = rawArray(docs)
+	product[expandedDLCsKey] = jsonread.RawArray(docs)
 	return nil
 }
 
 // dlcExpandedURL reads dlcs.expanded_all_products_url: absent or null is the
 // empty string, a present non-string is an error.
 func dlcExpandedURL(dlcs map[string]jsontext.Value) (string, error) {
-	url, err := stringOnly(dlcs["expanded_all_products_url"])
+	url, err := jsonread.Text(dlcs["expanded_all_products_url"])
 	if err != nil {
 		return "", fmt.Errorf("dlcs.expanded_all_products_url: %w", err)
 	}
@@ -135,7 +136,7 @@ func (c *Client) expandDLCsInBatches(ctx context.Context, product map[string]jso
 			ids = ids[:0]
 		}
 	}
-	product[expandedDLCsKey] = rawArray(expanded)
+	product[expandedDLCsKey] = jsonread.RawArray(expanded)
 	return nil
 }
 
@@ -144,11 +145,13 @@ func (c *Client) expandDLCsInBatches(ctx context.Context, product map[string]jso
 // which is what the live API actually sends here — is read as its literal text.
 // A structured value, or a boolean, is an error.
 func dlcID(entry jsontext.Value, index int) (string, error) {
-	obj, err := memberObject(entry)
+	obj, err := jsonread.Object(entry)
 	if err != nil {
 		return "", fmt.Errorf("dlcs.products[%d]: %w", index, err)
 	}
-	id, err := identifierText(obj["id"])
+	// The id is a database id, and the live API sends it as a number while a
+	// sibling entry of the same vector sends one as a string.
+	id, err := jsonread.Scalar(obj["id"])
 	if err != nil {
 		return "", fmt.Errorf("dlcs.products[%d].id: %w", index, err)
 	}
@@ -169,7 +172,7 @@ func (c *Client) fetchDLCBatch(ctx context.Context, url string) ([]jsontext.Valu
 	if err != nil {
 		return nil, err
 	}
-	docs, err := memberArray(doc)
+	docs, err := jsonread.Array(doc)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", expandedDLCsKey, err)
 	}

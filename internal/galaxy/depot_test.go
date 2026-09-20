@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -427,7 +428,7 @@ func TestUint64Value(t *testing.T) {
 		{"boolean", true, 0, true},
 		{"array", []any{}, 0, true},
 		{"object", map[string]any{}, 0, true},
-		{"float64 at 2^64", maxUint64Exclusive, 0, true},
+		{"float64 at 2^64", math.Ldexp(1, 64), 0, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

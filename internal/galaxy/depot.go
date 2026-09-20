@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"fmt"
-	"math"
 	"regexp"
 	"strings"
 
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/util"
 )
@@ -17,10 +17,6 @@ import (
 // gets. It stays private: the consumer recognises the entry through
 // GalaxyDepotItem.IsSmallFilesContainer, so nothing outside needs the literal.
 const smallFilesContainerName = "galaxy_smallfilescontainer"
-
-// maxUint64Exclusive is 2^64 — the first value past uint64. It is a float64
-// constant because the fallback path of uint64Value compares a float against it.
-const maxUint64Exclusive = float64(1 << 64)
 
 // DepotOptions carries the download configuration needed while expanding a
 // manifest: the dependency switch, the lowercase-path rule and the platform that
@@ -106,7 +102,7 @@ func (c *Client) FilteredDepotItems(ctx context.Context, depotJSON map[string]js
 	}
 	selectedLanguage := false
 	for i, raw := range languages {
-		name, err := memberText(raw)
+		name, err := jsonread.Text(raw)
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: depot languages[%d]: %w", i, err)
 		}
@@ -124,7 +120,7 @@ func (c *Client) FilteredDepotItems(ctx context.Context, depotJSON map[string]js
 	if bitness != nil {
 		selectedArch = false
 		for i, raw := range bitness {
-			name, err := memberText(raw)
+			name, err := jsonread.Text(raw)
 			if err != nil {
 				return nil, fmt.Errorf("galaxy: depot osBitness[%d]: %w", i, err)
 			}
@@ -139,7 +135,10 @@ func (c *Client) FilteredDepotItems(ctx context.Context, depotJSON map[string]js
 		return nil, nil
 	}
 
-	hash, err := memberText(depotJSON["manifest"])
+	// The manifest id is an opaque server-issued token and the product id is a
+	// database id, which Galaxy is known to send as a JSON number; both are read
+	// with the wider Scalar.
+	hash, err := jsonread.Scalar(depotJSON["manifest"])
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: depot manifest: %w", err)
 	}
@@ -148,7 +147,7 @@ func (c *Client) FilteredDepotItems(ctx context.Context, depotJSON map[string]js
 		return nil, err
 	}
 
-	productID, err := memberText(depotJSON["productId"])
+	productID, err := jsonread.Scalar(depotJSON["productId"])
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: depot productId: %w", err)
 	}
@@ -167,7 +166,7 @@ func (c *Client) FilteredDepotItems(ctx context.Context, depotJSON map[string]js
 // Its path is the container constant and is NOT normalised: the lowercase and
 // separator handling applies to depot.items only.
 func smallFilesContainer(depot map[string]jsontext.Value, opts DepotOptions) (*model.GalaxyDepotItem, error) {
-	obj, err := memberObject(depot["smallFilesContainer"])
+	obj, err := jsonread.Object(depot["smallFilesContainer"])
 	if err != nil {
 		return nil, fmt.Errorf("smallFilesContainer: %w", err)
 	}
@@ -193,12 +192,12 @@ func smallFilesContainer(depot map[string]jsontext.Value, opts DepotOptions) (*m
 // depotItem decodes one entry of depot.items. A nil item means "skipped": the
 // entry has no chunks array.
 func depotItem(raw jsontext.Value, opts DepotOptions) (*model.GalaxyDepotItem, error) {
-	obj, err := memberObject(raw)
+	obj, err := jsonread.Object(raw)
 	if err != nil {
 		return nil, err
 	}
 	if obj == nil {
-		return nil, fmt.Errorf("expected a JSON object, got %s", jsonKind(raw))
+		return nil, fmt.Errorf("expected a JSON object, got %s", jsonread.Kind(raw))
 	}
 	chunks, isArray, err := depotChunks(obj)
 	if err != nil {
@@ -208,7 +207,7 @@ func depotItem(raw jsontext.Value, opts DepotOptions) (*model.GalaxyDepotItem, e
 		return nil, nil
 	}
 
-	path, err := memberText(obj["path"])
+	path, err := jsonread.Text(obj["path"])
 	if err != nil {
 		return nil, fmt.Errorf("path: %w", err)
 	}
@@ -227,12 +226,12 @@ func depotItem(raw jsontext.Value, opts DepotOptions) (*model.GalaxyDepotItem, e
 	// "sfcRef" present and non-null marks a file stored inside the small-files
 	// container. A null member is treated as absent: it carries no range.
 	if sfcRaw, ok := obj["sfcRef"]; ok && sfcRaw.Kind() != jsontext.KindNull {
-		sfc, err := memberObject(sfcRaw)
+		sfc, err := jsonread.Object(sfcRaw)
 		if err != nil {
 			return nil, fmt.Errorf("sfcRef: %w", err)
 		}
 		if sfc == nil {
-			return nil, fmt.Errorf("sfcRef: expected a JSON object, got %s", jsonKind(sfcRaw))
+			return nil, fmt.Errorf("sfcRef: expected a JSON object, got %s", jsonread.Kind(sfcRaw))
 		}
 		item.IsInSFC = true
 		if item.SFCOffset, err = uint64Value(sfc["offset"]); err != nil {
@@ -270,7 +269,7 @@ func depotChunks(obj map[string]jsontext.Value) (chunks []model.GalaxyDepotItemC
 	if obj["chunks"].Kind() != jsontext.KindBeginArray {
 		return nil, false, nil
 	}
-	raw, err := memberArray(obj["chunks"])
+	raw, err := jsonread.Array(obj["chunks"])
 	if err != nil {
 		return nil, false, err
 	}
@@ -278,21 +277,21 @@ func depotChunks(obj map[string]jsontext.Value) (chunks []model.GalaxyDepotItemC
 	var compressedTotal, total uint64
 	chunks = make([]model.GalaxyDepotItemChunk, 0, len(raw))
 	for i, v := range raw {
-		entry, err := memberObject(v)
+		entry, err := jsonread.Object(v)
 		if err != nil {
 			return nil, false, fmt.Errorf("chunks[%d]: %w", i, err)
 		}
 		if entry == nil {
-			return nil, false, fmt.Errorf("chunks[%d]: expected a JSON object, got %s", i, jsonKind(v))
+			return nil, false, fmt.Errorf("chunks[%d]: expected a JSON object, got %s", i, jsonread.Kind(v))
 		}
 		chunk := model.GalaxyDepotItemChunk{
 			CompressedOffset: compressedTotal,
 			Offset:           total,
 		}
-		if chunk.CompressedMD5, err = memberText(entry["compressedMd5"]); err != nil {
+		if chunk.CompressedMD5, err = jsonread.Text(entry["compressedMd5"]); err != nil {
 			return nil, false, fmt.Errorf("chunks[%d].compressedMd5: %w", i, err)
 		}
-		if chunk.MD5, err = memberText(entry["md5"]); err != nil {
+		if chunk.MD5, err = jsonread.Text(entry["md5"]); err != nil {
 			return nil, false, fmt.Errorf("chunks[%d].md5: %w", i, err)
 		}
 		if chunk.CompressedSize, err = uint64Value(entry["compressedSize"]); err != nil {
@@ -313,7 +312,7 @@ func depotChunks(obj map[string]jsontext.Value) (chunks []model.GalaxyDepotItemC
 // else "".
 func itemMD5(obj map[string]jsontext.Value, chunks []model.GalaxyDepotItemChunk) (string, error) {
 	if raw, ok := obj["md5"]; ok {
-		return memberText(raw)
+		return jsonread.Text(raw)
 	}
 	if len(chunks) == 1 {
 		return chunks[0].MD5, nil
@@ -326,7 +325,7 @@ func itemMD5(obj map[string]jsontext.Value, chunks []model.GalaxyDepotItemChunk)
 // document that carries the section in the wrong shape is broken rather than
 // empty.
 func objectField(obj map[string]jsontext.Value, key string) (map[string]jsontext.Value, error) {
-	inner, err := memberObject(obj[key])
+	inner, err := jsonread.Object(obj[key])
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", key, err)
 	}
@@ -335,46 +334,17 @@ func objectField(obj map[string]jsontext.Value, key string) (map[string]jsontext
 
 // arrayField is objectField for a JSON array, with the same absent/null rule.
 func arrayField(obj map[string]jsontext.Value, key string) ([]jsontext.Value, error) {
-	arr, err := memberArray(obj[key])
+	arr, err := jsonread.Array(obj[key])
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", key, err)
 	}
 	return arr, nil
 }
 
-// uint64Value reads one of a manifest's byte counts, sizes or offsets.
-//
-// The member is a JSON number, and this reader keeps it as one: the token form
-// answers for a whole value inside uint64 range, and the float fallback covers
-// a literal written with a fraction that is still whole ("1024.0") or an
-// exponent. It is deliberately strict: a string or a boolean is a protocol
-// error for a byte count, not a value to coerce. An absent or null member reads
-// as 0, and a negative or out-of-range value is an error rather than a wrapped
-// number.
+// uint64Value reads one of a manifest's byte counts, sizes or offsets: an
+// unsigned whole number, so a negative value, a fraction and a literal past the
+// uint64 range are errors rather than a wrapped size. An absent or null member
+// reads as 0.
 func uint64Value(v jsontext.Value) (uint64, error) {
-	switch v.Kind() {
-	case jsontext.KindInvalid, jsontext.KindNull:
-		return 0, nil
-	case jsontext.KindNumber:
-		tok, err := tokenOf(v)
-		if err != nil {
-			return 0, err
-		}
-		if n, err := tok.Uint(); err == nil {
-			return n, nil
-		}
-		f, err := tok.Float()
-		if err != nil {
-			return 0, fmt.Errorf("expected a byte count, got %s", tok.String())
-		}
-		if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
-			return 0, fmt.Errorf("expected a whole byte count, got %s", tok.String())
-		}
-		if f < 0 || f >= maxUint64Exclusive {
-			return 0, fmt.Errorf("byte count %s is outside the uint64 range", tok.String())
-		}
-		return uint64(f), nil
-	default:
-		return 0, fmt.Errorf("expected a byte count, got %s", jsonKind(v))
-	}
+	return jsonread.Uint(v)
 }

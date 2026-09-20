@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"encoding/json/jsontext"
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -44,7 +45,7 @@ func CdnURLTemplatesFromJSON(json map[string]jsontext.Value, cdnPriority []strin
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	entries, err := memberArray(raw)
+	entries, err := jsonread.Array(raw)
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: link document urls: %w", err)
 	}
@@ -55,11 +56,13 @@ func CdnURLTemplatesFromJSON(json map[string]jsontext.Value, cdnPriority []strin
 	}
 	rankedURLs := make([]ranked, 0, len(entries))
 	for i, element := range entries {
-		entry, err := memberObject(element)
+		entry, err := jsonread.Object(element)
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: link document urls[%d]: %w", i, err)
 		}
-		name, err := memberText(entry["endpoint_name"])
+		// The endpoint name keeps the upstream's asString() read: a numeric name
+		// is stringified, and the test locks it.
+		name, err := jsonread.Scalar(entry["endpoint_name"])
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: link document urls[%d].endpoint_name: %w", i, err)
 		}
@@ -97,7 +100,7 @@ func cdnRank(endpointName string, cdnPriority []string, index int) int {
 // order is observable when one parameter's value contains another parameter's
 // placeholder.
 func urlTemplate(entry map[string]jsontext.Value) (string, error) {
-	format, err := memberText(entry["url_format"])
+	format, err := jsonread.Text(entry["url_format"])
 	if err != nil {
 		return "", fmt.Errorf("url_format: %w", err)
 	}
@@ -107,7 +110,7 @@ func urlTemplate(entry map[string]jsontext.Value) (string, error) {
 		// A null parameters object means "nothing to replace".
 		return format, nil
 	}
-	parameters, err := memberObject(raw)
+	parameters, err := jsonread.Object(raw)
 	if err != nil {
 		return "", fmt.Errorf("parameters: %w", err)
 	}
@@ -119,7 +122,9 @@ func urlTemplate(entry map[string]jsontext.Value) (string, error) {
 	sort.Strings(keys)
 
 	for _, name := range keys {
-		value, err := memberText(parameters[name])
+		// A substituted value keeps the upstream's asString() read: a numeric
+		// value becomes its decimal text, and the test locks it.
+		value, err := jsonread.Scalar(parameters[name])
 		if err != nil {
 			return "", fmt.Errorf("parameters[%q]: %w", name, err)
 		}

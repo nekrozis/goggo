@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/nekrozis/goggo/internal/httpx"
+	"github.com/nekrozis/goggo/internal/jsonread"
 )
 
 // DefaultContentSystemHost serves builds, secure links and dependency
@@ -136,11 +137,11 @@ func decodeJSONObject(body string) (map[string]jsontext.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	obj, err := memberObject(doc)
+	obj, err := jsonread.Object(doc)
 	if err != nil || obj == nil {
-		// A body of "null" is not an object either: memberObject reports it as
+		// A body of "null" is not an object either: jsonread.Object reports it as
 		// "not present", which is not what the caller asked for.
-		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonKind(doc))
+		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonread.Kind(doc))
 	}
 	return obj, nil
 }

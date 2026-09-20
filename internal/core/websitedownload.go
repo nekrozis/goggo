@@ -22,9 +22,6 @@ import (
 // size and the per-task verdicts travel as structured results the CLI maps onto
 // output and exit codes.
 
-// websiteProtocolPrefix is stripped from a download file spec when present.
-const websiteProtocolPrefix = "gogdownloader://"
-
 // WebsiteTaskFailure is one task's operational failure: what happened, and
 // where. The event stream already showed the text; the record exists so the
 // aggregate exit code never depends on re-reading messages.
@@ -234,7 +231,7 @@ func (d *Downloader) downloadWebsiteFile(ctx context.Context, spec, outputFile s
 // three name a DLC file; anything else is refused. Empty segments are refused
 // too: dropping one silently would change which file is meant (D2).
 func parseWebsiteFileSpec(spec string) (game, dlc, fileid string, err error) {
-	raw := strings.TrimPrefix(spec, websiteProtocolPrefix)
+	raw := strings.TrimPrefix(spec, config.ProtocolPrefix)
 	parts := strings.Split(raw, "/")
 	for _, p := range parts {
 		if p == "" {

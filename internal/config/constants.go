@@ -1,15 +1,5 @@
 package config
 
-const (
-	// GameDetailsCacheVersion is bumped whenever the cached game-details XML
-	// format changes, invalidating previously cached files.
-	GameDetailsCacheVersion = 7
-
-	// ZlibWindowSize is the zlib window size used when decompressing Galaxy
-	// depots.
-	ZlibWindowSize = 15
-)
-
 // ProtocolPrefix is the URI scheme used for gogdownloader:// deep links.
 const ProtocolPrefix = "gogdownloader://"
 

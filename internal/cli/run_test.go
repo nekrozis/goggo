@@ -522,7 +522,7 @@ func TestRenderManifest(t *testing.T) {
 		"z": "https://cdn.gog.com/x?a=1&b=<2>",
 		"a": map[string]any{"items": []any{float64(2), true}},
 	}
-	if err := renderManifest(&buf, doc); err != nil {
+	if err := renderManifest(&buf, docOf(doc)); err != nil {
 		t.Fatalf("renderManifest: %v", err)
 	}
 	want := "{\n" +

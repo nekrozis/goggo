@@ -70,7 +70,7 @@ func TestFilteredProductsPageDecodesProducts(t *testing.T) {
 	if got.Page != 2 || got.TotalPages != 5 {
 		t.Errorf("page/totalPages = %d/%d, want 2/5", got.Page, got.TotalPages)
 	}
-	if len(got.Products) != 2 || got.Products[0]["slug"] != "alpha" || got.Products[1]["id"] != "x" {
+	if len(got.Products) != 2 || mustText(t, got.Products[0]["slug"]) != "alpha" || mustText(t, got.Products[1]["id"]) != "x" {
 		t.Errorf("products = %v", got.Products)
 	}
 }
@@ -204,7 +204,7 @@ func TestWishlistPageRequestAndDecode(t *testing.T) {
 	if *lastURI != want {
 		t.Errorf("request URI = %q, want %q", *lastURI, want)
 	}
-	if len(got.Products) != 1 || got.Products[0]["title"] != "Wanted" {
+	if len(got.Products) != 1 || mustText(t, got.Products[0]["title"]) != "Wanted" {
 		t.Errorf("products = %v", got.Products)
 	}
 }

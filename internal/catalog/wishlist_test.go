@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"testing"
 
@@ -32,7 +33,7 @@ func (f *fakeWishlist) WishlistPage(_ context.Context, page int) (webapi.Product
 
 // wishProduct builds a raw wishlist product; price members are merged into the
 // "price" object.
-func wishProduct(extra map[string]any, price map[string]any) map[string]any {
+func wishProduct(extra map[string]any, price map[string]any) map[string]jsontext.Value {
 	p := map[string]any{}
 	for k, v := range extra {
 		p[k] = v
@@ -42,7 +43,7 @@ func wishProduct(extra map[string]any, price map[string]any) map[string]any {
 		priceObj[k] = v
 	}
 	p["price"] = priceObj
-	return p
+	return docOf(p)
 }
 
 func wishlist(t *testing.T, fw *fakeWishlist, opts WishlistOptions) []model.WishlistItem {
@@ -55,7 +56,7 @@ func wishlist(t *testing.T, fw *fakeWishlist, opts WishlistOptions) []model.Wish
 }
 
 func TestWishlistMapsFields(t *testing.T) {
-	fw := &fakeWishlist{pages: []webapi.ProductPage{{Page: 1, TotalPages: 1, Products: []map[string]any{
+	fw := &fakeWishlist{pages: []webapi.ProductPage{{Page: 1, TotalPages: 1, Products: []map[string]jsontext.Value{
 		wishProduct(map[string]any{
 			"title":        "Wanted",
 			"isComingSoon": false,
@@ -131,7 +132,7 @@ func TestWishlistAmountShapes(t *testing.T) {
 				price["finalAmount"] = c.in
 			}
 			fw := &fakeWishlist{pages: []webapi.ProductPage{{Page: 1, TotalPages: 1,
-				Products: []map[string]any{wishProduct(nil, price)}}}}
+				Products: []map[string]jsontext.Value{wishProduct(nil, price)}}}}
 			if got := wishlist(t, fw, WishlistOptions{})[0].Price; got != c.want+"$" {
 				t.Errorf("price = %q, want %q", got, c.want+"$")
 			}
@@ -162,7 +163,7 @@ func TestWishlistPercentShapes(t *testing.T) {
 				price["discountPercentage"] = c.in
 			}
 			fw := &fakeWishlist{pages: []webapi.ProductPage{{Page: 1, TotalPages: 1,
-				Products: []map[string]any{wishProduct(nil, price)}}}}
+				Products: []map[string]jsontext.Value{wishProduct(nil, price)}}}}
 			if got := wishlist(t, fw, WishlistOptions{})[0].DiscountPercent; got != c.want {
 				t.Errorf("discount percent = %q, want %q", got, c.want)
 			}
@@ -184,7 +185,7 @@ func TestWishlistTagOrder(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fw := &fakeWishlist{pages: []webapi.ProductPage{{Page: 1, TotalPages: 1, Products: []map[string]any{
+			fw := &fakeWishlist{pages: []webapi.ProductPage{{Page: 1, TotalPages: 1, Products: []map[string]jsontext.Value{
 				wishProduct(map[string]any{
 					"isComingSoon": c.comingSoon, "isDiscounted": c.discounted, "isMovie": c.movie,
 				}, nil),
@@ -206,7 +207,7 @@ func TestWishlistTagOrder(t *testing.T) {
 // be filtered by the platform check.
 func TestWishlistMoviesSkipPlatformDetection(t *testing.T) {
 	opts := WishlistOptions{PlatformDetection: true, InstallerPlatform: config.PlatformLinux}
-	fw := &fakeWishlist{pages: []webapi.ProductPage{{Page: 1, TotalPages: 1, Products: []map[string]any{
+	fw := &fakeWishlist{pages: []webapi.ProductPage{{Page: 1, TotalPages: 1, Products: []map[string]jsontext.Value{
 		wishProduct(map[string]any{"title": "movie", "isMovie": true}, nil),
 		wishProduct(map[string]any{"title": "windows game", "isMovie": false,
 			"worksOn": map[string]any{"Windows": true}}, nil),
@@ -253,7 +254,7 @@ func TestWishlistReleaseDate(t *testing.T) {
 				extra["releaseDate"] = c.in
 			}
 			fw := &fakeWishlist{pages: []webapi.ProductPage{{Page: 1, TotalPages: 1,
-				Products: []map[string]any{wishProduct(extra, nil)}}}}
+				Products: []map[string]jsontext.Value{wishProduct(extra, nil)}}}}
 			if got := wishlist(t, fw, WishlistOptions{})[0].ReleaseDateTime; got != c.want {
 				t.Errorf("release = %d, want %d", got, c.want)
 			}
@@ -279,7 +280,7 @@ func TestWishlistURLs(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.want, func(t *testing.T) {
 			fw := &fakeWishlist{pages: []webapi.ProductPage{{Page: 1, TotalPages: 1,
-				Products: []map[string]any{wishProduct(map[string]any{"url": c.in}, nil)}}}}
+				Products: []map[string]jsontext.Value{wishProduct(map[string]any{"url": c.in}, nil)}}}}
 			if got := wishlist(t, fw, WishlistOptions{})[0].URL; got != c.want {
 				t.Errorf("url = %q, want %q", got, c.want)
 			}
@@ -291,8 +292,8 @@ func TestWishlistURLs(t *testing.T) {
 // pages are merged in order.
 func TestWishlistPagination(t *testing.T) {
 	fw := &fakeWishlist{pages: []webapi.ProductPage{
-		{Page: 1, TotalPages: 2, Products: []map[string]any{wishProduct(map[string]any{"title": "one"}, nil)}},
-		{Page: 2, TotalPages: 2, Products: []map[string]any{wishProduct(map[string]any{"title": "two"}, nil)}},
+		{Page: 1, TotalPages: 2, Products: []map[string]jsontext.Value{wishProduct(map[string]any{"title": "one"}, nil)}},
+		{Page: 2, TotalPages: 2, Products: []map[string]jsontext.Value{wishProduct(map[string]any{"title": "two"}, nil)}},
 	}}
 	items := wishlist(t, fw, WishlistOptions{})
 	if len(items) != 2 || items[0].Title != "one" || items[1].Title != "two" {
@@ -330,8 +331,8 @@ func TestWishlistFetcherError(t *testing.T) {
 // TestWishlistMissingPriceObject: a price member that is not an object leaves the
 // fields at their empty forms.
 func TestWishlistMissingPriceObject(t *testing.T) {
-	fw := &fakeWishlist{pages: []webapi.ProductPage{{Page: 1, TotalPages: 1, Products: []map[string]any{
-		{"title": "no price", "price": "oops"},
+	fw := &fakeWishlist{pages: []webapi.ProductPage{{Page: 1, TotalPages: 1, Products: []map[string]jsontext.Value{
+		docOf(map[string]any{"title": "no price", "price": "oops"}),
 	}}}}
 	got := wishlist(t, fw, WishlistOptions{})[0]
 	if got.Title != "no price" {

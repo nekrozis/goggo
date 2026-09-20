@@ -74,19 +74,16 @@ func TestProductBuildsReturnsRawDocument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProductBuilds: %v", err)
 	}
-	items, ok := doc["items"].([]any)
-	if !ok || len(items) != 1 {
-		t.Fatalf("items = %#v, want one element", doc["items"])
+	items := mustArray(t, doc["items"])
+	if len(items) != 1 {
+		t.Fatalf("items = %#v, want one element", items)
 	}
-	item, ok := items[0].(map[string]any)
-	if !ok {
-		t.Fatalf("item = %#v, want an object", items[0])
+	item := mustObject(t, items[0])
+	if got := mustInt(t, item["generation"]); got != 2 {
+		t.Errorf("generation = %d, want 2", got)
 	}
-	if item["generation"] != float64(2) {
-		t.Errorf("generation = %#v, want 2", item["generation"])
-	}
-	if link, _ := item["link"].(string); link == "" {
-		t.Errorf("link = %#v, want the build link", item["link"])
+	if got := mustText(t, item["link"]); got == "" {
+		t.Errorf("link = %q, want the build link", got)
 	}
 }
 

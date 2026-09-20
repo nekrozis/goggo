@@ -39,7 +39,7 @@ func TestGameDetailsJSONRequestAndDecode(t *testing.T) {
 	if *lastURI != "/www/account/gameDetails/1207659156.json" {
 		t.Errorf("request URI = %q", *lastURI)
 	}
-	if got["title"] != "Alpha" {
+	if mustText(t, got["title"]) != "Alpha" {
 		t.Errorf("details = %v", got)
 	}
 }

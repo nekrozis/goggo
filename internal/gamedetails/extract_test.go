@@ -38,7 +38,7 @@ func TestSerialsFromCDKeyShapes(t *testing.T) {
 // still renders, and a member of the wrong shape is an error rather than a
 // coercion.
 func TestChangelogFromJSONWrapping(t *testing.T) {
-	got, err := ChangelogFromJSON(map[string]any{"changelog": "<p>fix</p>", "title": "Game"})
+	got, err := ChangelogFromJSON(docOf(map[string]any{"changelog": "<p>fix</p>", "title": "Game"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,25 +46,25 @@ func TestChangelogFromJSONWrapping(t *testing.T) {
 		!strings.HasSuffix(got, "<body><p>fix</p></body>\n</html>") { // the literal has the newline
 		t.Errorf("wrapped changelog = %q", got)
 	}
-	if got, _ := ChangelogFromJSON(map[string]any{"changelog": ""}); got != "" {
+	if got, _ := ChangelogFromJSON(docOf(map[string]any{"changelog": ""})); got != "" {
 		t.Errorf("empty changelog = %q, want nothing", got)
 	}
-	if got, _ := ChangelogFromJSON(map[string]any{}); got != "" {
+	if got, _ := ChangelogFromJSON(docOf(map[string]any{})); got != "" {
 		t.Errorf("missing changelog = %q, want nothing", got)
 	}
 	// The title test is presence, not value: an empty
 	// title still renders "Changelog: ".
-	got, _ = ChangelogFromJSON(map[string]any{"changelog": "c", "title": ""})
+	got, _ = ChangelogFromJSON(docOf(map[string]any{"changelog": "c", "title": ""}))
 	if !strings.Contains(got, "<title>Changelog: </title>") {
 		t.Errorf("present-empty title = %q, want the trailing-space form", got)
 	}
 
 	// The shape rule: a member that has no string form is an error, never a
 	// coerced rendering.
-	if _, err := ChangelogFromJSON(map[string]any{"changelog": []any{"x"}}); err == nil {
+	if _, err := ChangelogFromJSON(docOf(map[string]any{"changelog": []any{"x"}})); err == nil {
 		t.Error("a structured changelog must be an error")
 	}
-	if _, err := ChangelogFromJSON(map[string]any{"changelog": "c", "title": map[string]any{}}); err == nil {
+	if _, err := ChangelogFromJSON(docOf(map[string]any{"changelog": "c", "title": map[string]any{}})); err == nil {
 		t.Error("a structured title must be an error")
 	}
 }

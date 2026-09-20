@@ -2,7 +2,8 @@ package gamedetails
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"go/parser"
 	"go/token"
@@ -76,7 +77,7 @@ func nodeList(nodes ...map[string]any) []any {
 }
 
 // product builds a minimal product document. Pass a nil value to omit a field.
-func product(fields map[string]any) map[string]any {
+func product(fields map[string]any) map[string]jsontext.Value {
 	base := map[string]any{
 		"slug":  "the_game",
 		"id":    "42",
@@ -89,7 +90,7 @@ func product(fields map[string]any) map[string]any {
 		}
 		base[k] = v
 	}
-	return base
+	return docOf(base)
 }
 
 // TestProductInfoToGameDetailsMapsStringsAndImages locks the metadata mapping:
@@ -459,10 +460,10 @@ func TestIdentifierFieldsLiveAPIShapes(t *testing.T) {
 // mustDocumentJSON parses fixture text the way the wire does, so a JSON number
 // arrives as the float64 json.Unmarshal yields — the exact shape that broke
 // the strict gate on live data.
-func mustDocumentJSON(t *testing.T, body string) map[string]any {
+func mustDocumentJSON(t *testing.T, body string) map[string]jsontext.Value {
 	t.Helper()
-	var doc map[string]any
-	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+	var doc map[string]jsontext.Value
+	if err := jsonv2.Unmarshal([]byte(body), &doc); err != nil {
 		t.Fatalf("fixture JSON: %v", err)
 	}
 	return doc
@@ -594,12 +595,12 @@ func TestProductInfoToGameDetailsNestedDLCs(t *testing.T) {
 // error, and the caller gets the ZERO GameDetails — never a half-built tree it
 // could mistake for a result.
 func TestProductInfoToGameDetailsRejectsWrongFieldShapes(t *testing.T) {
-	withDownloads := func(downloads any) map[string]any {
+	withDownloads := func(downloads any) map[string]jsontext.Value {
 		return product(map[string]any{"downloads": downloads})
 	}
 	cases := []struct {
 		name string
-		doc  map[string]any
+		doc  map[string]jsontext.Value
 	}{
 		{"slug is not a string", product(map[string]any{"slug": 42})},
 		{"images is not an object", product(map[string]any{"images": "nope"})},
@@ -760,7 +761,7 @@ func TestSizeString(t *testing.T) {
 		{true, ""},
 	}
 	for _, c := range cases {
-		if got := sizeString(c.in); got != c.want {
+		if got := sizeString(rawOf(c.in)); got != c.want {
 			t.Errorf("sizeString(%#v) = %q, want %q", c.in, got, c.want)
 		}
 	}

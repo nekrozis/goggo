@@ -29,6 +29,8 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -229,7 +231,7 @@ func (f *chainFixture) fetch(t *testing.T, rawURL string) []byte {
 //
 // Picking depots[0] stands in for the real selection logic (build ids, sorting,
 // the DLC include filter); it is a harness simplification.
-func (f *chainFixture) firstDepotEntry(t *testing.T) map[string]any {
+func (f *chainFixture) firstDepotEntry(t *testing.T) map[string]jsontext.Value {
 	t.Helper()
 	manifest, err := f.client.ManifestV2(context.Background(), chainBuildHash, false)
 	if err != nil {
@@ -252,7 +254,7 @@ func TestChainProductDownload(t *testing.T) {
 	}
 	items := mustArray(t, builds["items"], "items")
 	first := mustObject(t, items[0], "items[0]")
-	if first["generation"] != float64(2) {
+	if mustInt(t, first["generation"], "items[0].generation") != 2 {
 		t.Fatalf("generation = %v, want 2", first["generation"])
 	}
 	link := mustString(t, first["link"], "items[0].link")
@@ -465,29 +467,54 @@ func depotManifestBody(path, chunkMD5 string) string {
 		len(chainChunk), len(chainChunk))
 }
 
-func mustArray(t *testing.T, v any, what string) []any {
+func mustArray(t *testing.T, v any, what string) []jsontext.Value {
 	t.Helper()
-	arr, ok := v.([]any)
+	raw, ok := v.(jsontext.Value)
 	if !ok {
-		t.Fatalf("%s = %#v, want an array", what, v)
+		t.Fatalf("%s = %#v, want a JSON member", what, v)
+	}
+	var arr []jsontext.Value
+	if err := jsonv2.Unmarshal(raw, &arr); err != nil {
+		t.Fatalf("%s: %v", what, err)
 	}
 	return arr
 }
 
-func mustObject(t *testing.T, v any, what string) map[string]any {
+func mustObject(t *testing.T, v any, what string) map[string]jsontext.Value {
 	t.Helper()
-	obj, ok := v.(map[string]any)
+	raw, ok := v.(jsontext.Value)
 	if !ok {
-		t.Fatalf("%s = %#v, want an object", what, v)
+		t.Fatalf("%s = %#v, want a JSON member", what, v)
+	}
+	var obj map[string]jsontext.Value
+	if err := jsonv2.Unmarshal(raw, &obj); err != nil {
+		t.Fatalf("%s: %v", what, err)
 	}
 	return obj
 }
 
+func mustInt(t *testing.T, v any, what string) int64 {
+	t.Helper()
+	raw, ok := v.(jsontext.Value)
+	if !ok {
+		t.Fatalf("%s = %#v, want a JSON member", what, v)
+	}
+	var n int64
+	if err := jsonv2.Unmarshal(raw, &n); err != nil {
+		t.Fatalf("%s: %v", what, err)
+	}
+	return n
+}
+
 func mustString(t *testing.T, v any, what string) string {
 	t.Helper()
-	s, ok := v.(string)
+	raw, ok := v.(jsontext.Value)
 	if !ok {
-		t.Fatalf("%s = %#v, want a string", what, v)
+		t.Fatalf("%s = %#v, want a JSON member", what, v)
+	}
+	var s string
+	if err := jsonv2.Unmarshal(raw, &s); err != nil {
+		t.Fatalf("%s: %v", what, err)
 	}
 	return s
 }

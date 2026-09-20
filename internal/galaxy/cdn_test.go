@@ -35,7 +35,7 @@ func TestCdnURLTemplatesRanking(t *testing.T) {
 		`{"endpoint_name":"cdnB","url_format":"B"},`+
 		`{"endpoint_name":"cdnA","url_format":"A"}]}`)
 
-	got, err := CdnURLTemplatesFromJSON(doc, []string{"cdnA", "cdnB"})
+	got, err := CdnURLTemplatesFromJSON(docOf(doc), []string{"cdnA", "cdnB"})
 	if err != nil {
 		t.Fatalf("CdnURLTemplatesFromJSON: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestCdnURLTemplatesRanking(t *testing.T) {
 func TestCdnURLTemplatesUnknownDocumentOrder(t *testing.T) {
 	doc := linkDoc(t, `{"urls":[{"endpoint_name":"x","url_format":"1"},{"endpoint_name":"y","url_format":"2"}]}`)
 
-	got, err := CdnURLTemplatesFromJSON(doc, nil)
+	got, err := CdnURLTemplatesFromJSON(docOf(doc), nil)
 	if err != nil {
 		t.Fatalf("CdnURLTemplatesFromJSON: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestCdnURLTemplatesStableForDuplicateNames(t *testing.T) {
 		`{"endpoint_name":"other","url_format":"unknown"},`+
 		`{"endpoint_name":"cdn","url_format":"second"}]}`)
 
-	got, err := CdnURLTemplatesFromJSON(doc, []string{"cdn"})
+	got, err := CdnURLTemplatesFromJSON(docOf(doc), []string{"cdn"})
 	if err != nil {
 		t.Fatalf("CdnURLTemplatesFromJSON: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestCdnURLTemplatesPlaceholders(t *testing.T) {
 		`"url_format":"https://x/{path}?a={alpha}&b={alpha}",`+
 		`"parameters":{"path":"/p","alpha":"A"}}]}`)
 
-	got, err := CdnURLTemplatesFromJSON(doc, nil)
+	got, err := CdnURLTemplatesFromJSON(docOf(doc), nil)
 	if err != nil {
 		t.Fatalf("CdnURLTemplatesFromJSON: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestCdnURLTemplatesKeyOrder(t *testing.T) {
 	doc := linkDoc(t, `{"urls":[{"endpoint_name":"cdn","url_format":"x{a}y{b}",`+
 		`"parameters":{"b":"B","a":"{b}"}}]}`)
 
-	got, err := CdnURLTemplatesFromJSON(doc, nil)
+	got, err := CdnURLTemplatesFromJSON(docOf(doc), nil)
 	if err != nil {
 		t.Fatalf("CdnURLTemplatesFromJSON: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestCdnURLTemplatesShape(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := CdnURLTemplatesFromJSON(linkDoc(t, c.doc), []string{"cdnA", "cdnB"})
+			got, err := CdnURLTemplatesFromJSON(docOf(linkDoc(t, c.doc)), []string{"cdnA", "cdnB"})
 			if c.wantErr {
 				if err == nil {
 					t.Fatal("the document must be reported as broken")
@@ -158,7 +158,7 @@ func TestCdnURLTemplatesShape(t *testing.T) {
 func TestCdnURLTemplatesEmptyFormatKept(t *testing.T) {
 	doc := linkDoc(t, `{"urls":[{"url_format":""},{"endpoint_name":"cdn","url_format":"u"}]}`)
 
-	got, err := CdnURLTemplatesFromJSON(doc, []string{"cdn"})
+	got, err := CdnURLTemplatesFromJSON(docOf(doc), []string{"cdn"})
 	if err != nil {
 		t.Fatalf("CdnURLTemplatesFromJSON: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestCdnURLTemplatesEmptyFormatKept(t *testing.T) {
 func TestCdnURLTemplatesCoercion(t *testing.T) {
 	doc := linkDoc(t, `{"urls":[{"url_format":"x{path}","parameters":{"path":5}}]}`)
 
-	got, err := CdnURLTemplatesFromJSON(doc, nil)
+	got, err := CdnURLTemplatesFromJSON(docOf(doc), nil)
 	if err != nil {
 		t.Fatalf("CdnURLTemplatesFromJSON: %v", err)
 	}

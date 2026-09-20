@@ -11,7 +11,7 @@ func TestManualURLsFromJSON(t *testing.T) {
 			map[string]any{"manualUrl": "b"},
 			map[string]any{"manualUrl": "a"},
 		}
-		got, err := ManualURLsFromJSON(in)
+		got, err := ManualURLsFromJSON(rawOf(in))
 		if err != nil {
 			t.Fatalf("ManualURLsFromJSON: %v", err)
 		}
@@ -26,7 +26,7 @@ func TestManualURLsFromJSON(t *testing.T) {
 			"1": map[string]any{"manualUrl": "first"},
 			"3": map[string]any{"manualUrl": "third"},
 		}
-		got, err := ManualURLsFromJSON(in)
+		got, err := ManualURLsFromJSON(rawOf(in))
 		if err != nil {
 			t.Fatalf("ManualURLsFromJSON: %v", err)
 		}
@@ -41,7 +41,7 @@ func TestManualURLsFromJSON(t *testing.T) {
 				map[string]any{"inner": map[string]any{"manualUrl": "deep"}},
 			},
 		}
-		got, err := ManualURLsFromJSON(in)
+		got, err := ManualURLsFromJSON(rawOf(in))
 		if err != nil {
 			t.Fatalf("ManualURLsFromJSON: %v", err)
 		}
@@ -52,14 +52,14 @@ func TestManualURLsFromJSON(t *testing.T) {
 
 	t.Run("a manualUrl member is not recursed into", func(t *testing.T) {
 		in := map[string]any{"manualUrl": map[string]any{"manualUrl": "hidden"}}
-		if _, err := ManualURLsFromJSON(in); err == nil {
+		if _, err := ManualURLsFromJSON(rawOf(in)); err == nil {
 			t.Error("want error for a non-scalar manualUrl")
 		}
 	})
 
 	t.Run("scalars and empty input contribute nothing", func(t *testing.T) {
 		for _, in := range []any{nil, "text", float64(1), []any{}, map[string]any{}} {
-			got, err := ManualURLsFromJSON(in)
+			got, err := ManualURLsFromJSON(rawOf(in))
 			if err != nil {
 				t.Fatalf("ManualURLsFromJSON(%#v): %v", in, err)
 			}
@@ -112,7 +112,7 @@ func TestDLCNamesFromJSON(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := DLCNamesFromJSON(c.in)
+			got, err := DLCNamesFromJSON(rawOf(c.in))
 			if err != nil {
 				t.Fatalf("DLCNamesFromJSON: %v", err)
 			}

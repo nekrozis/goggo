@@ -286,7 +286,7 @@ func TestFilteredDepotItemsLanguage(t *testing.T) {
 			srv, calls := depotServer(t, oneChunkManifest)
 			cl := newTestClient(t, srv, nil)
 			items, err := cl.FilteredDepotItems(context.Background(),
-				depotObject(t, c.depot), "en|eng|english|en[_-]US", "64", DepotOptions{})
+				docOf(depotObject(t, c.depot)), "en|eng|english|en[_-]US", "64", DepotOptions{})
 			if err != nil {
 				t.Fatalf("FilteredDepotItems: %v", err)
 			}
@@ -326,7 +326,7 @@ func TestFilteredDepotItemsArch(t *testing.T) {
 			srv, _ := depotServer(t, oneChunkManifest)
 			cl := newTestClient(t, srv, nil)
 			items, err := cl.FilteredDepotItems(context.Background(),
-				depotObject(t, c.depot), "en", "64", DepotOptions{})
+				docOf(depotObject(t, c.depot)), "en", "64", DepotOptions{})
 			if c.wantErr {
 				if err == nil {
 					t.Fatal("a broken osBitness must be reported")
@@ -358,7 +358,7 @@ func TestFilteredDepotItemsStampsProductID(t *testing.T) {
 			srv, _ := depotServer(t, oneChunkManifest)
 			cl := newTestClient(t, srv, nil)
 			items, err := cl.FilteredDepotItems(context.Background(),
-				depotObject(t, c.depot), "en", "64", DepotOptions{})
+				docOf(depotObject(t, c.depot)), "en", "64", DepotOptions{})
 			if err != nil {
 				t.Fatalf("FilteredDepotItems: %v", err)
 			}
@@ -378,7 +378,7 @@ func TestFilteredDepotItemsInvalidRegex(t *testing.T) {
 	srv, calls := depotServer(t, oneChunkManifest)
 	cl := newTestClient(t, srv, nil)
 	_, err := cl.FilteredDepotItems(context.Background(),
-		depotObject(t, `{"languages":["en"],"manifest":"abcdef"}`), "(", "64", DepotOptions{})
+		docOf(depotObject(t, `{"languages":["en"],"manifest":"abcdef"}`)), "(", "64", DepotOptions{})
 	if err == nil {
 		t.Fatal("an invalid regexp must be reported")
 	}
@@ -431,7 +431,7 @@ func TestUint64Value(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := uint64Value(c.value)
+			got, err := uint64Value(rawOf(c.value))
 			if c.wantErr {
 				if err == nil {
 					t.Fatalf("uint64Value(%v) must fail", c.value)

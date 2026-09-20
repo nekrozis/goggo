@@ -1,28 +1,29 @@
 package core
 
 import (
+	"encoding/json/jsontext"
 	"strings"
 	"testing"
 )
 
 // installManifest is a manifest shaped like the one a build returns, with a
 // decoy productId: only baseProductId may feed %product_id%.
-func installManifest() map[string]any {
-	return map[string]any{
+func installManifest() map[string]jsontext.Value {
+	return docOf(map[string]any{
 		"baseProductId":    "1495134320",
 		"productId":        "9999999999",
 		"installDirectory": "The Witcher 3: Wild Hunt - GOTY",
-	}
+	})
 }
 
 // installProduct is the product document of installManifest's base product, the
 // one the three information templates read.
-func installProduct() map[string]any {
-	return map[string]any{
+func installProduct() map[string]jsontext.Value {
+	return docOf(map[string]any{
 		"id":    "1495134320",
 		"slug":  "the_witcher_3_wild_hunt",
 		"title": "The Witcher 3: Wild Hunt",
-	}
+	})
 }
 
 // TestInstallSubdirTemplateTable locks the exported list against the resolver
@@ -127,7 +128,7 @@ func TestResolveInstallSubdir(t *testing.T) {
 	cases := []struct {
 		name     string
 		template string
-		product  map[string]any
+		product  map[string]jsontext.Value
 		want     string
 	}{
 		{name: "install_dir", template: "%install_dir%", want: "The Witcher 3: Wild Hunt - GOTY"},
@@ -184,7 +185,7 @@ func TestResolveInstallSubdir(t *testing.T) {
 func TestResolveInstallSubdirEmptyProductInfo(t *testing.T) {
 	cases := []struct {
 		name          string
-		product       map[string]any
+		product       map[string]jsontext.Value
 		gamename      string
 		title         string
 		titleStripped string
@@ -197,42 +198,42 @@ func TestResolveInstallSubdirEmptyProductInfo(t *testing.T) {
 		},
 		{
 			name:          "empty product document",
-			product:       map[string]any{},
+			product:       docOf(map[string]any{}),
 			gamename:      "%gamename%",
 			title:         "%title%",
 			titleStripped: "%title_stripped%",
 		},
 		{
 			name:          "empty slug",
-			product:       map[string]any{"slug": "", "title": "A Title"},
+			product:       docOf(map[string]any{"slug": "", "title": "A Title"}),
 			gamename:      "%gamename%",
 			title:         "A Title",
 			titleStripped: "A Title",
 		},
 		{
 			name:          "null slug",
-			product:       map[string]any{"slug": nil, "title": "A Title"},
+			product:       docOf(map[string]any{"slug": nil, "title": "A Title"}),
 			gamename:      "%gamename%",
 			title:         "A Title",
 			titleStripped: "A Title",
 		},
 		{
 			name:          "empty title",
-			product:       map[string]any{"slug": "some_game", "title": ""},
+			product:       docOf(map[string]any{"slug": "some_game", "title": ""}),
 			gamename:      "some_game",
 			title:         "%title%",
 			titleStripped: "%title_stripped%",
 		},
 		{
 			name:          "null title",
-			product:       map[string]any{"slug": "some_game", "title": nil},
+			product:       docOf(map[string]any{"slug": "some_game", "title": nil}),
 			gamename:      "some_game",
 			title:         "%title%",
 			titleStripped: "%title_stripped%",
 		},
 		{
 			name:          "both empty",
-			product:       map[string]any{"slug": "", "title": ""},
+			product:       docOf(map[string]any{"slug": "", "title": ""}),
 			gamename:      "%gamename%",
 			title:         "%title%",
 			titleStripped: "%title_stripped%",
@@ -258,7 +259,7 @@ func TestResolveInstallSubdirEmptyProductInfo(t *testing.T) {
 
 	// The reason the literal rule exists, spelled out: the prefix case keeps
 	// its literal text instead of degrading to "/setup".
-	if got, err := ResolveInstallSubdir("%title%/setup", installManifest(), map[string]any{"slug": "some_game"}); err != nil {
+	if got, err := ResolveInstallSubdir("%title%/setup", installManifest(), docOf(map[string]any{"slug": "some_game"})); err != nil {
 		t.Fatalf("ResolveInstallSubdir: %v", err)
 	} else if got != "%title%/setup" {
 		t.Errorf("value = %q, want %q", got, "%title%/setup")
@@ -267,7 +268,7 @@ func TestResolveInstallSubdirEmptyProductInfo(t *testing.T) {
 	// The information templates are read only when the request needs them: a
 	// product document is not consulted for the other three names, so a request
 	// that needs no document cannot be broken by one.
-	if got, err := ResolveInstallSubdir("%product_id%", installManifest(), map[string]any{"slug": map[string]any{}}); err != nil {
+	if got, err := ResolveInstallSubdir("%product_id%", installManifest(), docOf(map[string]any{"slug": map[string]any{}})); err != nil {
 		t.Errorf("ResolveInstallSubdir(%s): %v", "%product_id%", err)
 	} else if got != "1495134320" {
 		t.Errorf("value = %q, want the manifest's base product id", got)
@@ -279,15 +280,15 @@ func TestResolveInstallSubdirEmptyProductInfo(t *testing.T) {
 func TestResolveInstallSubdirManifestShape(t *testing.T) {
 	cases := []struct {
 		name     string
-		manifest map[string]any
+		manifest map[string]jsontext.Value
 	}{
 		{name: "nil manifest", manifest: nil},
-		{name: "empty manifest", manifest: map[string]any{}},
+		{name: "empty manifest", manifest: docOf(map[string]any{})},
 		{
 			name:     "null members",
-			manifest: map[string]any{"installDirectory": nil, "baseProductId": nil},
+			manifest: docOf(map[string]any{"installDirectory": nil, "baseProductId": nil}),
 		},
-		{name: "unrelated manifest", manifest: map[string]any{"depots": []any{}}},
+		{name: "unrelated manifest", manifest: docOf(map[string]any{"depots": []any{}})},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -312,7 +313,7 @@ func TestResolveInstallSubdirManifestShape(t *testing.T) {
 			if key == "baseProductId" {
 				template = "%product_id%"
 			}
-			_, err := ResolveInstallSubdir(template, map[string]any{key: map[string]any{}}, nil)
+			_, err := ResolveInstallSubdir(template, docOf(map[string]any{key: map[string]any{}}), nil)
 			if err == nil {
 				t.Fatal("a structured member must be an error")
 			}
@@ -325,7 +326,7 @@ func TestResolveInstallSubdirManifestShape(t *testing.T) {
 	// The manifest is read whole, both entries before the template is consulted:
 	// a malformed baseProductId is an error even when the requested name does
 	// not use it.
-	if _, err := ResolveInstallSubdir("%install_dir%", map[string]any{"baseProductId": map[string]any{}}, nil); err == nil {
+	if _, err := ResolveInstallSubdir("%install_dir%", docOf(map[string]any{"baseProductId": map[string]any{}}), nil); err == nil {
 		t.Error("a malformed baseProductId must be an error whatever the template is")
 	}
 
@@ -336,7 +337,7 @@ func TestResolveInstallSubdirManifestShape(t *testing.T) {
 			if key == "title" {
 				template = "%title%"
 			}
-			_, err := ResolveInstallSubdir(template, installManifest(), map[string]any{key: []any{}})
+			_, err := ResolveInstallSubdir(template, installManifest(), docOf(map[string]any{key: []any{}}))
 			if err == nil {
 				t.Fatal("a structured product member must be an error")
 			}
@@ -348,7 +349,7 @@ func TestResolveInstallSubdirManifestShape(t *testing.T) {
 
 	// A malformed product document does not reach a template that does not read
 	// it, because the caller never fetches one for those.
-	if got, err := ResolveInstallSubdir("%install_dir%", installManifest(), map[string]any{"slug": []any{}}); err != nil {
+	if got, err := ResolveInstallSubdir("%install_dir%", installManifest(), docOf(map[string]any{"slug": []any{}})); err != nil {
 		t.Errorf("ResolveInstallSubdir(%s): %v", "%install_dir%", err)
 	} else if got != "The Witcher 3: Wild Hunt - GOTY" {
 		t.Errorf("value = %q, want the manifest's install directory", got)
@@ -381,7 +382,7 @@ func TestResolveInstallSubdirWithoutProduct(t *testing.T) {
 // gate belongs to the conversion, where a field's type decides the tree, not to
 // a path template).
 func TestResolveInstallSubdirErrorsAreNotSilent(t *testing.T) {
-	got, err := ResolveInstallSubdir("%gamename%", installManifest(), map[string]any{"slug": 42})
+	got, err := ResolveInstallSubdir("%gamename%", installManifest(), docOf(map[string]any{"slug": 42}))
 	if err != nil {
 		t.Fatalf("a numeric slug is read as a string: %v", err)
 	}
@@ -389,7 +390,7 @@ func TestResolveInstallSubdirErrorsAreNotSilent(t *testing.T) {
 		t.Errorf("value = %q, want the scalar rendered as its text", got)
 	}
 
-	if _, err := ResolveInstallSubdir("%install_dir%", map[string]any{"installDirectory": []any{}}, nil); err == nil {
+	if _, err := ResolveInstallSubdir("%install_dir%", docOf(map[string]any{"installDirectory": []any{}}), nil); err == nil {
 		t.Fatal("want an error for a structured installDirectory")
 	}
 }

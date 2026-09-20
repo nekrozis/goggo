@@ -3,6 +3,7 @@ package galaxy
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"net/http"
@@ -104,7 +105,7 @@ func TestProductSkipsExpansionWithoutDLCInformation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Product: %v", err)
 			}
-			if _, present := got["expanded_dlcs"]; present {
+			if got["expanded_dlcs"].Kind() != jsontext.KindInvalid {
 				t.Errorf("expanded_dlcs = %v, want the member absent", got["expanded_dlcs"])
 			}
 			if uris := f.requestURIs(); len(uris) != 1 {
@@ -144,12 +145,12 @@ func TestProductSkipsExpansionForNonObjectDLCs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Product must skip a non-object dlcs, not fail: %v", err)
 			}
-			if _, present := got["expanded_dlcs"]; present {
+			if got["expanded_dlcs"].Kind() != jsontext.KindInvalid {
 				t.Errorf("expanded_dlcs = %v, want the member absent (nothing was expanded)", got["expanded_dlcs"])
 			}
 			// The document is untouched apart from the missing injection: the
 			// guard is skipped and the response is returned as it arrived.
-			if got["slug"] != "game" {
+			if mustText(t, got["slug"]) != "game" {
 				t.Errorf("slug = %v, want the original value", got["slug"])
 			}
 			if uris := f.requestURIs(); len(uris) != 1 {
@@ -183,8 +184,8 @@ func TestProductExpandsDLCsInOneRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Product: %v", err)
 	}
-	dlcs, ok := got["expanded_dlcs"].([]any)
-	if !ok || len(dlcs) != 2 {
+	dlcs := mustArray(t, got["expanded_dlcs"])
+	if len(dlcs) != 2 {
 		t.Fatalf("expanded_dlcs = %v, want the two documents", got["expanded_dlcs"])
 	}
 	if uris := f.requestURIs(); len(uris) != 2 || uris[1] != "/expanded" {
@@ -192,7 +193,7 @@ func TestProductExpandsDLCsInOneRequest(t *testing.T) {
 	}
 	// The rest of the document is untouched: Product hands back what the API
 	// answered, it does not rebuild it.
-	if got["slug"] != "game" {
+	if mustText(t, got["slug"]) != "game" {
 		t.Errorf("slug = %v, want the original value", got["slug"])
 	}
 }
@@ -256,14 +257,14 @@ func TestProductBatchesDLCIDs(t *testing.T) {
 				t.Errorf("batch sizes = %v, want %v", sizes, tc.batches)
 			}
 
-			docs, ok := got["expanded_dlcs"].([]any)
-			if !ok || len(docs) != tc.count {
+			docs := mustArray(t, got["expanded_dlcs"])
+			if len(docs) != tc.count {
 				t.Fatalf("expanded_dlcs has %d entries, want %d", len(docs), tc.count)
 			}
 			for i, doc := range docs {
-				entry, _ := doc.(map[string]any)
-				if entry["id"] != ids[i] {
-					t.Fatalf("expanded_dlcs[%d].id = %v, want %v (order must survive batching)", i, entry["id"], ids[i])
+				entry := mustObject(t, doc)
+				if got := mustText(t, entry["id"]); got != ids[i] {
+					t.Fatalf("expanded_dlcs[%d].id = %v, want %v (order must survive batching)", i, got, ids[i])
 				}
 			}
 		})
@@ -325,8 +326,8 @@ func TestProductExpandsNumericDLCIDs(t *testing.T) {
 	if batches[0][0] != "1523284508" || batches[0][1] != "1523284509" {
 		t.Errorf("first ids = %q,%q, want the numeric ids stringified", batches[0][0], batches[0][1])
 	}
-	docs, ok := got["expanded_dlcs"].([]any)
-	if !ok || len(docs) != total {
+	docs := mustArray(t, got["expanded_dlcs"])
+	if len(docs) != total {
 		t.Fatalf("expanded_dlcs = %v, want %d documents", got["expanded_dlcs"], total)
 	}
 }
@@ -381,8 +382,8 @@ func TestProductSkipsTheRequestForAnUnusableExpansionURL(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Product: %v", err)
 			}
-			docs, ok := got["expanded_dlcs"].([]any)
-			if !ok || len(docs) != 0 {
+			docs := mustArray(t, got["expanded_dlcs"])
+			if len(docs) != 0 {
 				t.Errorf("expanded_dlcs = %v, want an empty array", got["expanded_dlcs"])
 			}
 			if uris := f.requestURIs(); len(uris) != 1 {
@@ -488,8 +489,8 @@ func TestDecodeDocumentTakesArraysWhileResponseJSONRefusesThem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeDocument(array) = %v, want success", err)
 	}
-	if _, ok := v.([]any); !ok {
-		t.Errorf("decodeDocument(array) = %T, want []any", v)
+	if v.Kind() != jsontext.KindBeginArray {
+		t.Errorf("decodeDocument(array) = %s, want an array", jsonKind(v))
 	}
 
 	if _, err := decodeJSONObject(body); !errors.Is(err, ErrNotJSON) {
@@ -511,8 +512,8 @@ func TestDecodeDocumentHandlesZlibArraysAndObjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeDocument(zlib array) = %v, want success", err)
 	}
-	if _, ok := v.([]any); !ok {
-		t.Errorf("decodeDocument(zlib array) = %T, want []any", v)
+	if v.Kind() != jsontext.KindBeginArray {
+		t.Errorf("decodeDocument(zlib array) = %s, want an array", jsonKind(v))
 	}
 
 	if _, err := decodeJSONObject(zlibBody(t, `[{"id":"2"}]`)); !errors.Is(err, ErrNotJSON) {
@@ -523,7 +524,7 @@ func TestDecodeDocumentHandlesZlibArraysAndObjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeDocument(zlib object) = %v, want success", err)
 	}
-	if _, ok := obj.(map[string]any); !ok {
-		t.Errorf("decodeDocument(zlib object) = %T, want map[string]any", obj)
+	if obj.Kind() != jsontext.KindBeginObject {
+		t.Errorf("decodeDocument(zlib object) = %s, want an object", jsonKind(obj))
 	}
 }

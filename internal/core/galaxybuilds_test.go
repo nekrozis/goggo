@@ -305,7 +305,7 @@ func TestSortProductBuildsLeavesUnknownOrdersAlone(t *testing.T) {
 		doc := map[string]any{"items": []any{
 			map[string]any{"build_id": "a"}, map[string]any{"build_id": "b"},
 		}}
-		got, err := d.sortProductBuilds(doc)
+		got, err := d.sortProductBuilds(docOf(doc))
 		if err != nil {
 			t.Fatalf("sortProductBuilds(%q): %v", order, err)
 		}
@@ -313,8 +313,8 @@ func TestSortProductBuildsLeavesUnknownOrdersAlone(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildItems: %v", err)
 		}
-		first, ok := items[0].(map[string]any)
-		if len(items) != 2 || !ok || first["build_id"] != "a" {
+		first := mustObject(t, items[0])
+		if len(items) != 2 || mustText(t, first["build_id"]) != "a" {
 			t.Errorf("order %q reordered the list: %v", order, items)
 		}
 	}
@@ -327,11 +327,11 @@ func TestSortProductBuildsShapeErrors(t *testing.T) {
 	// A missing or null list is no builds at all; a wrong shape is a protocol
 	// error (the tier the depot step established).
 	for _, doc := range []map[string]any{{}, {"items": nil}} {
-		if _, err := d.sortProductBuilds(doc); err != nil {
+		if _, err := d.sortProductBuilds(docOf(doc)); err != nil {
 			t.Errorf("doc %v must read as empty, got %v", doc, err)
 		}
 	}
-	if _, err := d.sortProductBuilds(map[string]any{"items": map[string]any{}}); err == nil {
+	if _, err := d.sortProductBuilds(docOf(map[string]any{"items": map[string]any{}})); err == nil {
 		t.Error("a non-array items value must be an error")
 	}
 }
@@ -354,7 +354,7 @@ func TestBuildIndexFor(t *testing.T) {
 		{"2x", -1}, // a partial integer is not an index
 	}
 	for _, c := range cases {
-		got, err := buildIndexFor(items, c.buildID)
+		got, err := buildIndexFor(valuesOf(items), c.buildID)
 		if err != nil {
 			t.Fatalf("buildIndexFor(%q): %v", c.buildID, err)
 		}
@@ -363,7 +363,7 @@ func TestBuildIndexFor(t *testing.T) {
 		}
 	}
 
-	if _, err := buildIndexFor([]any{"not an object"}, ""); err == nil {
+	if _, err := buildIndexFor(valuesOf([]any{"not an object"}), ""); err == nil {
 		t.Error("a non-object entry must be an error")
 	}
 }
@@ -655,16 +655,16 @@ func TestShowBuildsShapeErrors(t *testing.T) {
 // TestEndpointNamesShapeErrors covers the tier on the secure link document: a
 // missing or null "urls" is no endpoints, a wrong shape is an error.
 func TestEndpointNamesShapeErrors(t *testing.T) {
-	if names, err := endpointNames(map[string]any{}); err != nil || names != nil {
+	if names, err := endpointNames(docOf(map[string]any{})); err != nil || names != nil {
 		t.Errorf("endpointNames(empty) = %v, %v; want no names and no error", names, err)
 	}
-	if names, err := endpointNames(map[string]any{"urls": nil}); err != nil || names != nil {
+	if names, err := endpointNames(docOf(map[string]any{"urls": nil})); err != nil || names != nil {
 		t.Errorf("endpointNames(null) = %v, %v; want no names and no error", names, err)
 	}
-	if _, err := endpointNames(map[string]any{"urls": map[string]any{}}); err == nil {
+	if _, err := endpointNames(docOf(map[string]any{"urls": map[string]any{}})); err == nil {
 		t.Error("a non-array urls value must be an error")
 	}
-	if _, err := endpointNames(map[string]any{"urls": []any{"not an object"}}); err == nil {
+	if _, err := endpointNames(docOf(map[string]any{"urls": []any{"not an object"}})); err == nil {
 		t.Error("a non-object entry must be an error")
 	}
 }

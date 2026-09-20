@@ -168,7 +168,7 @@ func TestGzipBodyIsDecodedTransparently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getResponseJSON: %v", err)
 	}
-	if got["generation"] != float64(2) {
+	if mustInt(t, got["generation"]) != 2 {
 		t.Errorf("generation = %#v, want 2", got["generation"])
 	}
 }

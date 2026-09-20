@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"os"
 	"path/filepath"
@@ -25,7 +26,7 @@ type fakeFetcher struct {
 	pageErr    error
 	owned      []string
 	ownedErr   error
-	details    map[string]map[string]any
+	details    map[string]map[string]jsontext.Value
 	detailsErr map[string]error
 	detailIDs  []string
 }
@@ -43,7 +44,7 @@ func (f *fakeFetcher) FilteredProductsPage(_ context.Context, q webapi.ProductQu
 	return pg, nil
 }
 
-func (f *fakeFetcher) GameDetailsJSON(_ context.Context, gameID string) (map[string]any, error) {
+func (f *fakeFetcher) GameDetailsJSON(_ context.Context, gameID string) (map[string]jsontext.Value, error) {
 	f.detailIDs = append(f.detailIDs, gameID)
 	if err, ok := f.detailsErr[gameID]; ok {
 		return nil, err
@@ -56,16 +57,16 @@ func (f *fakeFetcher) OwnedGameIDs(context.Context) ([]string, error) {
 }
 
 // product builds a raw product map; extra merges additional members.
-func product(slug string, id any, extra map[string]any) map[string]any {
+func product(slug string, id any, extra map[string]any) map[string]jsontext.Value {
 	p := map[string]any{"slug": slug, "id": id}
 	for k, v := range extra {
 		p[k] = v
 	}
-	return p
+	return docOf(p)
 }
 
 // onePage wraps products in a single terminal page.
-func onePage(products ...map[string]any) []webapi.ProductPage {
+func onePage(products ...map[string]jsontext.Value) []webapi.ProductPage {
 	return []webapi.ProductPage{{Page: 1, TotalPages: 1, Products: products}}
 }
 
@@ -214,9 +215,9 @@ func TestListNewOnlyAndGameFilters(t *testing.T) {
 // TestListHiddenPass walks the two-round pagination of the hidden-products pass.
 func TestListHiddenPass(t *testing.T) {
 	ff := &fakeFetcher{pages: []webapi.ProductPage{
-		{Page: 1, TotalPages: 1, Products: []map[string]any{product("zeta", float64(1), nil)}},
-		{Page: 1, TotalPages: 2, Products: []map[string]any{product("beta", float64(2), nil)}},
-		{Page: 2, TotalPages: 2, Products: []map[string]any{product("alpha", float64(3), nil)}},
+		{Page: 1, TotalPages: 1, Products: []map[string]jsontext.Value{product("zeta", float64(1), nil)}},
+		{Page: 1, TotalPages: 2, Products: []map[string]jsontext.Value{product("beta", float64(2), nil)}},
+		{Page: 2, TotalPages: 2, Products: []map[string]jsontext.Value{product("alpha", float64(3), nil)}},
 	}}
 	res := list(t, ff, ListOptions{IncludeHidden: true, Updated: true})
 
@@ -296,12 +297,12 @@ func TestListInvalidRegexFailsBeforeFetching(t *testing.T) {
 // TestListDLCEnrichment covers the two triggers, the GFDLC gate and the
 // soft-skip behaviour.
 func TestListDLCEnrichment(t *testing.T) {
-	details := map[string]map[string]any{
-		"1": {"dlcs": []any{
+	details := map[string]map[string]jsontext.Value{
+		"1": {"dlcs": rawOf([]any{
 			map[string]any{"manualUrl": "https://www.gog.com/downloads/dlc_one/x"},
 			map[string]any{"manualUrl": "https://www.gog.com/downloads/dlc_two/y"},
 			map[string]any{"manualUrl": "https://www.gog.com/downloads/dlc_one/z"},
-		}},
+		})},
 	}
 
 	t.Run("dlcCount triggers", func(t *testing.T) {

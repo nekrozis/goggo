@@ -861,7 +861,7 @@ func TestGameDetailsIsCompleteOrNothing(t *testing.T) {
 			name:     "a name that matches no product",
 			products: []string{"no_such_game"},
 			setUp:    func(t *testing.T, f *gameInfoFixture) {},
-			wantErr:  msgNoProducts,
+			wantErr:  `no product named "no_such_game"`,
 		},
 		{
 			name:     "no products at all",

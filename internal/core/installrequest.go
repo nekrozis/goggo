@@ -25,6 +25,11 @@ type InstallRequest struct {
 
 	Arch                uint32
 	IncludeDependencies bool
+
+	// RefMode says how ProductID is read. It travels with the request because
+	// the same reference means two different things under --regex, and nothing
+	// downstream may re-derive which one the user asked for.
+	RefMode ProductRefMode
 }
 
 // NewInstallRequest resolves the effective configuration into a request.
@@ -33,7 +38,7 @@ type InstallRequest struct {
 // applied, and none of them is a command-line string: the front end parses the
 // options, it does not decide what the English language expression or the
 // "windows" platform segment are.
-func NewInstallRequest(cfg config.Config, productID, buildID string) InstallRequest {
+func NewInstallRequest(cfg config.Config, productID, buildID string, refMode ProductRefMode) InstallRequest {
 	download := cfg.DownloadConfig
 	return InstallRequest{
 		ProductID:      productID,
@@ -44,6 +49,8 @@ func NewInstallRequest(cfg config.Config, productID, buildID string) InstallRequ
 
 		Arch:                download.GalaxyArch,
 		IncludeDependencies: download.GalaxyDependencies,
+
+		RefMode: refMode,
 	}
 }
 

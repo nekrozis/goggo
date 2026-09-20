@@ -23,7 +23,7 @@ func installTestConfig(t *testing.T) config.Config {
 // TestNewInstallRequestResolvesValues locks that the request carries resolved
 // values: the architecture is a flag, not the "x64" the user typed.
 func TestNewInstallRequestResolvesValues(t *testing.T) {
-	req := NewInstallRequest(installTestConfig(t), "1495134320", "2")
+	req := NewInstallRequest(installTestConfig(t), "1495134320", "2", ProductRefExact)
 
 	if req.ProductID != "1495134320" || req.BuildID != "2" {
 		t.Errorf("product/build = %q/%q, want 1495134320/2", req.ProductID, req.BuildID)
@@ -59,7 +59,7 @@ func TestNewInstallRequestPlatform(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			cfg := installTestConfig(t)
 			cfg.DownloadConfig.GalaxyPlatform = c.mask
-			if got := NewInstallRequest(cfg, "1", "").Platform; got != c.want {
+			if got := NewInstallRequest(cfg, "1", "", ProductRefExact).Platform; got != c.want {
 				t.Errorf("platform = %q, want %q", got, c.want)
 			}
 		})
@@ -91,7 +91,7 @@ func TestNewInstallRequestLanguage(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			cfg := installTestConfig(t)
 			cfg.DownloadConfig.GalaxyLanguage = c.flag
-			if got := NewInstallRequest(cfg, "1", "").LanguageRegex; got != c.want {
+			if got := NewInstallRequest(cfg, "1", "", ProductRefExact).LanguageRegex; got != c.want {
 				t.Errorf("language regex = %q, want %q", got, c.want)
 			}
 		})
@@ -103,7 +103,7 @@ func TestNewInstallRequestLanguage(t *testing.T) {
 func TestNewInstallRequestDependencies(t *testing.T) {
 	cfg := installTestConfig(t)
 	cfg.DownloadConfig.GalaxyDependencies = false
-	if NewInstallRequest(cfg, "1", "").IncludeDependencies {
+	if NewInstallRequest(cfg, "1", "", ProductRefExact).IncludeDependencies {
 		t.Error("IncludeDependencies = true, want false when the setting is off")
 	}
 }

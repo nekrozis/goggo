@@ -161,7 +161,7 @@ func TestInstallEndToEnd(t *testing.T) {
 	d.token.SetJSON(map[string]any{
 		"access_token": "at", "refresh_token": "rt", "expires_in": 3600, "user_id": "u1",
 	})
-	if err := d.Install(context.Background(), NewInstallRequest(cfg, planProductID, "")); err != nil {
+	if err := d.Install(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact)); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 
@@ -300,7 +300,9 @@ func TestInstallPublishesProgressThroughTheRun(t *testing.T) {
 	})
 
 	done := make(chan error, 1)
-	go func() { done <- d.Install(context.Background(), NewInstallRequest(cfg, planProductID, "")) }()
+	go func() {
+		done <- d.Install(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
+	}()
 
 	select {
 	case <-gate.arrived:
@@ -356,7 +358,7 @@ func TestInstallRequestCarriesContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	req := NewInstallRequest(cfg, planProductID, "")
+	req := NewInstallRequest(cfg, planProductID, "", ProductRefExact)
 	if err := d.Install(ctx, req); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want the context cancellation", err)
 	}

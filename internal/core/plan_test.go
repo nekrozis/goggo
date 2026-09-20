@@ -212,7 +212,7 @@ func TestBuildPlanFullChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req := NewInstallRequest(cfg, planProductID, "")
+	req := NewInstallRequest(cfg, planProductID, "", ProductRefExact)
 	res, err := d.BuildPlan(context.Background(), req)
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
@@ -330,7 +330,7 @@ func TestBuildPlanContainerDroppedWhenInstalled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req := NewInstallRequest(cfg, planProductID, "")
+	req := NewInstallRequest(cfg, planProductID, "", ProductRefExact)
 	res, err := d.BuildPlan(context.Background(), req)
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
@@ -361,7 +361,7 @@ func TestBuildPlanGenerationGate(t *testing.T) {
 	cfg := planTestConfig(t)
 	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
 
-	res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, ""))
+	res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestBuildPlanLinuxFallback(t *testing.T) {
 	cfg.DownloadConfig.GalaxyPlatform = config.PlatformLinux
 	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
 
-	req := NewInstallRequest(cfg, planProductID, "")
+	req := NewInstallRequest(cfg, planProductID, "", ProductRefExact)
 	res, err := d.BuildPlan(context.Background(), req)
 	if err == nil || !errors.Is(err, ErrNotImplemented) {
 		t.Fatalf("err = %v, want ErrNotImplemented", err)
@@ -415,7 +415,7 @@ func TestBuildPlanFreeSpaceGate(t *testing.T) {
 	f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(planDepotHashDLC), huge)
 
 	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
-	res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, ""))
+	res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
 	if err == nil || !strings.Contains(err.Error(), "not enough free space") {
 		t.Fatalf("err = %v, want the free-space failure", err)
 	}
@@ -428,7 +428,7 @@ func TestBuildPlanFreeSpaceGate(t *testing.T) {
 	// Downloader is constructed.
 	cfg.DownloadConfig.FreeSpaceCheck = false
 	d2 := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
-	if _, err := d2.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "")); err != nil {
+	if _, err := d2.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact)); err != nil {
 		t.Fatalf("BuildPlan with the gate off: %v", err)
 	}
 }
@@ -447,7 +447,7 @@ func TestBuildPlanBlacklistFiltersTasks(t *testing.T) {
 	cfg.BlacklistFilePath = blPath
 	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
 
-	res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, ""))
+	res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -477,6 +477,38 @@ func TestBuildPlanBlacklistFiltersTasks(t *testing.T) {
 // The tokens are the contract — the decision word and the values it reports —
 // and the sentence around them is not. A token with a leading space pins a
 // count as a whole one, so "12 files" cannot satisfy " 2 files".
+// TestBuildPlanStopsOnAnUnresolvedReference locks the guard on the product
+// reference: a name that resolves to nothing fails the plan with the reason,
+// instead of carrying an empty product id into the builds request and reporting
+// whatever /products//os/... answered.
+func TestBuildPlanStopsOnAnUnresolvedReference(t *testing.T) {
+	f := newPlanFixture(t)
+	f.set("/www/user/data/games", `{"owned":["`+planProductID+`"]}`)
+	f.set("/www/account/getFilteredProducts",
+		`{"page":1,"totalPages":1,"products":[{"id":"`+planProductID+`","slug":"some_other_game"}]}`)
+	cfg := planTestConfig(t)
+	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+
+	res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, "no_such_game", "", ProductRefExact))
+	if err == nil {
+		t.Fatalf("BuildPlan = %+v, want a failure for a reference that matches no product", res)
+	}
+	if want := `no product named "no_such_game"`; !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %v, want it to mention %q", err, want)
+	}
+	// The reason is the failure, so it is not also queued as a notice: the user
+	// would read the same sentence twice.
+	if len(res.Messages) != 0 {
+		t.Errorf("messages = %v, want none", res.Messages)
+	}
+	if got := f.seen("/builds"); got != 0 {
+		t.Errorf("build requests = %d, want none: the reference never resolved", got)
+	}
+	if got := f.seen("/products/"); got != 0 {
+		t.Errorf("product requests = %d, want none: an unresolved reference must not become a request for an empty id", got)
+	}
+}
+
 func planMessageHas(res PlanResult, tokens ...string) bool {
 	for _, m := range res.Messages {
 		all := true
@@ -544,7 +576,7 @@ func TestBuildPlanSkipAggregation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, ""))
+	res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -573,7 +605,7 @@ func TestBuildPlanSkipAggregation(t *testing.T) {
 	// config at construction, so the verbose run needs a fresh one.
 	cfg.MsgLevel = msgLevelVerbose
 	dv := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
-	res, err = dv.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, ""))
+	res, err = dv.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
 	if err != nil {
 		t.Fatalf("BuildPlan verbose: %v", err)
 	}
@@ -613,7 +645,7 @@ func TestBuildPlanNothingToDownload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, ""))
+	res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -696,7 +728,7 @@ func TestBuildPlanInstallDirTemplateNeedsProductInfo(t *testing.T) {
 			// of a test about the install directory.
 			d.token.SetJSON(map[string]any{"access_token": "a", "refresh_token": "r", "expires_in": 3600})
 
-			res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, ""))
+			res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
 			if err != nil {
 				t.Fatalf("BuildPlan: %v", err)
 			}

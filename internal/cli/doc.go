@@ -174,16 +174,26 @@ func (c *console) readLine() (string, error) {
 // non-interactive run still sees the candidates it could not choose from. The
 // prompt and the retry message go to stderr, and an unparsable answer is
 // answered with what to type rather than an error code.
+//
+// During an install the live frame owns the terminal, so the prompt suspends it
+// first: the frame comes down and stops being painted, which is what keeps the
+// candidate list from being erased by the next repaint. Outside an install
+// there is no frame and the streams are the plain ones.
 func (c *console) SelectProduct(items []string) (int, error) {
-	fmt.Fprintln(c.out, "Select product:")
+	if c.coord != nil {
+		c.coord.suspend()
+		defer c.coord.resume()
+	}
+	out, errOut := c.Out(), c.ErrOut()
+	fmt.Fprintln(out, "Select product:")
 	for i, name := range items {
-		fmt.Fprintf(c.out, "%d: %s\n", i, name)
+		fmt.Fprintf(out, "%d: %s\n", i, name)
 	}
 	if !c.IsTerminal() {
 		return 0, fmt.Errorf("no terminal to read the selection from")
 	}
 	for {
-		fmt.Fprint(c.errOut, "> ")
+		fmt.Fprint(errOut, "> ")
 		line, err := c.readLine()
 		if err != nil {
 			return 0, err
@@ -191,6 +201,6 @@ func (c *console) SelectProduct(items []string) (int, error) {
 		if n, err := strconv.Atoi(strings.TrimSpace(line)); err == nil && n >= 0 && n < len(items) {
 			return n, nil
 		}
-		fmt.Fprintln(c.errOut, "invalid selection")
+		fmt.Fprintln(errOut, "invalid selection")
 	}
 }

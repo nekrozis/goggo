@@ -23,11 +23,16 @@ const defaultInfoThreads = 4
 // GameDetailsRequest is one acquisition run's input.
 type GameDetailsRequest struct {
 	// Products are the products to fetch: a numeric id passes through, anything
-	// else is a game name looked up in the account's product list, with the
-	// interactive selection a name gets elsewhere in this package
-	// (selectProductID). An empty list is a caller error rather than an empty
-	// answer: an empty result would read as "these products have no files".
+	// else is a game name looked up in the account's product list the way
+	// RefMode asks, with the interactive selection a name gets elsewhere in
+	// this package (selectProductID). An empty list is a caller error rather
+	// than an empty answer: an empty result would read as "these products have
+	// no files".
 	Products []string
+
+	// RefMode says how Products are read: by slug, or as the expression --regex
+	// selects.
+	RefMode ProductRefMode
 
 	// InfoThreads is how many fetches run at once; zero means the run's
 	// setting. It is NOT --threads — that one is the download concurrency, whose
@@ -57,7 +62,7 @@ func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([
 
 	ids := make([]string, 0, len(req.Products))
 	for _, product := range req.Products {
-		id, notice, err := d.selectProductID(ctx, product)
+		id, notice, err := d.selectProductID(ctx, product, req.RefMode)
 		if err != nil {
 			return nil, err
 		}
@@ -142,8 +147,8 @@ func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([
 // An empty products list means the WHOLE account. Unlike a download there is no
 // transfer behind it, so the implicit enumeration is allowed here and only
 // here: acquisition reads, it never writes and never downloads.
-func (d *Downloader) ListGameDetails(ctx context.Context, products []string) ([]gamedetails.GameDetails, error) {
-	games, err := d.acquireForList(ctx, products)
+func (d *Downloader) ListGameDetails(ctx context.Context, products []string, mode ProductRefMode) ([]gamedetails.GameDetails, error) {
+	games, err := d.acquireForList(ctx, products, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -156,11 +161,13 @@ func (d *Downloader) ListGameDetails(ctx context.Context, products []string) ([]
 	return games, nil
 }
 
-func (d *Downloader) acquireForList(ctx context.Context, products []string) ([]gamedetails.GameDetails, error) {
+func (d *Downloader) acquireForList(ctx context.Context, products []string, mode ProductRefMode) ([]gamedetails.GameDetails, error) {
 	if len(products) > 0 {
-		return d.GameDetails(ctx, GameDetailsRequest{Products: products})
+		return d.GameDetails(ctx, GameDetailsRequest{Products: products, RefMode: mode})
 	}
-	res, err := catalog.List(ctx, d.web, d.gameListOptions(""))
+	// No products named: the whole account is listed, and the listing carries no
+	// reference for a mode to read.
+	res, err := catalog.List(ctx, d.web, d.accountListOptions())
 	if err != nil {
 		return nil, err
 	}

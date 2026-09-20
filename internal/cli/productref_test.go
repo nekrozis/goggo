@@ -1,0 +1,212 @@
+package cli
+
+import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/core"
+)
+
+// TestRegexIsAcceptedWhereAReferenceIsRead locks the option's surface against
+// the tree: every command that takes a positional reference accepts --regex, and
+// no other command does. The arity table decides which is which, so a command
+// that reads a reference but forgets the option fails here instead of at a
+// user's terminal.
+func TestRegexIsAcceptedWhereAReferenceIsRead(t *testing.T) {
+	var walk func(path []string, nodes []commandNode)
+	references, others := 0, 0
+	walk = func(path []string, nodes []commandNode) {
+		for _, n := range nodes {
+			here := append(append([]string{}, path...), n.name)
+			if len(n.children) != 0 && n.id == cmdNone {
+				walk(here, n.children)
+				continue
+			}
+			if n.id != cmdNone {
+				_, count := commandArity(n.id)
+				args := append([]string{}, here...)
+				if count != 0 {
+					args = append(args, "some_game")
+				}
+				args = append(args, "--regex")
+				_, err := parseArgs(args, baseConfig())
+				if count != 0 {
+					references++
+					if err != nil {
+						t.Errorf("%s --regex: %v, want a command that reads a reference to accept it",
+							strings.Join(here, " "), err)
+					}
+				} else {
+					others++
+					if err == nil {
+						t.Errorf("%s --regex: accepted, want a usage error", strings.Join(here, " "))
+					}
+				}
+			}
+			if len(n.children) != 0 {
+				walk(here, n.children)
+			}
+		}
+	}
+	walk(nil, commandTree)
+	if references < 2 || others < 2 {
+		t.Fatalf("walked %d reference commands and %d others: the walk is wrong, not the option", references, others)
+	}
+}
+
+// TestReferenceModeIsWhatTheFlagSays locks the two readings the flag selects: the
+// product's own name by default, an expression under --regex.
+func TestReferenceModeIsWhatTheFlagSays(t *testing.T) {
+	if got := productRefMode(mustParse(t, "install", "some_game")); got != core.ProductRefExact {
+		t.Errorf("install without --regex: mode = %v, want the exact read", got)
+	}
+	if got := productRefMode(mustParse(t, "install", "some_game", "--regex")); got != core.ProductRefRegex {
+		t.Errorf("install --regex: mode = %v, want the expression read", got)
+	}
+}
+
+// newReferenceFixture answers a session and an account with two products whose
+// slugs share the word "Game", so the two readings of one reference differ
+// observably: the exact read finds no product called "Game", the expression
+// matches both and has to ask. It writes the token file itself, because a
+// reference is only read after a session exists.
+func newReferenceFixture(t *testing.T) core.Dependencies {
+	t.Helper()
+	isolateRoots(t)
+	home, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir: %v", err)
+	}
+	dir := filepath.Join(home, config.ProgramName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	token := fmt.Sprintf(`{"access_token":"at","refresh_token":"rt","expires_at":%d,"user_id":"u1"}`,
+		time.Now().Add(time.Hour).Unix())
+	if err := os.WriteFile(filepath.Join(dir, "galaxy_tokens.json"), []byte(token), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/www/account":
+			fmt.Fprint(w, "account")
+		case "/www/user/data/games":
+			fmt.Fprint(w, `{"owned":["555","556"]}`)
+		case "/www/account/getFilteredProducts":
+			fmt.Fprint(w, `{"page":1,"totalPages":1,"products":[`+
+				`{"id":"555","slug":"Some Game A"},{"id":"556","slug":"Some Game B"}]}`)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse fixture URL: %v", err)
+	}
+	return core.Dependencies{HTTPTransport: &hostRedirectTransport{target: target}}
+}
+
+// TestReferenceReadReachesTheSelector locks the hop from the flag to the
+// selector on every command that reads a reference: one argument resolves as a
+// product's name without --regex and as an expression with it, which shows up as
+// the different failure each reading reports. A dispatch that dropped the mode
+// would answer both readings the same way.
+func TestReferenceReadReachesTheSelector(t *testing.T) {
+	// Each entry is a command that reads a reference, with the arguments its
+	// arity needs. orphans remove is driven with --yes because the destructive
+	// authorization is asked for before the walk, not after it.
+	cases := [][]string{
+		{"install", "Game"},
+		{"verify", "Game"},
+		{"orphans", "check", "Game"},
+		{"orphans", "remove", "Game", "--yes"},
+		{"list", "details", "Game"},
+		{"list", "json", "Game"},
+		{"show", "builds", "Game"},
+		{"show", "manifest", "Game"},
+		{"show", "cdns", "Game"},
+		{"download", "Game"},
+		{"download", "file", "Game/1"},
+	}
+	for _, base := range cases {
+		t.Run(strings.Join(base, " "), func(t *testing.T) {
+			deps := newReferenceFixture(t)
+
+			_, _, errOut := runReference(t, deps, base...)
+			if want := `no product named "Game"`; !strings.Contains(errOut, want) {
+				t.Errorf("without --regex: stderr = %q, want it to report %q", errOut, want)
+			}
+
+			withRegex := append(append([]string{}, base...), "--regex")
+			_, _, errOut = runReference(t, deps, withRegex...)
+			if want := "Unable to read selection"; !strings.Contains(errOut, want) {
+				t.Errorf("--regex: stderr = %q, want %q: the expression matched both products and had to ask",
+					errOut, want)
+			}
+		})
+	}
+}
+
+// TestExactReferenceResolvesThroughTheAccount locks the other half of the
+// default read end to end: the product's own name is what reaches the work, so
+// the command runs instead of failing to resolve.
+func TestExactReferenceResolvesThroughTheAccount(t *testing.T) {
+	deps := newReferenceFixture(t)
+
+	code, _, errOut := runReference(t, deps, "list", "details", "Some Game A")
+	if code != 0 {
+		t.Errorf("exit = %d, want 0 for a name the account holds:\n%s", code, errOut)
+	}
+}
+
+// TestZeroMatchExitCodes locks the decided split between the two families: a
+// reference that resolves to nothing is an operational failure for the commands
+// that go on to do work, and the notice IS the answer for the commands that only
+// display one. "There is nothing to show" and "the command could not do what it
+// was asked" are different categories, so the exit codes differ on purpose.
+func TestZeroMatchExitCodes(t *testing.T) {
+	cases := []struct {
+		args []string
+		want int
+	}{
+		{args: []string{"install", "Game"}, want: 1},
+		{args: []string{"verify", "Game"}, want: 1},
+		{args: []string{"orphans", "check", "Game"}, want: 1},
+		{args: []string{"orphans", "remove", "Game", "--yes"}, want: 1},
+		{args: []string{"list", "details", "Game"}, want: 1},
+		{args: []string{"list", "json", "Game"}, want: 1},
+		{args: []string{"download", "Game"}, want: 1},
+		{args: []string{"download", "file", "Game/1"}, want: 1},
+		{args: []string{"show", "builds", "Game"}, want: 0},
+		{args: []string{"show", "manifest", "Game"}, want: 0},
+		{args: []string{"show", "cdns", "Game"}, want: 0},
+	}
+	for _, c := range cases {
+		t.Run(strings.Join(c.args, " "), func(t *testing.T) {
+			deps := newReferenceFixture(t)
+			code, _, errOut := runReference(t, deps, c.args...)
+			if code != c.want {
+				t.Errorf("exit = %d, want %d:\n%s", code, c.want, errOut)
+			}
+		})
+	}
+}
+
+// runReference drives one command line through the real dispatcher.
+func runReference(t *testing.T, deps core.Dependencies, args ...string) (int, string, string) {
+	t.Helper()
+	var out, errOut strings.Builder
+	code := runWithDeps(args, strings.NewReader(""), &out, &errOut, deps)
+	return code, out.String(), errOut.String()
+}

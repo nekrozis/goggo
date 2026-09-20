@@ -49,7 +49,7 @@ func TestCompileFilters(t *testing.T) {
 			t.Fatalf("CompileFilters: %v", err)
 		}
 		if len(f.Games) != 1 || !f.Games[0].MatchString("alpha") {
-			t.Errorf("games = %v, want only the --game-regex", f.Games)
+			t.Errorf("games = %v, want only the --game", f.Games)
 		}
 		if f.IgnoreDLCCount != nil {
 			t.Error("IgnoreDLCCount should be nil")
@@ -57,8 +57,16 @@ func TestCompileFilters(t *testing.T) {
 	})
 
 	t.Run("invalid game regex", func(t *testing.T) {
-		if _, err := CompileFilters("(", "", ""); err == nil {
-			t.Error("want error")
+		_, err := CompileFilters("(", "", "")
+		if err == nil {
+			t.Fatal("want error")
+		}
+		// The message has to name the flag the user typed, and that spelling
+		// lives in the CLI's option table (internal/cli: --game). A diagnostic
+		// naming a flag the binary does not accept is worse than none, so the
+		// prefix is pinned whole: "--game-regex" fails here.
+		if !strings.Contains(err.Error(), "catalog: --game:") {
+			t.Errorf("error %q should name the flag it came from", err)
 		}
 	})
 

@@ -40,6 +40,11 @@ const (
 	optLanguage
 	optArch
 
+	// How the positional product argument is read (see productRefOptions). It
+	// belongs with the target, not with the listing filters: --game filters a
+	// listing, --regex only says what the argument means.
+	optRegex
+
 	// install only.
 	optThreads
 	optProgressInterval
@@ -270,6 +275,14 @@ var optionTable = append([]optionSpec{
 			inv.cfg.DownloadConfig.GalaxyArch = arch
 			return nil
 		},
+	},
+
+	{
+		id: optRegex, long: "regex",
+		summary: "Read the game argument as a regular expression",
+		detail: "Without it the argument must be a product name exactly as\n" +
+			"\"list games\" prints it.",
+		parse: func(inv *invocation, _ string) error { inv.productRefRegex = true; return nil },
 	},
 
 	{

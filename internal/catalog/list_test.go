@@ -286,7 +286,7 @@ func TestListPropagatesPageError(t *testing.T) {
 func TestListInvalidRegexFailsBeforeFetching(t *testing.T) {
 	ff := &fakeFetcher{}
 	if _, err := List(context.Background(), ff, ListOptions{GameRegex: "("}); err == nil {
-		t.Fatal("List: want error for an invalid --game-regex")
+		t.Fatal("List: want error for an invalid --game")
 	}
 	if len(ff.pageCalls) != 0 || ff.detailIDs != nil || ff.owned != nil {
 		t.Errorf("fetcher was used before validation: %+v", ff.pageCalls)

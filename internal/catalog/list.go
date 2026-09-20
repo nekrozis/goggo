@@ -4,7 +4,7 @@
 // DLC names.
 //
 // The HTTP primitives stay in internal/webapi and the business filtering lives here,
-// so the transport layer never learns about --game-regex, --new or --include. The
+// so the transport layer never learns about --game, --new or --include. The
 // per-game configuration file override of the DLC-count rule is not implemented here.
 package catalog
 
@@ -34,7 +34,7 @@ type ListOptions struct {
 	// Tags is forwarded to the products query, already split on commas.
 	Tags []string
 
-	// GameRegex is --game-regex; FilterListPath is --game-list-file (used only
+	// GameRegex is --game; FilterListPath is --game-list-file (used only
 	// when GameRegex is empty).
 	GameRegex      string
 	FilterListPath string

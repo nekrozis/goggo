@@ -210,7 +210,7 @@ func TestVerifyClassifiesTheInstallation(t *testing.T) {
 			f := newVerifyFixture(t)
 			c.prepare(t, f)
 
-			res, err := f.downloader(t).Verify(context.Background(), NewInstallRequest(f.cfg, planProductID, ""))
+			res, err := f.downloader(t).Verify(context.Background(), NewInstallRequest(f.cfg, planProductID, "", ProductRefExact))
 			if err != nil {
 				t.Fatalf("Verify: %v", err)
 			}
@@ -268,7 +268,7 @@ func TestVerifyKeepsThePlanDiagnostics(t *testing.T) {
 	f := newVerifyFixture(t)
 	f.cfg.MsgLevel = msgLevelVerbose
 
-	res, err := f.downloader(t).Verify(context.Background(), NewInstallRequest(f.cfg, planProductID, ""))
+	res, err := f.downloader(t).Verify(context.Background(), NewInstallRequest(f.cfg, planProductID, "", ProductRefExact))
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestVerifyKeepsThePlanDiagnostics(t *testing.T) {
 func TestVerifyFileSetIgnoresTheContainerRoute(t *testing.T) {
 	f := newVerifyFixture(t)
 	d := f.downloader(t)
-	req := NewInstallRequest(f.cfg, planProductID, "")
+	req := NewInstallRequest(f.cfg, planProductID, "", ProductRefExact)
 
 	expectedPaths := func(t *testing.T, mode planMode) []string {
 		t.Helper()
@@ -346,7 +346,7 @@ func TestVerifyDoesNotFetchTheOldBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldDepot := galaxy.HashToGalaxyPath(planOldDepotHash)
-	req := NewInstallRequest(cfg, planProductID, "")
+	req := NewInstallRequest(cfg, planProductID, "", ProductRefExact)
 
 	res, err := d.Verify(context.Background(), req)
 	if err != nil {
@@ -386,7 +386,7 @@ func TestVerifyWritesNothing(t *testing.T) {
 		t.Fatalf("fixture placed %d files, want three", len(before))
 	}
 
-	res, err := f.downloader(t).Verify(context.Background(), NewInstallRequest(f.cfg, planProductID, ""))
+	res, err := f.downloader(t).Verify(context.Background(), NewInstallRequest(f.cfg, planProductID, "", ProductRefExact))
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestVerifyResolvesTheSameRootAsInstall(t *testing.T) {
 			f := newVerifyFixture(t)
 			f.cfg.Directories.GalaxyInstallSubdir = subdir
 			d := f.downloader(t)
-			req := NewInstallRequest(f.cfg, planProductID, "")
+			req := NewInstallRequest(f.cfg, planProductID, "", ProductRefExact)
 
 			planned, err := d.BuildPlan(context.Background(), req)
 			if err != nil {
@@ -480,7 +480,7 @@ func TestVerifyHonoursTheMaskAndTheBlacklist(t *testing.T) {
 		f := newVerifyFixture(t)
 		f.cfg.DownloadConfig.Include &^= config.GFDLC
 
-		res, err := f.downloader(t).Verify(context.Background(), NewInstallRequest(f.cfg, planProductID, ""))
+		res, err := f.downloader(t).Verify(context.Background(), NewInstallRequest(f.cfg, planProductID, "", ProductRefExact))
 		if err != nil {
 			t.Fatalf("Verify: %v", err)
 		}
@@ -500,7 +500,7 @@ func TestVerifyHonoursTheMaskAndTheBlacklist(t *testing.T) {
 		}
 		f.cfg.BlacklistFilePath = blPath
 
-		res, err := f.downloader(t).Verify(context.Background(), NewInstallRequest(f.cfg, planProductID, ""))
+		res, err := f.downloader(t).Verify(context.Background(), NewInstallRequest(f.cfg, planProductID, "", ProductRefExact))
 		if err != nil {
 			t.Fatalf("Verify: %v", err)
 		}
@@ -527,7 +527,7 @@ func TestVerifyReportsUnobservableFiles(t *testing.T) {
 	f := newVerifyFixture(t)
 	f.setBaseDepot(verifyBadMemberItem())
 
-	res, err := f.downloader(t).Verify(context.Background(), NewInstallRequest(f.cfg, planProductID, ""))
+	res, err := f.downloader(t).Verify(context.Background(), NewInstallRequest(f.cfg, planProductID, "", ProductRefExact))
 	if err != nil {
 		t.Fatalf("an unobservable file must not fail the run: %v", err)
 	}

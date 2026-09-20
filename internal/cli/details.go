@@ -21,7 +21,7 @@ import (
 // blacklist failure is fatal for the text format (its file rows depend on
 // the filter) and irrelevant for JSON (it filters nothing).
 func runListDetails(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer) outcome {
-	games, err := d.ListGameDetails(ctx, inv.args)
+	games, err := d.ListGameDetails(ctx, inv.args, productRefMode(inv))
 	if err != nil {
 		return reportError(stderr, err)
 	}

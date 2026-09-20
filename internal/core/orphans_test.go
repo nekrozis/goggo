@@ -191,7 +191,7 @@ func TestCheckOrphansReportsTheUnaccountedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := f.downloader(t).CheckOrphans(context.Background(), NewInstallRequest(f.cfg, planProductID, ""))
+	res, err := f.downloader(t).CheckOrphans(context.Background(), NewInstallRequest(f.cfg, planProductID, "", ProductRefExact))
 	if err != nil {
 		t.Fatalf("CheckOrphans: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestCheckOrphansIsReadOnly(t *testing.T) {
 	f.place(t, "leftover.bin", []byte("x"))
 
 	before := treeState(t, f.root)
-	res, err := f.downloader(t).CheckOrphans(context.Background(), NewInstallRequest(f.cfg, planProductID, ""))
+	res, err := f.downloader(t).CheckOrphans(context.Background(), NewInstallRequest(f.cfg, planProductID, "", ProductRefExact))
 	if err != nil {
 		t.Fatalf("CheckOrphans: %v", err)
 	}

@@ -167,7 +167,7 @@ func TestShowBuildsListsBuildsWhenNoneSelected(t *testing.T) {
 			srv := newFixtureServer(t)
 			d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, c.sortOrder), newFakeConsole())
 
-			res, err := d.ShowBuilds(context.Background(), fixtureProductID, "")
+			res, err := d.ShowBuilds(context.Background(), fixtureProductID, "", ProductRefExact)
 			if err != nil {
 				t.Fatalf("ShowBuilds: %v", err)
 			}
@@ -219,7 +219,7 @@ func TestShowBuildsFetchesManifest(t *testing.T) {
 			srv := newFixtureServer(t)
 			d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "none"), newFakeConsole())
 
-			res, err := d.ShowBuilds(context.Background(), fixtureProductID, c.buildID)
+			res, err := d.ShowBuilds(context.Background(), fixtureProductID, c.buildID, ProductRefExact)
 			if err != nil {
 				t.Fatalf("ShowBuilds: %v", err)
 			}
@@ -243,7 +243,7 @@ func TestShowBuildsUnsupportedGeneration(t *testing.T) {
 		`{"build_id":"b-three","version_name":"2.0","date_published":"2024-02-02","generation":3,"link":""}]}`)
 	d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "none"), newFakeConsole())
 
-	res, err := d.ShowBuilds(context.Background(), fixtureProductID, "1")
+	res, err := d.ShowBuilds(context.Background(), fixtureProductID, "1", ProductRefExact)
 	if err != nil {
 		t.Fatalf("ShowBuilds: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestShowBuildsIndexOutOfRange(t *testing.T) {
 	srv := newFixtureServer(t)
 	d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "none"), newFakeConsole())
 
-	res, err := d.ShowBuilds(context.Background(), fixtureProductID, "9")
+	res, err := d.ShowBuilds(context.Background(), fixtureProductID, "9", ProductRefExact)
 	if err != nil {
 		t.Fatalf("ShowBuilds: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestShowBuildsLinuxWithoutBuilds(t *testing.T) {
 	cfg.DownloadConfig.GalaxyPlatform = config.PlatformLinux
 	d := newOfflineDownloader(t, srv.Server, cfg, newFakeConsole())
 
-	res, err := d.ShowBuilds(context.Background(), fixtureProductID, "")
+	res, err := d.ShowBuilds(context.Background(), fixtureProductID, "", ProductRefExact)
 	if !errors.Is(err, errInstallerFallback) {
 		t.Fatalf("err = %v, want errInstallerFallback", err)
 	}
@@ -372,7 +372,7 @@ func TestListCDNs(t *testing.T) {
 	srv := newFixtureServer(t)
 	d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "none"), newFakeConsole())
 
-	res, err := d.ListCDNs(context.Background(), fixtureProductID, "b-new")
+	res, err := d.ListCDNs(context.Background(), fixtureProductID, "b-new", ProductRefExact)
 	if err != nil {
 		t.Fatalf("ListCDNs: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestListCDNsRequiresGenerationTwo(t *testing.T) {
 	srv := newFixtureServer(t)
 	d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "none"), newFakeConsole())
 
-	res, err := d.ListCDNs(context.Background(), fixtureProductID, "b-old")
+	res, err := d.ListCDNs(context.Background(), fixtureProductID, "b-old", ProductRefExact)
 	if err != nil {
 		t.Fatalf("ListCDNs: %v", err)
 	}
@@ -416,7 +416,7 @@ func TestListCDNsLinuxWithoutBuilds(t *testing.T) {
 	cfg.DownloadConfig.GalaxyPlatform = config.PlatformLinux
 	d := newOfflineDownloader(t, srv.Server, cfg, newFakeConsole())
 
-	res, err := d.ListCDNs(context.Background(), fixtureProductID, "")
+	res, err := d.ListCDNs(context.Background(), fixtureProductID, "", ProductRefExact)
 	if err != nil {
 		t.Fatalf("ListCDNs: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestSelectProductIDNumeric(t *testing.T) {
 	ui := newFakeConsole()
 	d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "score"), ui)
 
-	if _, err := d.ShowBuilds(context.Background(), "456", ""); err != nil {
+	if _, err := d.ShowBuilds(context.Background(), "456", "", ProductRefExact); err != nil {
 		t.Fatalf("ShowBuilds: %v", err)
 	}
 	if got := srv.seen("/account/getFilteredProducts"); got != 0 {
@@ -448,43 +448,88 @@ func TestSelectProductIDNumeric(t *testing.T) {
 	}
 }
 
-// TestSelectProductIDFromGameName covers the game-name path: the account is
-// listed, a single match is used directly, and the resolved id is what the
-// builds request names.
-func TestSelectProductIDFromGameName(t *testing.T) {
-	srv := newFixtureServer(t)
-	d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "score"), newFakeConsole())
+// TestSelectProductIDExactName covers the default read: the argument is the
+// product's own slug, so a single match is used directly and the resolved id is
+// what the builds request names. The comparison ignores case, so a name copied
+// from anywhere still resolves.
+func TestSelectProductIDExactName(t *testing.T) {
+	for _, ref := range []string{"Some Game", "some game"} {
+		t.Run(ref, func(t *testing.T) {
+			srv := newFixtureServer(t)
+			d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "score"), newFakeConsole())
 
-	if _, err := d.ShowBuilds(context.Background(), "Some", ""); err != nil {
-		t.Fatalf("ShowBuilds: %v", err)
-	}
-	if got := srv.seen("/account/getFilteredProducts"); got != 1 {
-		t.Errorf("the account was listed %d times, want 1", got)
-	}
-	if got := srv.seen("/products/555/os/windows/builds"); got != 1 {
-		t.Errorf("build requests for the resolved id = %d, want 1", got)
+			if _, err := d.ShowBuilds(context.Background(), ref, "", ProductRefExact); err != nil {
+				t.Fatalf("ShowBuilds: %v", err)
+			}
+			if got := srv.seen("/account/getFilteredProducts"); got != 1 {
+				t.Errorf("the account was listed %d times, want 1", got)
+			}
+			if got := srv.seen("/products/555/os/windows/builds"); got != 1 {
+				t.Errorf("build requests for the resolved id = %d, want 1", got)
+			}
+		})
 	}
 }
 
-func TestSelectProductIDNoMatch(t *testing.T) {
+// TestSelectProductIDExactRejectsSubstring locks what the default read does NOT
+// do: a reference is not an expression, so a prefix shared by two products is
+// no match at all rather than a prompt to choose between them.
+func TestSelectProductIDExactRejectsSubstring(t *testing.T) {
 	srv := newFixtureServer(t)
-	srv.setProducts(fixtureProductsNone)
-	d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "score"), newFakeConsole())
+	srv.setProducts(fixtureProductsTwo)
+	ui := newFakeConsole()
+	d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "score"), ui)
 
-	res, err := d.ShowBuilds(context.Background(), "Nothing", "")
+	res, err := d.ShowBuilds(context.Background(), "Some", "", ProductRefExact)
 	if err != nil {
 		t.Fatalf("ShowBuilds: %v", err)
 	}
-	if res.Notice.Text != msgNoProducts || !res.Notice.Err {
-		t.Errorf("notice = %+v, want the stderr no-products message", res.Notice)
+	want := `no product named "Some" (list games prints exact names; --regex matches a pattern)`
+	if res.Notice.Text != want || !res.Notice.Err {
+		t.Errorf("notice = %+v, want %q on stderr", res.Notice, want)
+	}
+	if len(ui.selection) != 0 {
+		t.Errorf("offered %v, want nothing: an exact read never prompts", ui.selection)
 	}
 	if got := srv.seen("/builds"); got != 0 {
 		t.Errorf("build requests = %d, want none", got)
 	}
 }
 
-// TestSelectProductIDInteractive covers the multi-match path: the console is
-// offered the candidates and the index it returns selects the product.
+// TestSelectProductIDNoMatch covers the two unresolved-reference messages: the
+// exact read names the reference it looked for, the expression form keeps the
+// listing's own wording.
+func TestSelectProductIDNoMatch(t *testing.T) {
+	cases := []struct {
+		mode ProductRefMode
+		want string
+	}{
+		{mode: ProductRefExact, want: `no product named "Nothing" (list games prints exact names; --regex matches a pattern)`},
+		{mode: ProductRefRegex, want: msgNoProducts},
+	}
+	for _, c := range cases {
+		t.Run(c.want, func(t *testing.T) {
+			srv := newFixtureServer(t)
+			srv.setProducts(fixtureProductsNone)
+			d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "score"), newFakeConsole())
+
+			res, err := d.ShowBuilds(context.Background(), "Nothing", "", c.mode)
+			if err != nil {
+				t.Fatalf("ShowBuilds: %v", err)
+			}
+			if res.Notice.Text != c.want || !res.Notice.Err {
+				t.Errorf("notice = %+v, want %q on stderr", res.Notice, c.want)
+			}
+			if got := srv.seen("/builds"); got != 0 {
+				t.Errorf("build requests = %d, want none", got)
+			}
+		})
+	}
+}
+
+// TestSelectProductIDInteractive covers the multi-match path of the expression
+// form: the console is offered the candidates and the index it returns selects
+// the product.
 func TestSelectProductIDInteractive(t *testing.T) {
 	srv := newFixtureServer(t)
 	srv.setProducts(fixtureProductsTwo)
@@ -492,7 +537,7 @@ func TestSelectProductIDInteractive(t *testing.T) {
 	ui.selected = 1
 	d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "score"), ui)
 
-	if _, err := d.ShowBuilds(context.Background(), "Some", ""); err != nil {
+	if _, err := d.ShowBuilds(context.Background(), "Some", "", ProductRefRegex); err != nil {
 		t.Fatalf("ShowBuilds: %v", err)
 	}
 	if want := "Some Game A,Some Game B"; strings.Join(ui.selection, ",") != want {
@@ -519,7 +564,7 @@ func TestSelectProductIDUnanswerable(t *testing.T) {
 			srv.setProducts(fixtureProductsTwo)
 			d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "score"), c.ui)
 
-			res, err := d.ShowBuilds(context.Background(), "Some", "")
+			res, err := d.ShowBuilds(context.Background(), "Some", "", ProductRefRegex)
 			if err != nil {
 				t.Fatalf("ShowBuilds: %v", err)
 			}
@@ -540,7 +585,7 @@ func TestShowBuildsShapeErrors(t *testing.T) {
 	srv.setBuilds(`{"items":{}}`)
 	d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "score"), newFakeConsole())
 
-	if _, err := d.ShowBuilds(context.Background(), fixtureProductID, ""); err == nil {
+	if _, err := d.ShowBuilds(context.Background(), fixtureProductID, "", ProductRefExact); err == nil {
 		t.Error("a non-array items value must be an error")
 	}
 }

@@ -18,7 +18,7 @@ import (
 // therefore reports whether the CHECK worked — unlike `verify`, whose mismatch
 // means the installation does not match what it should be.
 func (c *console) runOrphansCheck(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer) outcome {
-	res, err := d.CheckOrphans(ctx, core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build))
+	res, err := d.CheckOrphans(ctx, core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build, productRefMode(inv)))
 	renderNotices(stdout, stderr, res.Notices)
 	if err != nil {
 		return reportError(stderr, err)
@@ -40,7 +40,7 @@ func (c *console) runOrphansRemove(ctx context.Context, d *core.Downloader, inv 
 	ctx, stopSignal := signal.NotifyContext(ctx, os.Interrupt)
 	defer stopSignal()
 
-	res, err := d.CheckOrphans(ctx, core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build))
+	res, err := d.CheckOrphans(ctx, core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build, productRefMode(inv)))
 	renderNotices(stdout, stderr, res.Notices)
 	if err != nil {
 		return reportError(stderr, err)

@@ -102,7 +102,7 @@ func TestInstallDownloadsAContainerMemberTheContainerCannotSupply(t *testing.T) 
 	fi := newSFCInstallFixture(t, "bytes that are not the member's", true)
 	console := newFakeConsole()
 
-	if err := fi.downloader(t, console).Install(context.Background(), NewInstallRequest(fi.cfg, planProductID, "")); err != nil {
+	if err := fi.downloader(t, console).Install(context.Background(), NewInstallRequest(fi.cfg, planProductID, "", ProductRefExact)); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 
@@ -129,7 +129,7 @@ func TestInstallFailsWhenTheContainerMemberCannotBeDownloaded(t *testing.T) {
 	fi := newSFCInstallFixture(t, "bytes that are not the member's", false)
 	console := newFakeConsole()
 
-	err := fi.downloader(t, console).Install(context.Background(), NewInstallRequest(fi.cfg, planProductID, ""))
+	err := fi.downloader(t, console).Install(context.Background(), NewInstallRequest(fi.cfg, planProductID, "", ProductRefExact))
 	if err == nil {
 		t.Fatal("Install reported success over a member that was never written")
 	}

@@ -73,12 +73,12 @@ func (r WebsiteDownloadResult) Failed() bool {
 // --all escape hatch. Acquisition keeps its complete-or-nothing contract; the
 // transfer run is per-task: a failure neither cancels the queue nor hides
 // itself from the aggregate verdict.
-func (d *Downloader) DownloadWebsite(ctx context.Context, products []string) (WebsiteDownloadResult, error) {
+func (d *Downloader) DownloadWebsite(ctx context.Context, products []string, mode ProductRefMode) (WebsiteDownloadResult, error) {
 	if len(products) == 0 {
 		return WebsiteDownloadResult{}, errors.New("download: no games selected")
 	}
 
-	details, err := d.GameDetails(ctx, GameDetailsRequest{Products: products})
+	details, err := d.GameDetails(ctx, GameDetailsRequest{Products: products, RefMode: mode})
 	if err != nil {
 		return WebsiteDownloadResult{}, err
 	}
@@ -167,10 +167,10 @@ func (r WebsiteFileResult) Failed() bool {
 // back the per-spec verdicts. A spec's failure never cancels the others and
 // never hides from the aggregate; the front end maps "any failure" onto exit 1
 // and keeps the successful downloads.
-func (d *Downloader) DownloadWebsiteFiles(ctx context.Context, specs []string, outputFile string) WebsiteFileResult {
+func (d *Downloader) DownloadWebsiteFiles(ctx context.Context, specs []string, outputFile string, mode ProductRefMode) WebsiteFileResult {
 	res := WebsiteFileResult{Outcomes: make([]WebsiteFileOutcome, 0, len(specs))}
 	for _, spec := range specs {
-		dest, err := d.downloadWebsiteFile(ctx, spec, outputFile)
+		dest, err := d.downloadWebsiteFile(ctx, spec, outputFile, mode)
 		res.Outcomes = append(res.Outcomes, WebsiteFileOutcome{Spec: spec, Destination: dest, Err: err})
 	}
 	return res
@@ -179,14 +179,14 @@ func (d *Downloader) DownloadWebsiteFiles(ctx context.Context, specs []string, o
 // downloadWebsiteFile is one spec's chain: parse, acquire, look the id up in
 // the recursive vector, run the single task. The return is the destination
 // when it became known, whatever the verdict.
-func (d *Downloader) downloadWebsiteFile(ctx context.Context, spec, outputFile string) (string, error) {
+func (d *Downloader) downloadWebsiteFile(ctx context.Context, spec, outputFile string, mode ProductRefMode) (string, error) {
 	game, dlc, fileid, err := parseWebsiteFileSpec(spec)
 	if err != nil {
 		return "", err
 	}
 
 	all := config.IncludeAllMask()
-	details, err := d.GameDetails(ctx, GameDetailsRequest{Products: []string{game}, Include: &all})
+	details, err := d.GameDetails(ctx, GameDetailsRequest{Products: []string{game}, Include: &all, RefMode: mode})
 	if err != nil {
 		return "", err
 	}

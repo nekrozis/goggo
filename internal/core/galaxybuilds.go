@@ -12,6 +12,7 @@ import (
 	"github.com/nekrozis/goggo/internal/catalog"
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/jsonval"
+	"github.com/nekrozis/goggo/internal/model"
 )
 
 // Messages printed for these two commands instead of doing the work. They are
@@ -33,6 +34,20 @@ var errInstallerFallback = errors.New(
 
 // numericIDRE matches a product-id argument in its numeric form.
 var numericIDRE = regexp.MustCompile(`^[0-9]+$`)
+
+// ProductRefMode says how a product reference is read.
+type ProductRefMode uint8
+
+const (
+	// ProductRefExact matches the reference against the account's product slugs
+	// by whole-string equality, ignoring case. It is what a name printed by
+	// "list games" resolves to.
+	ProductRefExact ProductRefMode = iota
+
+	// ProductRefRegex matches it as an unanchored regular expression, the way
+	// the listing filter does.
+	ProductRefRegex
+)
 
 // Notice is a message printed instead of doing the work. It is not an error:
 // the exit code stays 0. Err selects the stream — the support and generation
@@ -76,8 +91,8 @@ type CDNsResult struct {
 // ShowBuilds resolves the product id, reads its build list, sorts it the way
 // --galaxy-builds-sort asks, then either returns the listing or fetches and
 // returns the manifest of the selected build.
-func (d *Downloader) ShowBuilds(ctx context.Context, productID, buildID string) (BuildsResult, error) {
-	id, notice, err := d.selectProductID(ctx, productID)
+func (d *Downloader) ShowBuilds(ctx context.Context, productID, buildID string, mode ProductRefMode) (BuildsResult, error) {
+	id, notice, err := d.selectProductID(ctx, productID, mode)
 	if err != nil {
 		return BuildsResult{}, err
 	}
@@ -93,8 +108,8 @@ func (d *Downloader) ShowBuilds(ctx context.Context, productID, buildID string) 
 
 // ListCDNs resolves the product id, reads the build list, and returns the CDN
 // endpoint names of the secure link of the selected build.
-func (d *Downloader) ListCDNs(ctx context.Context, productID, buildID string) (CDNsResult, error) {
-	id, notice, err := d.selectProductID(ctx, productID)
+func (d *Downloader) ListCDNs(ctx context.Context, productID, buildID string, mode ProductRefMode) (CDNsResult, error) {
+	id, notice, err := d.selectProductID(ctx, productID, mode)
 	if err != nil {
 		return CDNsResult{}, err
 	}
@@ -217,24 +232,38 @@ func (d *Downloader) showBuildsFor(ctx context.Context, productID, buildID strin
 }
 
 // selectProductID resolves the product argument: a numeric argument IS the
-// product id; anything else is a game-name regular expression matched against
-// the account's product list, with an interactive selection when it matches
-// more than one.
+// product id; otherwise the account's product list is searched the way mode
+// asks — by slug equality, or by the unanchored expression --regex selects —
+// with an interactive selection when more than one product matches.
 //
-// A non-empty Notice means the caller prints that message and stops; the
-// returned error is reserved for a real failure of the product list itself.
-func (d *Downloader) selectProductID(ctx context.Context, productID string) (string, Notice, error) {
-	if numericIDRE.MatchString(productID) {
-		return productID, Notice{}, nil
+// A resolved id is always accompanied by an empty Notice, and a failure to
+// resolve always carries one: callers may treat a non-empty Notice as the
+// whole outcome. The returned error is reserved for a real failure of the
+// product list itself.
+func (d *Downloader) selectProductID(ctx context.Context, ref string, mode ProductRefMode) (string, Notice, error) {
+	if numericIDRE.MatchString(ref) {
+		return ref, Notice{}, nil
 	}
 
-	res, err := catalog.List(ctx, d.web, d.gameListOptions(productID))
+	res, err := catalog.List(ctx, d.web, d.gameListOptions(ref, mode))
 	if err != nil {
 		return "", Notice{}, err
 	}
+	if mode == ProductRefExact {
+		// An exact read is a whole-string comparison, so it is done here on the
+		// slugs the listing returned rather than by handing the reference to the
+		// listing filter, whose match is a substring one.
+		matched := make([]model.GameItem, 0, 1)
+		for _, g := range res.Games {
+			if strings.EqualFold(g.Name, ref) {
+				matched = append(matched, g)
+			}
+		}
+		res.Games = matched
+	}
 	switch len(res.Games) {
 	case 0:
-		return "", Notice{Text: msgNoProducts, Err: true}, nil
+		return "", Notice{Text: noProductMessage(ref, mode), Err: true}, nil
 	case 1:
 		return res.Games[0].ID, Notice{}, nil
 	}
@@ -252,17 +281,44 @@ func (d *Downloader) selectProductID(ctx context.Context, productID string) (str
 	return res.Games[index].ID, Notice{}, nil
 }
 
-// gameListOptions assembles the product query for the game-name lookup.
+// noProductMessage is what an unresolved reference reports. An exact read names
+// the reference the user typed and says where the exact spelling comes from,
+// because a typo is the failure it has to explain; the expression form keeps
+// the listing's own wording.
+func noProductMessage(ref string, mode ProductRefMode) string {
+	if mode == ProductRefRegex {
+		return msgNoProducts
+	}
+	return fmt.Sprintf("no product named %q (list games prints exact names; --regex matches a pattern)", ref)
+}
+
+// gameListOptions assembles the product query for a reference lookup.
 //
 // It duplicates the assembly in internal/cli/list.go on purpose: the listing
 // command still lives there, and the two copies converge when it moves into
 // this package. Keeping them separate keeps this step from changing listing
 // behaviour.
-func (d *Downloader) gameListOptions(gameRegex string) catalog.ListOptions {
+//
+// The reference is a product the user named, so it outranks the configured
+// filter list, which is the listing filter's own precedence. Only the expression
+// form is handed to the listing filter; the exact form is compared against the
+// slugs the listing returns.
+func (d *Downloader) gameListOptions(ref string, mode ProductRefMode) catalog.ListOptions {
+	opts := d.accountListOptions()
+	opts.FilterListPath = ""
+	if mode == ProductRefRegex {
+		opts.GameRegex = ref
+	}
+	return opts
+}
+
+// accountListOptions assembles the query for a whole-account listing: no
+// reference, so the configured filter list decides what the listing contains,
+// exactly as it does for a plain listing.
+func (d *Downloader) accountListOptions() catalog.ListOptions {
 	cfg := d.cfg
 	return catalog.ListOptions{
 		Tags:              cfg.DownloadConfig.Tags,
-		GameRegex:         gameRegex,
 		FilterListPath:    cfg.GameListFilePath,
 		IgnoreDLCCountRE:  cfg.IgnoreDLCCountRegex,
 		InstallerPlatform: cfg.DownloadConfig.InstallerPlatform,

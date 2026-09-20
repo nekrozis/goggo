@@ -259,7 +259,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		if inv.cmd == cmdShowManifest && build == "" {
 			build = "0"
 		}
-		res, err := d.ShowBuilds(ctx, inv.target.Product, build)
+		res, err := d.ShowBuilds(ctx, inv.target.Product, build, productRefMode(inv))
 		// The Linux support messages are rendered even when the run then fails:
 		// they go to stdout and the missing fallback is reported on stderr
 		// afterwards.
@@ -279,7 +279,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		return outcomeOK
 
 	case cmdShowCDNs:
-		res, err := d.ListCDNs(ctx, inv.target.Product, inv.target.Build)
+		res, err := d.ListCDNs(ctx, inv.target.Product, inv.target.Build, productRefMode(inv))
 		renderNotice(stdout, stderr, res.Notice)
 		if err != nil {
 			return reportError(stderr, err)
@@ -294,7 +294,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		// resolves its target exactly like one — but only observes: the plan is
 		// built in verify mode (no destructive work, no free-space answer) and
 		// every expected file is classified.
-		req := core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build)
+		req := core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build, productRefMode(inv))
 		res, err := d.Verify(ctx, req)
 		for _, notice := range res.Notices {
 			renderNotice(stdout, stderr, notice)
@@ -321,7 +321,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		// start → the install with Stop deferred → signal restore. Stop covers
 		// every exit path — error, cancellation and panic — but never swallows:
 		// a panic propagates after the cleanup, as Go would.
-		req := core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build)
+		req := core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build, productRefMode(inv))
 		return stopOutcome(ui.runInstall(ctx, d, req, inv.cfg, progress))
 	}
 
@@ -329,6 +329,15 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 	// operational failure means a future command that forgets a case fails
 	// loudly instead of exiting 0.
 	return reportError(stderr, fmt.Errorf("%s has no handler", inv.cmd.path()))
+}
+
+// productRefMode maps --regex onto the mode the selector reads. The default is
+// the product's own name, which is what `list games` prints.
+func productRefMode(inv invocation) core.ProductRefMode {
+	if inv.productRefRegex {
+		return core.ProductRefRegex
+	}
+	return core.ProductRefExact
 }
 
 // reportError prints a diagnostic to stderr and classifies it.

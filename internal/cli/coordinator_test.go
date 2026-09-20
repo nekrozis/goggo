@@ -235,3 +235,101 @@ func TestConsoleRoutesThroughCoordinator(t *testing.T) {
 		t.Errorf("stdout = %q, want no coordinator after the scope ended", out.String())
 	}
 }
+
+// TestCoordinatorSuspendStopsPainting locks the pause: while a prompt holds the
+// terminal no frame is painted at all, which is what keeps the next repaint from
+// erasing the question the user is answering.
+func TestCoordinatorSuspendStopsPainting(t *testing.T) {
+	var out, errOut strings.Builder
+	c := newTerminalCoordinator(&out, &errOut)
+
+	c.drawFrame([]string{"row"})
+	c.suspend()
+	if eraseToEndAt(out.String()) < 0 {
+		t.Fatalf("suspend wrote %q, want the frame taken down", out.String())
+	}
+
+	out.Reset()
+	c.drawFrame([]string{"row"})
+	c.drawFrame([]string{"row", "and another"})
+	if got := out.String(); got != "" {
+		t.Errorf("frames handed over during the pause = %q, want nothing painted", got)
+	}
+}
+
+// TestCoordinatorResumePaintsTheNewestFrame locks what the frame comes back as:
+// the newest one handed over while the prompt was up, from a cursor position the
+// row arithmetic can trust again.
+func TestCoordinatorResumePaintsTheNewestFrame(t *testing.T) {
+	var out, errOut strings.Builder
+	c := newTerminalCoordinator(&out, &errOut)
+
+	c.drawFrame([]string{"row"})
+	c.suspend()
+	c.drawFrame([]string{"row", "and another"})
+	out.Reset()
+	c.resume()
+
+	painted := out.String()
+	if !strings.Contains(painted, "row\n") || !strings.Contains(painted, "and another\n") {
+		t.Errorf("resume painted %q, want the frame handed over during the pause", painted)
+	}
+	// The frame is on screen again, so the next frame's erase counts the rows it
+	// actually occupies.
+	out.Reset()
+	c.drawFrame([]string{"fresh"})
+	if got := cursorUpRows(out.String()); got != 2 {
+		t.Errorf("frame after resume = %q, want the cursor to come back up the 2 rows the resumed frame occupies, got %d",
+			out.String(), got)
+	}
+}
+
+// TestCoordinatorPausedWritesBypassTheFrameTransaction locks the prompt's own
+// output: with the frame down, a line goes to its stream untouched — no erase, no
+// redraw — so the numbered list stays on screen while the user reads it.
+func TestCoordinatorPausedWritesBypassTheFrameTransaction(t *testing.T) {
+	var out, errOut strings.Builder
+	c := newTerminalCoordinator(&out, &errOut)
+
+	c.drawFrame([]string{"row"})
+	c.suspend()
+	out.Reset()
+	errOut.Reset()
+
+	c.writeOut("Select product:")
+	c.writeOut("0: some_game")
+	c.writeErr("> ")
+
+	if got := out.String(); got != "Select product:\n0: some_game\n" {
+		t.Errorf("stdout = %q, want the candidate list verbatim", got)
+	}
+	if got := errOut.String(); got != "> \n" {
+		t.Errorf("stderr = %q, want the bare prompt", got)
+	}
+}
+
+// TestSelectProductOwnsTheTerminalWhileItAsks locks the defect at the console:
+// during an install the candidate list is printed with the frame down, and no
+// cursor work follows it, so a repaint cannot erase the choices.
+func TestSelectProductOwnsTheTerminalWhileItAsks(t *testing.T) {
+	var out, errOut strings.Builder
+	c := newConsole(strings.NewReader(""), &out, &errOut)
+	c.coord = newTerminalCoordinator(&out, &errOut)
+	c.coord.drawFrame([]string{"Downloading", "Rate"})
+
+	if _, err := c.SelectProduct([]string{"some_game", "other_game"}); err == nil {
+		t.Fatal("SelectProduct: want an error without a terminal")
+	}
+
+	painted := out.String()
+	start := strings.Index(painted, "Select product:")
+	if start < 0 {
+		t.Fatalf("output = %q, want the candidate list printed", painted)
+	}
+	if !strings.Contains(painted, "0: some_game\n1: other_game\n") {
+		t.Errorf("output = %q, want the numbered candidates in order", painted)
+	}
+	if got := painted[start:]; strings.Contains(got, "\x1b[") {
+		t.Errorf("output from the list onwards = %q, want no cursor work: the frame is down while the prompt asks", got)
+	}
+}

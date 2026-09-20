@@ -21,11 +21,17 @@ import (
 // cursor sits just below it, so the row arithmetic never depends on where an
 // earlier write left the cursor. Layout guarantees the frame never wraps
 // (layout.go), which is what makes the erase's row count trustworthy.
+//
+// A prompt takes the terminal over through suspend/resume: the frame comes down
+// and stays down, so the cursor stops moving under the user's input and the
+// answer is not painted over.
 type terminalCoordinator struct {
 	mu      sync.Mutex
 	out     io.Writer
 	errOut  io.Writer
 	frame   []string // the frame currently on screen
+	pending []string // the frame a paused coordinator paints on resume
+	paused  bool
 	stopped bool
 }
 
@@ -49,10 +55,18 @@ func (c *terminalCoordinator) redraw() {
 
 // drawFrame is the Frame transaction: erase what is on screen, paint the new
 // frame, leave the cursor just below it.
+//
+// While a prompt holds the terminal the frame is only remembered: painting it
+// would move the cursor away from the answer being typed. The remembered frame
+// is what resume puts back.
 func (c *terminalCoordinator) drawFrame(lines []string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.stopped {
+		return
+	}
+	if c.paused {
+		c.pending = lines
 		return
 	}
 	c.erase()
@@ -60,6 +74,40 @@ func (c *terminalCoordinator) drawFrame(lines []string) {
 		fmt.Fprintln(c.out, line)
 	}
 	c.frame = lines
+}
+
+// suspend hands the terminal to a prompt: the frame comes down and no later
+// frame is painted until resume. The frame in flight is kept, so resume has
+// something to put back even if the prompt is answered before the next tick.
+//
+// The state lives here, not in the caller: a prompt that stopped the renderer
+// itself would be a second owner of the frame's lifetime.
+func (c *terminalCoordinator) suspend() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stopped || c.paused {
+		return
+	}
+	c.erase()
+	c.pending = c.frame
+	c.frame = nil
+	c.paused = true
+}
+
+// resume takes the terminal back and paints the newest frame it was handed
+// while the prompt was up.
+func (c *terminalCoordinator) resume() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stopped || !c.paused {
+		return
+	}
+	c.paused = false
+	for _, line := range c.pending {
+		fmt.Fprintln(c.out, line)
+	}
+	c.frame = c.pending
+	c.pending = nil
 }
 
 // writeOut and writeErr are the Diagnostic transactions: the frame comes down,
@@ -73,6 +121,13 @@ func (c *terminalCoordinator) transaction(w io.Writer, line string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.stopped {
+		return
+	}
+	if c.paused {
+		// A prompt owns the terminal and the frame is already down: the line
+		// goes straight to its stream, because there is no frame to take down
+		// and put back.
+		fmt.Fprintln(w, line)
 		return
 	}
 	c.erase()

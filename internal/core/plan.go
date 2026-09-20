@@ -118,13 +118,25 @@ func (d *Downloader) BuildPlan(ctx context.Context, req InstallRequest) (PlanRes
 func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode planMode) (PlanResult, error) {
 	var res PlanResult
 
-	// Product resolution: a numeric id passes through, a name goes through the
-	// account's game list, possibly interactively.
-	id, notice, err := d.selectProductID(ctx, req.ProductID)
-	res.addMessage(notice.Text)
+	// Product resolution: a numeric id passes through, a name is read the way
+	// the request asks — by slug, or as the expression --regex selects —
+	// possibly interactively.
+	id, notice, err := d.selectProductID(ctx, req.ProductID, req.RefMode)
 	if err != nil {
 		return res, err
 	}
+	if id == "" {
+		// The reference resolved to nothing, so the message is the reason and
+		// travels as the failure. Carrying on would ask the API about an empty
+		// product id and report whatever /products//os/<platform>/builds
+		// answered, which is a second failure standing in for the first.
+		text := notice.Text
+		if text == "" {
+			text = msgNoProducts
+		}
+		return res, errors.New(text)
+	}
+	res.addMessage(notice.Text)
 
 	// Builds and their order. The generation query parameter stays unset,
 	// which the client fills with its default "2".

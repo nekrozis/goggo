@@ -34,7 +34,7 @@ func (c *console) runWebsiteDownload(ctx context.Context, d *core.Downloader, in
 	c.renderer.Start()
 	func() {
 		defer func() { c.renderer.Stop(result) }()
-		res, runErr = d.DownloadWebsite(ctx, inv.args)
+		res, runErr = d.DownloadWebsite(ctx, inv.args, productRefMode(inv))
 		result = classifyInstallResult(runErr, ctx)
 	}()
 	stopSignal()
@@ -88,7 +88,7 @@ func (c *console) runWebsiteFiles(ctx context.Context, d *core.Downloader, inv i
 	c.renderer.Start()
 	func() {
 		defer func() { c.renderer.Stop(result) }()
-		res = d.DownloadWebsiteFiles(ctx, inv.args, inv.outputFile)
+		res = d.DownloadWebsiteFiles(ctx, inv.args, inv.outputFile, productRefMode(inv))
 		switch {
 		case ctx.Err() != nil:
 			result = stopCanceled

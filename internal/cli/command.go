@@ -140,6 +140,9 @@ type invocation struct {
 	// yes carries the destructive-confirmation flag. Only the destructive
 	// commands accept it.
 	yes bool
+	// productRefRegex carries --regex: the positional product argument is read
+	// as an expression instead of as a product's own name.
+	productRefRegex bool
 }
 
 // commandNode is one node of the tree.
@@ -190,6 +193,12 @@ var installTargetOptions = []optionID{
 	optArch,
 }
 
+// productRefOptions is how the positional product argument is read, and every
+// command that takes one accepts it. It is kept apart from the groups around it
+// because it says nothing about where a product installs or which games a
+// listing covers: it only changes the meaning of the argument beside it.
+var productRefOptions = []optionID{optRegex}
+
 // listGamesOptions filters the games listing.
 //
 // The installer filters are the listing side of platform/language. They are
@@ -226,7 +235,8 @@ var saveOptions = []optionID{
 var detailsOptions = joinOptions(listGamesOptions,
 	[]optionID{optInclude, optExclude, optBlacklist},
 	saveOptions,
-	[]optionID{optInfoThreads})
+	[]optionID{optInfoThreads},
+	productRefOptions)
 
 // listDetailsNotes is shared by both list leaves: the two facts a reader
 // must have before trusting the output.
@@ -298,11 +308,11 @@ var commandTree = []commandNode{
 		summary: "Show one product's builds or endpoints",
 		children: []commandNode{
 			{name: "builds", summary: "List a product's builds", id: cmdShowBuilds,
-				session: sessionRequired, options: []optionID{optSort}},
+				session: sessionRequired, options: []optionID{optSort, optRegex}},
 			{name: "manifest", summary: "Show a build's manifest", id: cmdShowManifest,
-				session: sessionRequired},
+				session: sessionRequired, options: productRefOptions},
 			{name: "cdns", summary: "List a build's CDN endpoints", id: cmdShowCDNs,
-				session: sessionRequired},
+				session: sessionRequired, options: productRefOptions},
 		},
 	},
 	{
@@ -310,7 +320,7 @@ var commandTree = []commandNode{
 		summary: "Make the local installation match the manifest",
 		id:      cmdInstall,
 		session: sessionImplicitLogin,
-		options: joinOptions(installTargetOptions, []optionID{
+		options: joinOptions(installTargetOptions, productRefOptions, []optionID{
 			optThreads,
 			optProgressInterval,
 			optCDNPriority,
@@ -332,7 +342,7 @@ var commandTree = []commandNode{
 				optInclude, optExclude, optBlacklist,
 				optInstallerPlatform, optInstallerLanguage,
 				optThreads, optProgressInterval, optCheckFreeSpace, optInfoThreads,
-			}, saveOptions),
+			}, saveOptions, productRefOptions),
 		notes: []string{
 			"Every selected game's files are queued and run to the end: a failing",
 			"file does not stop the others, but the command exits 1 if any failed.",
@@ -342,7 +352,7 @@ var commandTree = []commandNode{
 			{name: "file", summary: "Download single files by game/file id", id: cmdDownloadFile,
 				session: sessionImplicitLogin,
 				options: joinOptions([]optionID{optDirectory, optNoSubdirectories, optOutputFile, optInfoThreads},
-					subdirOptions, []optionID{optThreads, optProgressInterval}),
+					subdirOptions, []optionID{optThreads, optProgressInterval}, productRefOptions),
 				notes: []string{
 					"Specs are <gamename>/<fileid> or <gamename>/<dlc_gamename>/<fileid>;",
 					"the gogdownloader:// prefix is accepted and stripped.",
@@ -356,7 +366,7 @@ var commandTree = []commandNode{
 		summary: "Report whether the local files match the manifest",
 		id:      cmdVerify,
 		session: sessionRequired,
-		options: joinOptions(installTargetOptions, verifyOptions),
+		options: joinOptions(installTargetOptions, productRefOptions, verifyOptions),
 		// The report's vocabulary is the status codes, so the topic has to
 		// define them; and a verification never repairs, which a reader has
 		// to know before relying on it.
@@ -371,10 +381,10 @@ var commandTree = []commandNode{
 		children: []commandNode{
 			{name: "check", summary: "List them (read-only)", id: cmdOrphansCheck,
 				session: sessionRequired,
-				options: joinOptions(installTargetOptions, orphansOptions), notes: orphanNotes},
+				options: joinOptions(installTargetOptions, productRefOptions, orphansOptions), notes: orphanNotes},
 			{name: "remove", summary: "Delete them", id: cmdOrphansRemove,
 				session: sessionImplicitLogin,
-				options: joinOptions(installTargetOptions, orphansOptions, []optionID{optYes}), notes: orphanNotes},
+				options: joinOptions(installTargetOptions, productRefOptions, orphansOptions, []optionID{optYes}), notes: orphanNotes},
 		},
 	},
 }

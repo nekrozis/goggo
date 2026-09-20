@@ -63,7 +63,7 @@ func TestDownloadWebsiteBatchAssemblesAndRuns(t *testing.T) {
 	cfg, dir := websiteConfigIn(t)
 	d := newGameInfoDownloader(t, f, cfg)
 
-	res, err := d.DownloadWebsite(context.Background(), []string{"100"})
+	res, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
 	if err != nil {
 		t.Fatalf("DownloadWebsite: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestDownloadWebsiteAggregateKeepsRunningAndReports(t *testing.T) {
 	cfg, dir := websiteConfigIn(t)
 	d := newGameInfoDownloader(t, f, cfg)
 
-	res, err := d.DownloadWebsite(context.Background(), []string{"100"})
+	res, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
 	if err != nil {
 		t.Fatalf("DownloadWebsite: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestDownloadWebsiteFreeSpaceGate(t *testing.T) {
 	cfg.DownloadConfig.FreeSpaceCheck = true
 	d := newGameInfoDownloader(t, f, cfg)
 
-	res, err := d.DownloadWebsite(context.Background(), []string{"100"})
+	res, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
 	if err == nil || !strings.Contains(err.Error(), "not enough free space") {
 		t.Fatalf("err = %v, want the free-space refusal", err)
 	}
@@ -226,7 +226,7 @@ func TestDownloadWebsiteFilesChain(t *testing.T) {
 		// The extras entry carries the numeric wire id: the lookup matches the
 		// converted string form.
 		"gogdownloader://base_game/13403",
-	}, "")
+	}, "", ProductRefExact)
 	if !res.Failed() {
 		t.Fatal("aggregate = success, want the unknown id reported")
 	}
@@ -261,7 +261,7 @@ func TestDownloadWebsiteFileOutputOverrideAndNumericID(t *testing.T) {
 	d := newGameInfoDownloader(t, f, cfg)
 
 	out := filepath.Join(dir, "renamed.mp3")
-	res := d.DownloadWebsiteFiles(context.Background(), []string{"base_game/13403"}, out)
+	res := d.DownloadWebsiteFiles(context.Background(), []string{"base_game/13403"}, out, ProductRefExact)
 	if res.Failed() {
 		t.Fatalf("numeric id spec = %+v, want success", res.Outcomes)
 	}
@@ -390,7 +390,7 @@ func TestDownloadWebsiteRefreshFailureIsNotSwallowed(t *testing.T) {
 	d.token.SetJSON(map[string]any{"access_token": "a", "expires_at": 1})
 	f.setFailure("/token", 500)
 
-	_, err := d.DownloadWebsite(context.Background(), []string{"100"})
+	_, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
 	if err == nil || !strings.Contains(err.Error(), "refresh") {
 		t.Fatalf("err = %v, want the refresh reason", err)
 	}
@@ -406,7 +406,7 @@ func TestDownloadWebsiteCancellationTravels(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := d.DownloadWebsite(ctx, []string{"100"})
+	_, err := d.DownloadWebsite(ctx, []string{"100"}, ProductRefExact)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}

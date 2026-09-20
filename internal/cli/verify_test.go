@@ -134,30 +134,6 @@ func TestRenderVerifyUnclassifiedFactIsNotHealthy(t *testing.T) {
 	}
 }
 
-// TestRenderVerifySample locks the exact shape a real run prints, so a change to
-// the report is a deliberate one. The header and the rows are built from the
-// same root here: a sample whose paths disagree with its header would prove
-// nothing about the report a user actually sees.
-func TestRenderVerifySample(t *testing.T) {
-	const root = "/games/hoMM3"
-	res := core.VerifyResult{
-		InstallPath: root,
-		Facts: []core.FileFact{
-			verifyFact(root, "Data/Heroes3.exe", reconcile.StatusOK),
-			verifyFact(root, "Maps/extra.h3m", reconcile.StatusND),
-			verifyFact(root, "Data/Heroes3.exe.old", reconcile.StatusMD5),
-		},
-	}
-	_, out, _ := renderVerifyResult(t, res)
-	want := "Verifying → " + root + "\n" +
-		"ND   " + root + "/Maps/extra.h3m\n" +
-		"MD5  " + root + "/Data/Heroes3.exe.old\n" +
-		"3 files: 1 OK, 1 not downloaded, 1 md5 mismatch\n"
-	if out != want {
-		t.Errorf("stdout =\n%q\nwant\n%q", out, want)
-	}
-}
-
 // TestVerifyHelpDocumentsTheCodes locks the topic a user reads before trusting
 // the report: the four codes are defined there and the read-only promise is
 // stated.

@@ -8,12 +8,13 @@ import (
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/config"
-	"github.com/nekrozis/goggo/internal/gamedetails"
 )
 
 // Contract tests: the three writer contracts, the fail-closed serials boundary,
 // the acquisition request-count regression (C6) and the list read-only
-// guarantee. C1-C6 are the standalone assertions behind them.
+// guarantee. C1-C4 and C6 are the standalone assertions behind them; the cdKey
+// and changelog shapes the save flags consume are locked in gamedetails, where
+// the two extractions live.
 
 func TestWriteSerialsSkipsExisting(t *testing.T) { // C1
 	dir := t.TempDir()
@@ -85,49 +86,6 @@ func TestWriteOrFailDirectoryContracts(t *testing.T) {
 	gone := filepath.Join(dir, "a", "b", "serials.txt")
 	if a := writeSerials(gone, "s", "g"); a.Action != ArtifactWrote {
 		t.Errorf("created dirs action = %v, want wrote", a.Action)
-	}
-}
-
-func TestSerialsFromCDKeyShapes(t *testing.T) { // C5
-	cases := []struct {
-		in, want    string
-		unsupported bool
-	}{
-		{"ABC-123", "ABC-123\n", false},
-		{"a<br>b", "a\nb\n", false},
-		{"a<br/>b<br />c", "a\nb\nc\n", false},
-		{"", "", false},
-		{"<span>x</span>", "", true},
-		{"<BR>", "<BR>\n", false}, // the regex is case-sensitive: not a break
-	}
-	for _, tc := range cases {
-		got, unsupported := gamedetails.SerialsFromCDKey(tc.in)
-		if got != tc.want || unsupported != tc.unsupported {
-			t.Errorf("SerialsFromCDKey(%q) = %q/%v, want %q/%v", tc.in, got, unsupported, tc.want, tc.unsupported)
-		}
-	}
-}
-
-func TestChangelogFromJSONWrapping(t *testing.T) {
-	got, err := gamedetails.ChangelogFromJSON(map[string]any{"changelog": "<p>fix</p>", "title": "Game"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(got, `<!DOCTYPE html>`) || !strings.Contains(got, "<title>Changelog: Game</title>") ||
-		!strings.HasSuffix(got, "<body><p>fix</p></body>\n</html>") { // the literal has the newline
-		t.Errorf("wrapped changelog = %q", got)
-	}
-	if got, _ := gamedetails.ChangelogFromJSON(map[string]any{"changelog": ""}); got != "" {
-		t.Errorf("empty changelog = %q, want nothing", got)
-	}
-	if got, _ := gamedetails.ChangelogFromJSON(map[string]any{}); got != "" {
-		t.Errorf("missing changelog = %q, want nothing", got)
-	}
-	// The title test is presence, not value: an empty
-	// title still renders "Changelog: ".
-	got, _ = gamedetails.ChangelogFromJSON(map[string]any{"changelog": "c", "title": ""})
-	if !strings.Contains(got, "<title>Changelog: </title>") {
-		t.Errorf("present-empty title = %q, want the trailing-space form", got)
 	}
 }
 

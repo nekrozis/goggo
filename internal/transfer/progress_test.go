@@ -226,10 +226,49 @@ func compressed(t *testing.T, content string) []byte {
 	return buf.Bytes()
 }
 
+// arrivingBody is the response body the in-flight test reads through: it reports
+// when the client comes back for more after a read that carried bytes. The
+// previous read has been published to the sampler by then (the store happens
+// before the next read is issued, in the same goroutine), so the test has a
+// deterministic observation point instead of a polling loop.
+type arrivingBody struct {
+	body io.ReadCloser
+	more chan struct{}
+	read int
+	once sync.Once
+}
+
+func (b *arrivingBody) Read(p []byte) (int, error) {
+	if b.read > 0 {
+		b.once.Do(func() { close(b.more) })
+	}
+	n, err := b.body.Read(p)
+	b.read += n
+	return n, err
+}
+
+func (b *arrivingBody) Close() error { return b.body.Close() }
+
+// arrivingTransport installs that body on the network exit.
+type arrivingTransport struct {
+	base http.RoundTripper
+	more chan struct{}
+}
+
+func (t arrivingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body = &arrivingBody{body: resp.Body, more: t.more}
+	return resp, nil
+}
+
 // TestProgressPublishesWhileTheChunkIsStillArriving locks the in-flight
 // invariant: the sampler must see a transfer in flight, not only the chunk
 // boundary the events report. The handler holds the second half of the body until
-// the test has looked, so the partial reading is not a race.
+// the test has looked, and the transport reports the second read, so the partial
+// reading is not a race and not a poll.
 func TestProgressPublishesWhileTheChunkIsStillArriving(t *testing.T) {
 	const content = "progress sampling payload"
 	body := compressed(t, content)
@@ -267,7 +306,11 @@ func TestProgressPublishesWhileTheChunkIsStillArriving(t *testing.T) {
 		Destination: dest,
 	}
 
-	hx, err := httpx.New(httpx.Config{UserAgent: "goggo-test/1.0"})
+	more := make(chan struct{})
+	hx, err := httpx.New(httpx.Config{
+		UserAgent: "goggo-test/1.0",
+		Transport: arrivingTransport{base: http.DefaultTransport, more: more},
+	})
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
@@ -285,26 +328,16 @@ func TestProgressPublishesWhileTheChunkIsStillArriving(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- Run(context.Background(), []model.FileTask{task}, Options{}, deps) }()
 
-	deadline := time.Now().Add(5 * time.Second)
-	var middle int64
-	var seen []int64
-	for {
-		v, ok := progress.Bytes(dest)
-		if len(seen) == 0 || seen[len(seen)-1] != v {
-			seen = append(seen, v)
-		}
-		if ok && v > 0 && v < int64(len(body)) {
-			middle = v
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no in-flight sample within the deadline: Bytes = (%d, %v), body = %d, observed = %v",
-				v, ok, len(body), seen)
-		}
-		time.Sleep(time.Millisecond)
+	// The signal is a hang guard, not a timing assumption: the handler is
+	// still holding the second half, so the sample cannot move past it.
+	select {
+	case <-more:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the client never asked for a second read: no in-flight sample was possible")
 	}
-	if middle <= 0 || middle >= int64(len(body)) {
-		t.Errorf("in-flight sample = %d, want strictly inside (0, %d)", middle, len(body))
+	middle, ok := progress.Bytes(dest)
+	if !ok || middle <= 0 || middle >= int64(len(body)) {
+		t.Errorf("in-flight sample = (%d, %v), want strictly inside (0, %d)", middle, ok, len(body))
 	}
 	// The total is available before the chunk has landed, which is what lets
 	// the ETA exist during the first chunk.

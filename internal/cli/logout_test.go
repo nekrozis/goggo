@@ -47,6 +47,11 @@ func writeTestFile(t *testing.T, path, data string) {
 // environment, not the code.
 const invalidPath = "invalid\x00path"
 
+// logoutClearedLine is the one success line the logout path prints. It is
+// pinned here once — the wording is user-readable, so the tests that only care
+// that the run reported success share this literal instead of restating it.
+const logoutClearedLine = "Local login state cleared\n"
+
 // TestLogoutClearsAuthenticationStateOnly locks the scope of --logout: the two
 // authentication files go and everything sharing the tree stays — a future
 // "helpful" widening of the deletion set fails here.
@@ -74,8 +79,8 @@ func TestLogoutClearsAuthenticationStateOnly(t *testing.T) {
 	if err := logout(cfg, &out); err != nil {
 		t.Fatalf("logout: %v", err)
 	}
-	if got, want := out.String(), "Local login state cleared\n"; got != want {
-		t.Errorf("stdout = %q, want %q", got, want)
+	if got := out.String(); got != logoutClearedLine {
+		t.Errorf("stdout = %q, want %q", got, logoutClearedLine)
 	}
 	for _, p := range authFiles {
 		if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
@@ -91,7 +96,8 @@ func TestLogoutClearsAuthenticationStateOnly(t *testing.T) {
 
 // TestLogoutIsIdempotent locks the idempotence rule: logging out of a session
 // that is already gone is a success, not an error, so the operation can be
-// repeated.
+// repeated. This is the rule's home — removeAuthFile's own "absent is already
+// logged out" branch is the implementation of it.
 func TestLogoutIsIdempotent(t *testing.T) {
 	cfg := newLogoutConfig(t)
 	writeTestFile(t, core.TokenPath(cfg), "{}")
@@ -102,8 +108,8 @@ func TestLogoutIsIdempotent(t *testing.T) {
 		if err := logout(cfg, &out); err != nil {
 			t.Fatalf("logout #%d: %v", i, err)
 		}
-		if got, want := out.String(), "Local login state cleared\n"; got != want {
-			t.Errorf("logout #%d stdout = %q, want %q", i, got, want)
+		if got := out.String(); got != logoutClearedLine {
+			t.Errorf("logout #%d stdout = %q, want %q", i, got, logoutClearedLine)
 		}
 	}
 }
@@ -119,8 +125,8 @@ func TestLogoutOnMissingDirectoryIsSuccess(t *testing.T) {
 	if err := logout(cfg, &out); err != nil {
 		t.Fatalf("logout: %v", err)
 	}
-	if got, want := out.String(), "Local login state cleared\n"; got != want {
-		t.Errorf("stdout = %q, want %q", got, want)
+	if got := out.String(); got != logoutClearedLine {
+		t.Errorf("stdout = %q, want %q", got, logoutClearedLine)
 	}
 	if _, err := os.Stat(cfg.ConfigDirectory); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("logout must not create %s (stat err = %v)", cfg.ConfigDirectory, err)
@@ -153,20 +159,13 @@ func TestLogoutPropagatesRemovalFailure(t *testing.T) {
 	}
 }
 
-// TestRemoveAuthFileTreatsAlreadyGoneAsSuccess is the idempotence rule at the
-// level it is implemented: a path that does not exist is not an error.
-func TestRemoveAuthFileTreatsAlreadyGoneAsSuccess(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "absent")
-	if err := removeAuthFile(missing); err != nil {
-		t.Errorf("removeAuthFile(%q) = %v, want nil: an absent path is already logged out", missing, err)
-	}
-}
-
 // TestRemoveAuthFileReportsOtherFailures locks the classification: a failure
 // that is not fs.ErrNotExist becomes an error that still names the path.
 //
 // The path is checked through errors.As rather than by matching the rendered
-// message, so the assertion does not depend on how the OS words the error.
+// message, so the assertion does not depend on how the OS words the error. The
+// other branch — an absent path is already logged out — is the idempotence rule
+// locked by TestLogoutIsIdempotent, at the level a user can see it.
 func TestRemoveAuthFileReportsOtherFailures(t *testing.T) {
 	err := removeAuthFile(invalidPath)
 	if err == nil {

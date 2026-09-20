@@ -255,8 +255,16 @@ func TestGetJSONDeepCopiesNestedContainers(t *testing.T) {
 		"nested":       map[string]any{"list": []any{"a", "b"}},
 	})
 	got := g.GetJSON()
-	got["nested"].(map[string]any)["list"].([]any)[0] = "mutated"
-	got["nested"].(map[string]any)["extra"] = true
+	nested, ok := got["nested"].(map[string]any)
+	if !ok {
+		t.Fatalf("nested = %T, want map[string]any", got["nested"])
+	}
+	list, ok := nested["list"].([]any)
+	if !ok || len(list) == 0 {
+		t.Fatalf("nested list = %#v, want a non-empty []any", nested["list"])
+	}
+	list[0] = "mutated"
+	nested["extra"] = true
 
 	want := map[string]any{"list": []any{"a", "b"}}
 	if again := g.GetJSON(); !reflect.DeepEqual(again["nested"], want) {

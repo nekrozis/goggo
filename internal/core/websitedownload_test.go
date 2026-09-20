@@ -186,6 +186,30 @@ func TestParseWebsiteFileSpec(t *testing.T) {
 	}
 }
 
+// TestParseWebsiteSize locks the API size string's contract: the digits are
+// read after trimming, and a form with no size in it — unparsable or negative
+// — counts as zero rather than making the free-space gate stricter than "no
+// size".
+func TestParseWebsiteSize(t *testing.T) {
+	cases := []struct {
+		size string
+		want int64
+	}{
+		{"123", 123},
+		{" 42 ", 42},
+		{"0", 0},
+		{"", 0},
+		{"not-a-number", 0},
+		{"-5", 0},
+		{" -5 ", 0},
+	}
+	for _, tc := range cases {
+		if got := parseWebsiteSize(tc.size); got != tc.want {
+			t.Errorf("parseWebsiteSize(%q) = %d, want %d", tc.size, got, tc.want)
+		}
+	}
+}
+
 func TestDownloadWebsiteFilesChain(t *testing.T) {
 	f := oneProductFixture(t, "base.exe", "sound.mp3", "dlc.exe")
 	cfg, dir := websiteConfigIn(t)
@@ -350,12 +374,6 @@ func TestWebsiteTaskMapping(t *testing.T) {
 	task = websiteTaskFor(gamedetails.GameFile{Gamename: "game", ID: "id3", Type: config.GFBasePatch})
 	if !task.Checksummed {
 		t.Error("patch must be Checksummed")
-	}
-	if got := parseWebsiteSize("not-a-number"); got != 0 {
-		t.Errorf("unparsable size = %d, want 0", got)
-	}
-	if got := parseWebsiteSize(" -5 "); got != 0 {
-		t.Errorf("negative size = %d, want 0", got)
 	}
 }
 

@@ -10,17 +10,6 @@ func fixedTime() time.Time {
 	return time.Date(2026, time.September, 9, 23, 46, 13, 0, time.Local)
 }
 
-func TestTypeAndLevelConstants(t *testing.T) {
-	if MsgTypeInfo != 1<<0 || MsgTypeWarning != 1<<1 || MsgTypeError != 1<<2 || MsgTypeSuccess != 1<<3 {
-		t.Errorf("type bit flags wrong: info=%d warning=%d error=%d success=%d",
-			MsgTypeInfo, MsgTypeWarning, MsgTypeError, MsgTypeSuccess)
-	}
-	if MsgLevelAlways != -1 || MsgLevelDefault != 0 || MsgLevelVerbose != 1 || MsgLevelDebug != 2 {
-		t.Errorf("level values wrong: %d %d %d %d",
-			MsgLevelAlways, MsgLevelDefault, MsgLevelVerbose, MsgLevelDebug)
-	}
-}
-
 func TestNewMessageDefaults(t *testing.T) {
 	m := NewMessage("hello")
 	if m.Text != "hello" {

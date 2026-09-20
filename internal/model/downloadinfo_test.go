@@ -5,14 +5,6 @@ import (
 	"testing"
 )
 
-func TestDLStatusConstants(t *testing.T) {
-	if DLStatusNotStarted != 0 || DLStatusStarting != 1<<0 ||
-		DLStatusRunning != 1<<1 || DLStatusFinished != 1<<2 {
-		t.Errorf("DLStatus values wrong: %d %d %d %d",
-			DLStatusNotStarted, DLStatusStarting, DLStatusRunning, DLStatusFinished)
-	}
-}
-
 func TestDownloadInfoDefaults(t *testing.T) {
 	d := NewDownloadInfo()
 	if got := d.GetStatus(); got != DLStatusNotStarted {

@@ -38,7 +38,9 @@ func TestRunHelpAndVersion(t *testing.T) {
 	}
 
 	// --version carries the full identity: our version plus the compatibility
-	// baseline it tracks.
+	// baseline it tracks. These two lines are a contract pin — a script reads
+	// them — so the config layer's identity constants are pinned here through
+	// the output the CLI actually prints.
 	for _, arg := range []string{"--version", "version"} {
 		code, out, _ := run(t, "", arg)
 		if code != 0 {
@@ -63,7 +65,8 @@ func TestRunHelpAndVersion(t *testing.T) {
 // TestRunFailures locks the failure contract: anything the
 // parser or the command tree refuses is a usage failure and exits 2, with the
 // diagnostic on stderr and nothing on stdout. Removed commands are unknown
-// commands now, not "not implemented" options (D1/D14).
+// commands now, not "not implemented" options (D1/D14) — their own case is
+// TestRunHelpForACommandAndRemovedCommands.
 //
 // secret is the value a case hands to an option, when that value is something
 // that must not come back out: the refusal may name the option, never what was
@@ -77,7 +80,6 @@ func TestRunFailures(t *testing.T) {
 	}{
 		{"unknown option", []string{"--nonsense"}, "unknown option", ""},
 		{"unknown command", []string{"frobnicate"}, "unknown command", ""},
-		{"removed command", []string{"repair"}, "unknown command", ""},
 		{"removed option", []string{"--download"}, "unknown option", ""},
 		{"removed list option", []string{"--list", "details"}, "unknown option", ""},
 		{"missing value", []string{"list", "games", "--tag"}, "requires a value", ""},
@@ -116,6 +118,26 @@ func TestRunFailures(t *testing.T) {
 	}
 }
 
+// stripANSI drops the SGR sequences a coloured line is wrapped in, so a layout
+// assertion does not also pin the colour scheme.
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\033' {
+			b.WriteByte(s[i])
+			continue
+		}
+		for i < len(s) && s[i] != 'm' {
+			i++
+		}
+	}
+	return b.String()
+}
+
+// TestRenderGames locks the listing's layout and its one piece of state
+// marking: one line per game, the update count in brackets, one "+> " line per
+// DLC, and colour on the rows that carry state. The layout is compared with the
+// colour stripped, so changing the palette is not a change to the list.
 func TestRenderGames(t *testing.T) {
 	items := []model.GameItem{
 		{Name: "with-updates-new", Updates: 3, IsNew: true, DLCNames: []string{"dlc one", "dlc two"}},
@@ -128,17 +150,30 @@ func TestRenderGames(t *testing.T) {
 	if err := renderGames(&buf, items, true); err != nil {
 		t.Fatalf("renderGames: %v", err)
 	}
+	coloured := buf.String()
 	want := strings.Join([]string{
-		ansiNewGame + "with-updates-new [3]" + ansiReset,
+		"with-updates-new [3]",
 		"+> dlc one",
 		"+> dlc two",
-		ansiUpdated + "with-updates-old [1]" + ansiReset,
-		ansiNewGame + "new-only" + ansiReset,
+		"with-updates-old [1]",
+		"new-only",
 		"plain",
 		"",
 	}, "\n")
-	if buf.String() != want {
-		t.Errorf("coloured output:\n got %q\nwant %q", buf.String(), want)
+	if got := stripANSI(coloured); got != want {
+		t.Errorf("coloured layout:\n got %q\nwant %q", got, want)
+	}
+
+	// Colour marks a new game and a game with updates — and nothing else.
+	marked := map[string]bool{
+		"with-updates-new [3]": true,
+		"with-updates-old [1]": true,
+		"new-only":             true,
+	}
+	for _, line := range strings.Split(strings.TrimSuffix(coloured, "\n"), "\n") {
+		if got, want := strings.Contains(line, "\033["), marked[stripANSI(line)]; got != want {
+			t.Errorf("line %q coloured = %v, want %v: colour marks a new game or one with updates", line, got, want)
+		}
 	}
 
 	buf.Reset()

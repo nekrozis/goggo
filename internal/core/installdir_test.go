@@ -27,28 +27,89 @@ func installProduct() map[string]any {
 	}
 }
 
-// TestInstallSubdirTemplateTable locks the exported list as the one source of
-// truth: six unique names, and the two predicates agreeing with it.
+// TestInstallSubdirTemplateTable locks the exported list against the resolver
+// and the predicate, which is what makes the list a source of truth rather than
+// a table of its own: every name it carries resolves to the documented value
+// (a name the resolver does not implement would come back as its own literal
+// text), the predicate answers true exactly for the names whose value comes
+// from the product document, and the two agree about what a missing document
+// does. A name outside the list is rejected by both.
 func TestInstallSubdirTemplateTable(t *testing.T) {
-	if len(InstallSubdirTemplates) != 6 {
-		t.Fatalf("templates = %v, want the six names", InstallSubdirTemplates)
+	// The documented resolution of each template and whether it reads the
+	// product document.
+	documented := []struct {
+		template  string
+		want      string
+		needsInfo bool
+	}{
+		{"%install_dir%", "The Witcher 3: Wild Hunt - GOTY", false},
+		{"%product_id%", "1495134320", false},
+		{"%install_dir_stripped%", util.StrippedString("The Witcher 3: Wild Hunt - GOTY"), false},
+		{"%gamename%", "the_witcher_3_wild_hunt", true},
+		{"%title%", "The Witcher 3: Wild Hunt", true},
+		{"%title_stripped%", util.StrippedString("The Witcher 3: Wild Hunt"), true},
 	}
-	seen := map[string]bool{}
-	needsInfo := 0
+	values := make(map[string]string, len(documented))
+	for _, d := range documented {
+		values[d.template] = d.want
+	}
+
+	// Every exported name is one the resolver implements, and it resolves.
+	seen := make(map[string]bool, len(InstallSubdirTemplates))
 	for _, template := range InstallSubdirTemplates {
 		if seen[template] {
 			t.Errorf("%s is listed twice", template)
 		}
 		seen[template] = true
-		if !IsInstallSubdirTemplate(template) {
-			t.Errorf("IsInstallSubdirTemplate(%s) = false", template)
+		want, ok := values[template]
+		if !ok {
+			t.Errorf("%s is exported but has no documented resolution", template)
+			continue
 		}
-		if InstallSubdirNeedsProductInfo(template) {
-			needsInfo++
+		got, err := ResolveInstallSubdir(template, installManifest(), installProduct())
+		if err != nil {
+			t.Errorf("ResolveInstallSubdir(%q): %v", template, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("ResolveInstallSubdir(%q) = %q, want %q", template, got, want)
 		}
 	}
-	if needsInfo != 3 {
-		t.Errorf("templates needing product info = %d, want the three that read the document", needsInfo)
+
+	// And the list carries every documented name: one it did not would be a
+	// template the front end's whitelist rejects.
+	for _, d := range documented {
+		if !IsInstallSubdirTemplate(d.template) {
+			t.Errorf("IsInstallSubdirTemplate(%q) = false, want the exported list to carry every documented template", d.template)
+		}
+	}
+
+	// The predicate is the resolver's own rule for the same set: without a
+	// product document the names it claims come back as their literal text —
+	// which is what a caller that skipped the request has to get — and the
+	// names it does not claim do not move.
+	for _, d := range documented {
+		if got := InstallSubdirNeedsProductInfo(d.template); got != d.needsInfo {
+			t.Errorf("InstallSubdirNeedsProductInfo(%q) = %v, want %v", d.template, got, d.needsInfo)
+		}
+		withProduct, err := ResolveInstallSubdir(d.template, installManifest(), installProduct())
+		if err != nil {
+			t.Fatalf("ResolveInstallSubdir(%q): %v", d.template, err)
+		}
+		withoutProduct, err := ResolveInstallSubdir(d.template, installManifest(), nil)
+		if err != nil {
+			t.Fatalf("ResolveInstallSubdir(%q): %v", d.template, err)
+		}
+		if d.needsInfo {
+			if withoutProduct != d.template {
+				t.Errorf("ResolveInstallSubdir(%q) without a product document = %q, want the literal name", d.template, withoutProduct)
+			}
+			continue
+		}
+		if withoutProduct != withProduct {
+			t.Errorf("ResolveInstallSubdir(%q) without a product document = %q, want the same %q as with one",
+				d.template, withoutProduct, withProduct)
+		}
 	}
 
 	for _, name := range []string{"", "games", "%foo%", "%install_dir%/data", "%install_dir%x", "%GAMENAME%"} {

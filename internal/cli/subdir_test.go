@@ -68,8 +68,9 @@ func TestParseRemoteXMLDefault(t *testing.T) {
 	}
 }
 
-// TestSubdirDefaults locks the values applyParseDefaults writes, read through
-// the config table.
+// TestSubdirDefaults locks the values applyParseDefaults writes for the six
+// domains: the parsed default is what the download path actually uses, so this
+// is the CLI's half of the config table's defaults.
 func TestSubdirDefaults(t *testing.T) {
 	inv := mustParse(t, "download", "some_game")
 	want := map[string]string{
@@ -81,13 +82,6 @@ func TestSubdirDefaults(t *testing.T) {
 		"game":           "%gamename%",
 	}
 	for name, expected := range want {
-		opt, ok := config.SubdirOptionByName(name)
-		if !ok {
-			t.Fatalf("config table lost the %q domain", name)
-		}
-		if opt.Default != expected {
-			t.Errorf("config default for %s = %q, want %q", name, opt.Default, expected)
-		}
 		if got := subdirField(inv.cfg.Directories, name); got != expected {
 			t.Errorf("parsed default --subdir-%s = %q, want %q", name, got, expected)
 		}

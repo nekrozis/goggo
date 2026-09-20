@@ -6,11 +6,32 @@ import (
 	"github.com/nekrozis/goggo/internal/core"
 )
 
+// walkCommandTree visits every runnable node of the command tree. Three tests
+// below walk the same tree; one visitor keeps the leaf/namespace rule (a node
+// can be both, "download") in a single place.
+func walkCommandTree(visit func(commandNode)) {
+	var walk func([]commandNode)
+	walk = func(nodes []commandNode) {
+		for _, n := range nodes {
+			if n.id != cmdNone {
+				visit(n)
+			}
+			if len(n.children) != 0 {
+				walk(n.children)
+			}
+		}
+	}
+	walk(commandTree)
+}
+
 // TestCommandTreeDeclaresASessionClass is the completeness guard of the login
 // contract: every runnable leaf declares what it needs from
 // the session, each declaration is the one the contract names, and a new command
 // that forgets the field fails here instead of at run time — where the class
 // would still be unset and sessionRequest would panic.
+//
+// This is also the home of the full commandID -> sessionClass mapping; the
+// parser tests only sample it.
 func TestCommandTreeDeclaresASessionClass(t *testing.T) {
 	want := map[commandID]sessionClass{
 		cmdAuthLogin:     sessionExplicitLogin,
@@ -33,27 +54,16 @@ func TestCommandTreeDeclaresASessionClass(t *testing.T) {
 	}
 
 	seen := map[commandID]bool{}
-	var walk func([]commandNode)
-	walk = func(nodes []commandNode) {
-		for _, n := range nodes {
-			// A node can be leaf and namespace at once ("download"): the leaf
-			// check and the recursion are independent.
-			if n.id != cmdNone {
-				if n.session == sessionUnset {
-					t.Errorf("%s does not declare a session class", n.name)
-					continue
-				}
-				seen[n.id] = true
-				if got := want[n.id]; got != n.session {
-					t.Errorf("%s session = %s, want %s", n.name, n.session, got)
-				}
-			}
-			if len(n.children) != 0 {
-				walk(n.children)
-			}
+	walkCommandTree(func(n commandNode) {
+		if n.session == sessionUnset {
+			t.Errorf("%s does not declare a session class", n.name)
+			return
 		}
-	}
-	walk(commandTree)
+		seen[n.id] = true
+		if got := want[n.id]; got != n.session {
+			t.Errorf("%s session = %s, want %s", n.name, n.session, got)
+		}
+	})
 
 	for id := range want {
 		if !seen[id] {
@@ -64,7 +74,8 @@ func TestCommandTreeDeclaresASessionClass(t *testing.T) {
 
 // TestParseCarriesTheDeclaredSessionClass locks the copy from the tree node into
 // the invocation: the dispatcher acts on the declaration, so the value the
-// parser hands over is part of the contract.
+// parser hands over is part of the contract. One command per class is enough —
+// the mapping itself is TestCommandTreeDeclaresASessionClass'.
 func TestParseCarriesTheDeclaredSessionClass(t *testing.T) {
 	cases := []struct {
 		args []string
@@ -72,14 +83,8 @@ func TestParseCarriesTheDeclaredSessionClass(t *testing.T) {
 	}{
 		{[]string{"auth", "login"}, sessionExplicitLogin},
 		{[]string{"auth", "logout"}, sessionNone},
-		{[]string{"auth", "status"}, sessionNone},
 		{[]string{"list", "games"}, sessionRequired},
-		{[]string{"list", "wishlist"}, sessionRequired},
-		{[]string{"show", "manifest", "123"}, sessionRequired},
 		{[]string{"install", "123"}, sessionImplicitLogin},
-		{[]string{"verify", "123"}, sessionRequired},
-		{[]string{"orphans", "check", "123"}, sessionRequired},
-		{[]string{"orphans", "remove", "123", "--yes"}, sessionImplicitLogin},
 	}
 	for _, c := range cases {
 		if inv := parseOpts(t, c.args...); inv.session != c.want {
@@ -141,21 +146,15 @@ func TestOnlyWritingCommandsMayLogIn(t *testing.T) {
 		cmdOrphansRemove: true,
 		cmdAuthLogin:     true,
 	}
-	var walk func([]commandNode)
-	walk = func(nodes []commandNode) {
-		for _, n := range nodes {
-			if n.id != cmdNone && !may[n.id] {
-				for _, interactive := range []bool{true, false} {
-					if req := sessionRequest(n.session, interactive); req.AllowLogin {
-						t.Errorf("%s may log in (interactive=%v): it does not write and is not a login",
-							n.name, interactive)
-					}
-				}
-			}
-			if len(n.children) != 0 {
-				walk(n.children)
+	walkCommandTree(func(n commandNode) {
+		if may[n.id] {
+			return
+		}
+		for _, interactive := range []bool{true, false} {
+			if req := sessionRequest(n.session, interactive); req.AllowLogin {
+				t.Errorf("%s may log in (interactive=%v): it does not write and is not a login",
+					n.name, interactive)
 			}
 		}
-	}
-	walk(commandTree)
+	})
 }

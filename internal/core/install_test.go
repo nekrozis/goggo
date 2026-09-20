@@ -8,12 +8,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/nekrozis/goggo/internal/galaxy"
 	"github.com/nekrozis/goggo/internal/model"
@@ -194,12 +196,55 @@ func TestInstallEndToEnd(t *testing.T) {
 	assertFileContent(t, installPath+"/goggame-"+planProductID+".info", `{"buildId":"b-old"}`)
 }
 
+// chunkGate is the network exit this test hands the run: every request goes
+// through to the fixture, and a chunk body is handed over in two steps. The
+// transfer's first read of the body is answered with whatever the fixture
+// flushed; the second read stops here — after that first read's bytes have been
+// published into the progress registry, and before any of the rest can arrive.
+// That is what makes the sample below an observation rather than a poll.
+type chunkGate struct {
+	inner   http.RoundTripper
+	arrived chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (g *chunkGate) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := g.inner.RoundTrip(req)
+	if err != nil || !strings.Contains(req.URL.Path, "/chunks/") {
+		return resp, err
+	}
+	resp.Body = &gatedBody{body: resp.Body, gate: g}
+	return resp, nil
+}
+
+// gatedBody stops the read after the first one: closing arrived tells the test
+// the first read's bytes are published, and the read returns once the test
+// releases the run.
+type gatedBody struct {
+	body  io.ReadCloser
+	gate  *chunkGate
+	reads int
+}
+
+func (b *gatedBody) Read(p []byte) (int, error) {
+	if b.reads > 0 {
+		b.gate.once.Do(func() { close(b.gate.arrived) })
+		<-b.gate.release
+	}
+	b.reads++
+	return b.body.Read(p)
+}
+
+func (b *gatedBody) Close() error { return b.body.Close() }
+
 // TestInstallPublishesProgressThroughTheRun locks the injection chain the front
 // end relies on: the registry handed in through Dependencies reaches the
 // transfer run, which publishes into it while a chunk is still arriving and
 // clears the slot once the task is done. The fixture holds the second half of
-// the only chunk until the test has looked, so the partial reading is a
-// controlled moment rather than a race.
+// the only chunk until the test has looked, and the transport holds the read
+// that would consume it, so the partial reading is a controlled moment rather
+// than a race.
 func TestInstallPublishesProgressThroughTheRun(t *testing.T) {
 	f := newPlanFixture(t)
 	payload := planChunkPayload(t, "progress through the install run")
@@ -236,7 +281,18 @@ func TestInstallPublishesProgressThroughTheRun(t *testing.T) {
 	destination := cfg.Directories.Directory + "W3 GOTY/game/data.bin"
 	progress := transfer.NewProgress()
 
-	d := newOfflineDownloaderWith(t, f.Server, cfg, newFakeConsole(), Dependencies{Progress: progress})
+	target, err := url.Parse(f.Server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := &chunkGate{
+		inner:   &gogHostTransport{target: target},
+		arrived: make(chan struct{}),
+		release: release,
+	}
+
+	d := newOfflineDownloaderWith(t, f.Server, cfg, newFakeConsole(),
+		Dependencies{Progress: progress, HTTPTransport: gate})
 	// The offline downloader builds an empty credential store; give it a fresh
 	// token so the transfer's per-chunk expiry checks pass without a refresh.
 	d.token.SetJSON(map[string]any{
@@ -246,16 +302,14 @@ func TestInstallPublishesProgressThroughTheRun(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- d.Install(context.Background(), NewInstallRequest(cfg, planProductID, "")) }()
 
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if v, ok := progress.Bytes(destination); ok && v > 0 && v < int64(len(payload.compressed)) {
-			break
-		}
-		if time.Now().After(deadline) {
-			v, ok := progress.Bytes(destination)
-			t.Fatalf("no in-flight sample for %s: Bytes = (%d, %v)", destination, v, ok)
-		}
-		time.Sleep(time.Millisecond)
+	select {
+	case <-gate.arrived:
+	case err := <-done:
+		t.Fatalf("Install finished before the chunk body was gated (err = %v)", err)
+	}
+	if v, ok := progress.Bytes(destination); !ok || v <= 0 || v >= int64(len(payload.compressed)) {
+		t.Fatalf("in-flight sample for %s: Bytes = (%d, %v), want a partial count below %d",
+			destination, v, ok, len(payload.compressed))
 	}
 	if v, ok := progress.Total(destination); !ok || v != int64(len(payload.compressed)) {
 		t.Errorf("Total while in flight = (%d, %v), want (%d, true)", v, ok, len(payload.compressed))

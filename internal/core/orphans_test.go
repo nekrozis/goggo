@@ -105,12 +105,12 @@ func TestCheckOrphanedFilesIgnorelist(t *testing.T) {
 	}
 	// The ignorelisted file survives deletion and is not an orphan.
 	assertFileContent(t, filepath.Join(f.root, "leftover.bin"), "x")
-	if strings.Contains(consoleText(t, d), "orphaned files") &&
-		strings.Contains(consoleText(t, d), "\t1 orphaned files") {
-		t.Errorf("the ignorelisted file was counted: %s", consoleText(t, d))
+	out := consoleText(t, d)
+	if strings.Contains(out, "\t1 orphaned files") {
+		t.Errorf("the ignorelisted file was counted: %s", out)
 	}
-	if !strings.Contains(consoleText(t, d), "\t0 orphaned files") {
-		t.Errorf("output = %q, want 0 orphans after the ignorelist skip", consoleText(t, d))
+	if !strings.Contains(out, "\t0 orphaned files") {
+		t.Errorf("output = %q, want 0 orphans after the ignorelist skip", out)
 	}
 	if !strings.Contains(consoleErrText(t, d), "skipped ignorelisted file") {
 		t.Errorf("stderr = %q, want the verbose skip notice", consoleErrText(t, d))

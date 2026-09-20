@@ -197,17 +197,18 @@ func TestRemoveOrphansWithYesDoesNotAsk(t *testing.T) {
 // TestRemoveOrphansAsksWithoutYes locks the other half: with no --yes the question
 // decides, and only a clear yes deletes. The list of files that must survive a
 // "no" is the same list that would have gone — nothing else is touched either way.
+//
+// The vocabulary of answers — which spellings mean yes, what an empty line or
+// EOF means — is TestConfirm's single home; this test is about the transaction
+// the answer authorizes, so it drives one yes and one no through it.
 func TestRemoveOrphansAsksWithoutYes(t *testing.T) {
 	cases := []struct {
 		name       string
 		stdin      string
 		wantDelete bool
 	}{
-		{"y", "y\n", true},
 		{"yes", "yes\n", true},
-		{"n", "n\n", false},
-		{"empty", "\n", false},
-		{"no answer", "", false},
+		{"no", "n\n", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

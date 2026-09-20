@@ -154,14 +154,20 @@ func newOfflineDownloader(t *testing.T, srv *httptest.Server, cfg config.Config,
 
 // newOfflineDownloaderWith is newOfflineDownloader with the injection seam the
 // front end uses: the progress registry travels the same route, from
-// Dependencies into the downloader and on into the transfer run.
+// Dependencies into the downloader and on into the transfer run. A test that
+// hands in its own network exit gets it in place of the fixture's host rewrite,
+// which is the same seam the front end has.
 func newOfflineDownloaderWith(t *testing.T, srv *httptest.Server, cfg config.Config, ui Console, deps Dependencies) *Downloader {
 	t.Helper()
-	target, err := url.Parse(srv.URL)
-	if err != nil {
-		t.Fatalf("parse server URL: %v", err)
+	rt := deps.HTTPTransport
+	if rt == nil {
+		target, err := url.Parse(srv.URL)
+		if err != nil {
+			t.Fatalf("parse server URL: %v", err)
+		}
+		rt = &gogHostTransport{target: target}
 	}
-	hx, err := httpx.New(httpx.Config{HTTPClient: &http.Client{Transport: &gogHostTransport{target: target}}})
+	hx, err := httpx.New(httpx.Config{HTTPClient: &http.Client{Transport: rt}})
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
@@ -1015,9 +1021,10 @@ func TestSessionRequestExplicitLoginKeepsTheNonInteractiveBranch(t *testing.T) {
 }
 
 // TestRetryWaitIsMilliseconds locks the unit the CLI exposes: --wait counts
-// MILLISECONDS, so the website backoff must be built from milliseconds; the
-// earlier microsecond reading made every retry wait 1000x shorter than the
-// option asked for.
+// MILLISECONDS, so the wait the client is built with is exactly the configured
+// number of milliseconds — the ends of the range included (zero stays zero, a
+// large value keeps its magnitude). The wiring that puts that value on the wire
+// is TestSessionRetryWaitReachesTheWire's subject.
 func TestRetryWaitIsMilliseconds(t *testing.T) {
 	for _, tc := range []struct {
 		wait int
@@ -1033,11 +1040,6 @@ func TestRetryWaitIsMilliseconds(t *testing.T) {
 		if got := retryWait(cfg); got != tc.want {
 			t.Errorf("retryWait(--wait %d) = %v, want %v", tc.wait, got, tc.want)
 		}
-	}
-	cfg := config.Config{}
-	cfg.Wait = 500
-	if got := retryWait(cfg); got == 500*time.Microsecond {
-		t.Error("retryWait still reads --wait as microseconds")
 	}
 }
 

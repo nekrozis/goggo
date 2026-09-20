@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/config"
-	"github.com/nekrozis/goggo/internal/core"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -79,24 +78,15 @@ func TestCommandTreeResolution(t *testing.T) {
 }
 
 // TestRemovedCommandsAreUnknown locks D14: the commands this build does not
-// have are absent from the tree, and the ones whose capability moved somewhere
-// else are diagnosed with a hint.
+// have are absent from the tree. The removed option whose capability moved
+// somewhere else is the parser's own case in options_test.go
+// (TestParseUnknownAndRemovedOptions).
 func TestRemovedCommandsAreUnknown(t *testing.T) {
 	for _, name := range []string{"repair", "xml", "cache", "cloud", "config"} {
 		err := mustUsageError(t, name)
 		if !strings.Contains(err.Error(), "unknown command") {
 			t.Errorf("parseArgs(%s) error = %v, want an unknown command", name, err)
 		}
-	}
-	// The hint is a diagnosis, not a compatibility path: the option still
-	// fails, and nothing was translated.
-	err := mustUsageError(t, "--galaxy-install", "123")
-	if !strings.Contains(err.Error(), "unknown option") || !strings.Contains(err.Error(), "hint: use 'goggo install <game>'") {
-		t.Errorf("error = %v, want the unknown option plus the migration hint", err)
-	}
-	inv, err2 := parseArgs([]string{"--galaxy-install", "123"}, baseConfig())
-	if err2 == nil || inv.cmd != cmdNone {
-		t.Errorf("removed option produced %+v / %v, want a failure and no invocation", inv, err2)
 	}
 }
 
@@ -192,99 +182,47 @@ func TestOptionAcceptanceIsPerCommand(t *testing.T) {
 	}
 }
 
-// TestValueParsersReuseTheExistingSemantics locks that the parser produces
-// exactly what the shared option helpers produce, not a second interpretation of
-// the same syntax.
-func TestValueParsersReuseTheExistingSemantics(t *testing.T) {
-	inv := mustParse(t, "list", "games", "--installer-platform", "windows,linux+mac")
-	wantPriority, wantMask := util.ParseOptionString("windows,linux+mac", config.Platforms)
-	if inv.cfg.DownloadConfig.InstallerPlatform != wantMask || inv.cfg.PlatformPriority != "windows,linux+mac" {
-		t.Errorf("installer platform = %#x/%q, want %#x/%q",
-			inv.cfg.DownloadConfig.InstallerPlatform, inv.cfg.PlatformPriority, wantMask, "windows,linux+mac")
-	}
-	if len(wantPriority) == 0 {
-		t.Error("the shared helper produced no priority, so the test proves nothing")
-	}
-	if len(inv.cfg.DownloadConfig.PlatformPriority) != len(wantPriority) {
-		t.Errorf("platform priority = %v, want %v", inv.cfg.DownloadConfig.PlatformPriority, wantPriority)
-	}
-
-	inv = mustParse(t, "verify", "123", "--include", "installers,patches", "--exclude", "patches")
-	want := optionMask("installers,patches", config.IncludeOptions) &^ optionMask("patches", config.IncludeOptions)
-	if inv.cfg.DownloadConfig.Include != want {
-		t.Errorf("include mask = %#x, want %#x", inv.cfg.DownloadConfig.Include, want)
+// TestInstallerPlatformReusesTheSharedOptionHelper locks the listing side of
+// the platform vocabulary (the install side is options_test.go's
+// TestParsePlatformAndLanguage): --installer-platform speaks the shared
+// priority syntax, and the parser produces exactly what the shared helper
+// produces for it. A second interpretation of the same syntax is what this
+// refuses.
+func TestInstallerPlatformReusesTheSharedOptionHelper(t *testing.T) {
+	const list = "windows,linux+mac"
+	wantPriority, wantMask := util.ParseOptionString(list, config.Platforms)
+	// The helper's own answer is stated here so a helper that stopped grouping
+	// would not quietly turn the comparison below into a tautology: one group
+	// per comma, each group the OR of its "+"-joined parts.
+	wantGrouped := config.PlatformLinux | config.PlatformMac
+	if len(wantPriority) != 2 || wantPriority[0] != config.PlatformWindows || wantPriority[1] != wantGrouped ||
+		wantMask != config.PlatformWindows|wantGrouped {
+		t.Fatalf("ParseOptionString(%q) = %v/%#x, want the windows group then the linux+mac group", list, wantPriority, wantMask)
 	}
 
-	// --platform selects the Galaxy platform (single value), while the listing
-	// uses --installer-platform (priority syntax): two different options, two
-	// different meanings.
-	inv = mustParse(t, "install", "123", "--platform", "windows")
-	if inv.cfg.DownloadConfig.GalaxyPlatform != config.PlatformWindows {
-		t.Errorf("galaxy platform = %#x, want windows", inv.cfg.DownloadConfig.GalaxyPlatform)
+	inv := mustParse(t, "list", "games", "--installer-platform", list)
+	if inv.cfg.DownloadConfig.InstallerPlatform != wantMask {
+		t.Errorf("installer platform = %#x, want the helper's %#x", inv.cfg.DownloadConfig.InstallerPlatform, wantMask)
 	}
-	mustUsageError(t, "install", "123", "--platform", "bogus")
+	if inv.cfg.PlatformPriority != list {
+		t.Errorf("platform priority = %q, want the list kept verbatim", inv.cfg.PlatformPriority)
+	}
+	if got := inv.cfg.DownloadConfig.PlatformPriority; len(got) != len(wantPriority) ||
+		got[0] != wantPriority[0] || got[1] != wantPriority[1] {
+		t.Errorf("platform priority groups = %v, want the helper's %v", got, wantPriority)
+	}
+
+	// An unmatched value is that same helper's failure: it resolves to no bit,
+	// which the parser refuses instead of storing.
 	mustUsageError(t, "list", "games", "--installer-platform", "bogus")
-
-	// --arch: an unmatched value, and "all", mean 64-bit.
-	if inv := mustParse(t, "install", "123", "--arch", "bogus"); inv.cfg.DownloadConfig.GalaxyArch != config.ArchX64 {
-		t.Error("--arch bogus must fall back to x64")
-	}
-
-	// --progress-interval is clamped, not replaced by the default.
-	if inv := mustParse(t, "install", "123", "--progress-interval", "99999"); inv.cfg.ProgressInterval != progressIntervalMax {
-		t.Errorf("progress interval = %d, want the clamp to %d", inv.cfg.ProgressInterval, progressIntervalMax)
-	}
-	if inv := mustParse(t, "install", "123", "--progress-interval", "0"); inv.cfg.ProgressInterval != progressIntervalMin {
-		t.Errorf("progress interval = %d, want the clamp to %d", inv.cfg.ProgressInterval, progressIntervalMin)
-	}
-
-	// --directory is normalised the way the install path is built.
-	if inv := mustParse(t, "install", "123", "--directory", "/tmp/games"); inv.cfg.Directories.Directory != "/tmp/games/" {
-		t.Errorf("directory = %q, want a trailing separator", inv.cfg.Directories.Directory)
-	}
-	if inv := mustParse(t, "install", "123"); inv.cfg.Directories.Directory != defaultDirectory {
-		t.Errorf("default directory = %q, want %q", inv.cfg.Directories.Directory, defaultDirectory)
-	}
-
-	// --install-dir takes a concrete directory name or one of the templates the
-	// installer resolves. Anything else carrying a "%" is a half-exposed
-	// template language and stays refused.
-	if inv := mustParse(t, "install", "123", "--install-dir", "HoMM 3 Complete"); inv.cfg.Directories.GalaxyInstallSubdir != "HoMM 3 Complete" {
-		t.Error("--install-dir did not store the given directory name")
-	}
-	for _, template := range core.InstallSubdirTemplates {
-		inv := mustParse(t, "install", "123", "--install-dir", template)
-		if inv.cfg.Directories.GalaxyInstallSubdir != template {
-			t.Errorf("--install-dir %s = %q, want the template stored", template, inv.cfg.Directories.GalaxyInstallSubdir)
-		}
-	}
-	for _, name := range []string{"%foo%", "%gamename%/data", "%install_dir%x", "a%b"} {
-		err := mustUsageError(t, "install", "123", "--install-dir", name)
-		if !strings.Contains(err.Error(), "known templates") {
-			t.Errorf("--install-dir %s: error = %v, want the whitelist refusal", name, err)
-		}
-	}
-
-	// --verbose selects the verbose level, and nothing else.
-	if inv := mustParse(t, "list", "games", "--verbose"); inv.cfg.MsgLevel != msgLevelVerbose {
-		t.Errorf("msg level = %d, want %d", inv.cfg.MsgLevel, msgLevelVerbose)
-	}
-	if inv := mustParse(t, "list", "games", "-v"); inv.cfg.MsgLevel != msgLevelVerbose {
-		t.Errorf("-v did not select the verbose level")
-	}
-
-	// Negations clear their setting.
-	if inv := mustParse(t, "install", "123", "--no-subdirectories"); inv.cfg.Directories.SubDirectories {
-		t.Error("--no-subdirectories left the setting on")
-	}
-	if inv := mustParse(t, "install", "123", "--no-dependencies"); inv.cfg.DownloadConfig.GalaxyDependencies {
-		t.Error("--no-dependencies left the setting on")
-	}
 }
 
-// TestUnknownAndMalformedAreUsageErrors locks the single failure shape:
-// everything the parser refuses comes back as one error shape, so the caller has
-// a single mapping onto the usage exit code.
+// TestUnknownAndMalformedAreUsageErrors locks the single failure class:
+// everything the parser refuses — an unknown word, a missing value, a bad
+// arity, a value the option cannot take — comes back as a usage error, which is
+// the one mapping the caller has onto exit code 2. The wording is not the
+// contract here; run_test.go's TestRunFailures drives the same class through
+// Run and onto the code.
 func TestUnknownAndMalformedAreUsageErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"bogus"},
@@ -301,20 +239,16 @@ func TestUnknownAndMalformedAreUsageErrors(t *testing.T) {
 		{"version", "extra"},
 		{"install", "123", "--verbose=yes"},
 	} {
-		err := mustUsageError(t, args...)
-		if !strings.Contains(err.Error(), "unknown") && !strings.Contains(err.Error(), "takes") &&
-			!strings.Contains(err.Error(), "needs") && !strings.Contains(err.Error(), "requires") &&
-			!strings.Contains(err.Error(), "invalid") && !strings.Contains(err.Error(), "not accepted") &&
-			!strings.Contains(err.Error(), "does not take") {
-			t.Errorf("parseArgs(%v) error = %v, want a recognisable usage failure", args, err)
-		}
+		mustUsageError(t, args...)
 	}
 }
 
-// TestBareInvocationAndDefaults locks the two boundaries: a line with no
-// command parses to nothing to run (the caller decides what to print), and the
-// parser installs its own defaults — including the measured worker count (D9).
-func TestBareInvocationAndDefaults(t *testing.T) {
+// TestBareInvocation locks the boundary a line with no command leaves: nothing
+// to run (the caller decides what to print), and options without a command
+// still parse. The defaults the parser installs are locked in
+// TestThreadsPrecedence below, options_test.go's TestParseInstallDefaults and
+// subdir_test.go.
+func TestBareInvocation(t *testing.T) {
 	inv := mustParse(t)
 	if inv.cmd != cmdNone || inv.meta != metaNone {
 		t.Errorf("bare invocation = cmd %d / meta %d, want nothing to run", inv.cmd, inv.meta)
@@ -322,21 +256,6 @@ func TestBareInvocationAndDefaults(t *testing.T) {
 	inv = mustParse(t, "--verbose")
 	if inv.cmd != cmdNone || inv.cfg.MsgLevel != msgLevelVerbose {
 		t.Error("options without a command must still parse, with nothing to run")
-	}
-
-	cfg := baseConfig()
-	if _, err := parseArgs([]string{"install", "123"}, cfg); err != nil {
-		t.Fatal(err)
-	}
-	got := mustParse(t, "install", "123").cfg
-	if got.GalaxyBuildSortingOrder != defaultGalaxyBuildSort || got.Directories.GalaxyInstallSubdir != defaultGalaxyInstallSubdir {
-		t.Errorf("parser defaults missing: %+v", got.Directories)
-	}
-	if !got.Directories.SubDirectories || !got.DownloadConfig.GalaxyDependencies {
-		t.Error("the negations' defaults must be the positive values")
-	}
-	if got.Threads != defaultThreads {
-		t.Errorf("threads default = %d, want %d (D9/D46: the benchmark settled it)", got.Threads, defaultThreads)
 	}
 }
 

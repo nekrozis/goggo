@@ -3,15 +3,17 @@ package model
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/nekrozis/goggo/internal/config"
 )
 
 func TestNewGameFileDefaults(t *testing.T) {
 	f := NewGameFile()
-	if f.Platform != 1<<0 {
-		t.Errorf("Platform = %d, want PLATFORM_WINDOWS(1)", f.Platform)
+	if f.Platform != config.PlatformWindows {
+		t.Errorf("Platform = %d, want the Windows platform %d", f.Platform, config.PlatformWindows)
 	}
-	if f.Language != 1<<0 {
-		t.Errorf("Language = %d, want LANGUAGE_EN(1)", f.Language)
+	if f.Language != config.LangEN {
+		t.Errorf("Language = %d, want the English language %d", f.Language, config.LangEN)
 	}
 	if f.Silent != 0 || f.Type != 0 || f.Updated != 0 {
 		t.Errorf("Silent/Type/Updated defaults wrong: %d %d %d", f.Silent, f.Type, f.Updated)

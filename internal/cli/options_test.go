@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/core"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -70,6 +71,11 @@ func TestParsePlatformAndLanguage(t *testing.T) {
 	if inv.cfg.DownloadConfig.GalaxyArch != config.ArchX86 {
 		t.Errorf("arch = %#x, want x86", inv.cfg.DownloadConfig.GalaxyArch)
 	}
+	// An arch with no match falls back to 64-bit rather than failing: the
+	// Galaxy layer has no "unknown arch" state to report.
+	if got := parseOpts(t, "install", "123", "--arch", "nonsense").cfg.DownloadConfig.GalaxyArch; got != config.ArchX64 {
+		t.Errorf("unmatched arch = %#x, want the x64 fallback", got)
+	}
 	// A language with no match leaves 0, which the Galaxy layer reads as
 	// English.
 	if got := parseOpts(t, "install", "123", "--language", "nonsense").cfg.DownloadConfig.GalaxyLanguage; got != 0 {
@@ -124,8 +130,12 @@ func TestParseListResources(t *testing.T) {
 }
 
 // TestParseUnknownAndRemovedOptions locks the failure shape and the migration
-// hints (D2/D11): a removed option is still an error, and the hint only says
-// where the capability went.
+// hints (D2/D11): a removed option is still an error, the hint only says where
+// the capability went, and nothing is translated into an invocation.
+//
+// The credential options D19 refuses to introduce are the parser's other
+// refusal case — see TestCredentialOptionsAreNeverAdvertised, where their
+// absence of a hint is the point.
 func TestParseUnknownAndRemovedOptions(t *testing.T) {
 	for _, c := range []struct {
 		args []string
@@ -137,17 +147,15 @@ func TestParseUnknownAndRemovedOptions(t *testing.T) {
 		{[]string{"--download"}, ""},
 		{[]string{"--repair"}, ""},
 		{[]string{"--verbosity", "1"}, "goggo -v"},
-		// The credential options D19 refuses to introduce. They are unknown
-		// options like any other — see TestCredentialOptionsAreNeverAdvertised
-		// for why they carry no hint.
-		{[]string{"--password", "hunter2"}, ""},
-		{[]string{"--password-stdin"}, ""},
-		{[]string{"--token-stdin"}, ""},
-		{[]string{"--non-interactive"}, ""},
 	} {
-		_, err := parseArgs(c.args, testDefaults())
+		inv, err := parseArgs(c.args, testDefaults())
 		if err == nil || !isUsageError(err) {
 			t.Fatalf("parseArgs(%v) = %v, want a usage error", c.args, err)
+		}
+		// The hint is a diagnosis, not a compatibility path: the option still
+		// fails, and nothing was translated.
+		if inv.cmd != cmdNone {
+			t.Errorf("parseArgs(%v) produced %+v, want a failure and no invocation", c.args, inv)
 		}
 		if !strings.Contains(err.Error(), "unknown option") {
 			t.Errorf("parseArgs(%v) error = %v, want an unknown option", c.args, err)
@@ -376,7 +384,7 @@ func TestEnsureTrailingSlash(t *testing.T) {
 }
 
 // TestParseThreadsAndProgressInterval locks the two numeric rendering/transfer
-// knobs the parser owns; the clamp itself is locked in parse_test.go.
+// knobs the parser owns, the interval's clamp included.
 func TestParseThreadsAndProgressInterval(t *testing.T) {
 	inv := parseOpts(t, "install", "123", "--threads", "8", "--progress-interval", "50")
 	if inv.cfg.Threads != 8 || inv.cfg.ProgressInterval != 50 {
@@ -387,6 +395,14 @@ func TestParseThreadsAndProgressInterval(t *testing.T) {
 	}
 	if _, err := parseArgs([]string{"install", "123", "--progress-interval", "x"}, testDefaults()); err == nil {
 		t.Error("a malformed interval must be refused")
+	}
+	// A legal but out-of-range interval is clamped, not replaced by the
+	// default: the user asked for a cadence, just not one that is usable.
+	if got := parseOpts(t, "install", "123", "--progress-interval", "99999").cfg.ProgressInterval; got != progressIntervalMax {
+		t.Errorf("progress interval = %d, want the clamp to %d", got, progressIntervalMax)
+	}
+	if got := parseOpts(t, "install", "123", "--progress-interval", "0").cfg.ProgressInterval; got != progressIntervalMin {
+		t.Errorf("progress interval = %d, want the clamp to %d", got, progressIntervalMin)
 	}
 }
 
@@ -406,40 +422,22 @@ func TestParseOrphansOptions(t *testing.T) {
 	}
 }
 
-// TestNewConfigPaths locks the config-domain defaults (unchanged by the parser
-// rework, kept here so the file still covers them).
-func TestNewConfigPaths(t *testing.T) {
-	cfg := config.NewConfig("/cfg", "/cache")
-	if cfg.CacheDirectory != "/cache/goggo" || cfg.XMLDirectory != "/cache/goggo/xml" {
-		t.Errorf("cache paths = %q / %q", cfg.CacheDirectory, cfg.XMLDirectory)
+// TestParseInstallDirTemplates locks the install root's template family: every
+// template the resolver understands is accepted whole, and anything else
+// carrying a "%" is refused — a half-exposed template language would reach the
+// resolver unexpanded. A concrete directory name is TestParseInstallFlags'
+// case.
+func TestParseInstallDirTemplates(t *testing.T) {
+	for _, template := range core.InstallSubdirTemplates {
+		inv := parseOpts(t, "install", "123", "--install-dir", template)
+		if inv.cfg.Directories.GalaxyInstallSubdir != template {
+			t.Errorf("--install-dir %s = %q, want the template stored", template, inv.cfg.Directories.GalaxyInstallSubdir)
+		}
 	}
-	if cfg.ConfigFilePath != "/cfg/goggo/config.cfg" {
-		t.Errorf("config path = %q", cfg.ConfigFilePath)
-	}
-	if cfg.VersionString != config.VersionString || cfg.VersionNumber != config.Version {
-		t.Errorf("version = %q / %q", cfg.VersionString, cfg.VersionNumber)
-	}
-}
-
-// TestIdentityIsSeparateFromCompatibility locks the three-layer identity: the
-// program presents itself, and names the release it tracks only as a
-// compatibility baseline.
-func TestIdentityIsSeparateFromCompatibility(t *testing.T) {
-	if config.Version == config.UpstreamCompatibilityVersion {
-		t.Fatalf("own version %q must not equal the compatibility baseline", config.Version)
-	}
-	if !strings.HasPrefix(config.VersionString, config.ProgramName+" ") {
-		t.Errorf("VersionString = %q, want it to start with the program name", config.VersionString)
-	}
-	if strings.Contains(config.VersionString, config.UpstreamName) {
-		t.Errorf("VersionString = %q must not present another project as our identity", config.VersionString)
-	}
-
-	ua := config.DefaultUserAgent()
-	if !strings.HasPrefix(ua, config.ProgramName+"/"+config.Version) {
-		t.Errorf("UserAgent = %q, want it to start with %q", ua, config.ProgramName+"/"+config.Version)
-	}
-	if strings.Contains(ua, config.UpstreamName) {
-		t.Errorf("UserAgent = %q must not carry another product's name", ua)
+	for _, name := range []string{"%foo%", "%gamename%/data", "%install_dir%x", "a%b"} {
+		err := mustUsageError(t, "install", "123", "--install-dir", name)
+		if !strings.Contains(err.Error(), "known templates") {
+			t.Errorf("--install-dir %s: error = %v, want the whitelist refusal", name, err)
+		}
 	}
 }

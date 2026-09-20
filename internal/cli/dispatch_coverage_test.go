@@ -11,7 +11,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/core"
 )
 
@@ -160,6 +159,16 @@ func TestEveryCommandReachesAHandler(t *testing.T) {
 			if strings.Contains(errOut.String(), "unknown command") {
 				t.Fatalf("goggo %s is not in the tree: %s", strings.Join(args, " "), errOut.String())
 			}
+			// The handler's own error is fine — the fixture answers only what a
+			// session needs — but the exit code still has to come from the
+			// documented set (run.go is its single authority). A panic or a
+			// stray code is a dispatch bug, not a command's answer.
+			switch code {
+			case 0, 1, 2, 130:
+			default:
+				t.Fatalf("goggo %s exited %d, want one of 0/1/2/130:\n%s",
+					strings.Join(args, " "), code, errOut.String())
+			}
 		})
 	}
 }
@@ -198,5 +207,4 @@ func TestAuthLoginSucceedsAndExitsZero(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cfg.ConfigDirectory, "cookies.txt")); err != nil {
 		t.Errorf("cookie file was not written: %v", err)
 	}
-	_ = config.Config{}
 }

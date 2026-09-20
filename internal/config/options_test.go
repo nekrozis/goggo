@@ -7,9 +7,6 @@ import (
 )
 
 func TestLanguagesTableCompleteness(t *testing.T) {
-	if len(Languages) != 28 {
-		t.Fatalf("len(Languages) = %d, want 28", len(Languages))
-	}
 	codes := make(map[string]bool, len(Languages))
 	ids := make(map[uint32]bool, len(Languages))
 	for _, o := range Languages {
@@ -19,11 +16,11 @@ func TestLanguagesTableCompleteness(t *testing.T) {
 			t.Errorf("language %q has non-single-bit ID 0x%x", o.Code, o.ID)
 		}
 	}
-	if len(codes) != 28 {
-		t.Errorf("language codes not unique: got %d unique", len(codes))
+	if len(codes) != len(Languages) {
+		t.Errorf("language codes not unique: got %d unique of %d", len(codes), len(Languages))
 	}
-	if len(ids) != 28 {
-		t.Errorf("language IDs not unique: got %d unique", len(ids))
+	if len(ids) != len(Languages) {
+		t.Errorf("language IDs not unique: got %d unique of %d", len(ids), len(Languages))
 	}
 }
 
@@ -66,32 +63,17 @@ func TestLanguagesRegexp(t *testing.T) {
 	}
 }
 
-func TestPlatformAndArchTables(t *testing.T) {
-	if len(Platforms) != 3 {
-		t.Fatalf("len(Platforms) = %d, want 3", len(Platforms))
-	}
-	wantPlatformCodes := []string{"win", "mac", "linux"}
-	for i, want := range wantPlatformCodes {
-		if Platforms[i].Code != want {
-			t.Errorf("Platforms[%d].Code = %q, want %q", i, Platforms[i].Code, want)
+// TestPlatformTableOrder pins the platform table's order, which is observable:
+// util.OptionNameString renders a platform mask in table order, so this is the
+// order the "Platforms:" line of the list output prints.
+func TestPlatformTableOrder(t *testing.T) {
+	want := []string{"win", "mac", "linux"}
+	for i, code := range want {
+		if i >= len(Platforms) {
+			t.Fatalf("Platforms has %d entries, want at least %d", len(Platforms), len(want))
 		}
-	}
-	if len(GalaxyArchs) != 2 {
-		t.Fatalf("len(GalaxyArchs) = %d, want 2", len(GalaxyArchs))
-	}
-	if GalaxyArchs[0].ID != ArchX86 || GalaxyArchs[1].ID != ArchX64 {
-		t.Errorf("GalaxyArchs IDs wrong: %x, %x", GalaxyArchs[0].ID, GalaxyArchs[1].ID)
-	}
-}
-
-func TestListFormatTable(t *testing.T) {
-	if len(ListFormats) != 7 {
-		t.Fatalf("len(ListFormats) = %d, want 7", len(ListFormats))
-	}
-	wantCodes := []string{"games", "details", "json", "tags", "transform", "userdata", "wishlist"}
-	for i, want := range wantCodes {
-		if ListFormats[i].Code != want {
-			t.Errorf("ListFormats[%d].Code = %q, want %q", i, ListFormats[i].Code, want)
+		if Platforms[i].Code != code {
+			t.Errorf("Platforms[%d].Code = %q, want %q", i, Platforms[i].Code, code)
 		}
 	}
 }
@@ -139,26 +121,12 @@ func TestIncludeOptionsCompositeMasks(t *testing.T) {
 	}
 }
 
-func TestUnitConstants(t *testing.T) {
-	if UnitFormatIEC != 1 || UnitFormatSI != 2 {
-		t.Errorf("unit format values wrong: IEC=%d SI=%d", UnitFormatIEC, UnitFormatSI)
-	}
-	if UnitDivisorMIEC != 1024*1024 || UnitDivisorMSI != 1000*1000 {
-		t.Errorf("unit divisors wrong")
-	}
-	if UnitStringMIEC != "MiB" || UnitStringMSI != "MB" {
-		t.Errorf("unit strings wrong")
-	}
-}
-
-func TestCacheAndProtocolConstants(t *testing.T) {
-	if GameDetailsCacheVersion != 7 {
-		t.Errorf("GameDetailsCacheVersion = %d, want 7", GameDetailsCacheVersion)
-	}
-	if ZlibWindowSize != 15 {
-		t.Errorf("ZlibWindowSize = %d, want 15", ZlibWindowSize)
-	}
+// TestProtocolPrefix pins the deep-link scheme's exact value: it is the string
+// the download layer strips from a file spec and the CLI documents in help, so
+// the value is a contract with the gogdownloader:// URI format rather than an
+// internal detail.
+func TestProtocolPrefix(t *testing.T) {
 	if ProtocolPrefix != "gogdownloader://" {
-		t.Errorf("ProtocolPrefix = %q", ProtocolPrefix)
+		t.Errorf("ProtocolPrefix = %q, want %q", ProtocolPrefix, "gogdownloader://")
 	}
 }

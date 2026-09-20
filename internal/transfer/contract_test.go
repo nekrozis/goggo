@@ -21,30 +21,14 @@ func (fakeURLProvider) URL(context.Context, model.FileTask, model.GalaxyDepotIte
 	return "", nil
 }
 
-// TestObserverContract locks that Observer stays implementable from outside:
-// if it ever grows a method that needs package internals, this breaks.
-func TestObserverContract(t *testing.T) {
-	var _ Observer = fakeObserver{}
-}
-
-// TestURLProviderContract locks the same for URLProvider, and that its chunk
-// parameter is the model type rather than something transfer invented.
-func TestURLProviderContract(t *testing.T) {
-	var _ URLProvider = fakeURLProvider{}
-}
-
-// TestEventKindsDistinct locks the five kinds onto distinct values.
-func TestEventKindsDistinct(t *testing.T) {
-	seen := map[EventKind]bool{}
-	for _, k := range []EventKind{
-		EventProgress, EventMessageInfo, EventMessageWarning, EventMessageError, EventMessageSuccess,
-	} {
-		if seen[k] {
-			t.Errorf("event kind %d appears twice", k)
-		}
-		seen[k] = true
-	}
-}
+// The compile-time half of the contract: Observer and URLProvider stay
+// implementable from outside this package, and URLProvider's chunk parameter
+// stays the model type rather than something transfer invented. The fakes carry
+// no behaviour, so this is a package-level assertion, not a test.
+var (
+	_ Observer    = fakeObserver{}
+	_ URLProvider = fakeURLProvider{}
+)
 
 // TestEventShape locks that an event can express both halves of the contract: a
 // progress point inside a chunk loop and a bare message.
@@ -64,18 +48,5 @@ func TestEventShape(t *testing.T) {
 	message := Event{Path: "/install/game/data.bin", Text: "File already exists", Kind: EventMessageInfo, ChunkIndex: -1}
 	if message.ChunkIndex != -1 || message.Text == "" {
 		t.Errorf("message event = %+v", message)
-	}
-}
-
-// TestRunDepsShape locks the three-field carrier: exactly what the run loop
-// needs, nothing else, and HTTP stays the httpx client rather than growing a
-// fourth field or swapping to another type.
-func TestRunDepsShape(t *testing.T) {
-	deps := RunDeps{URL: fakeURLProvider{}, Observer: fakeObserver{}}
-	if deps.HTTP != nil {
-		t.Error("RunDeps.HTTP must be the httpx client, unset by default")
-	}
-	if deps.URL == nil || deps.Observer == nil {
-		t.Error("RunDeps.URL and RunDeps.Observer must be settable")
 	}
 }

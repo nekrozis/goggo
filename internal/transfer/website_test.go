@@ -141,16 +141,6 @@ func newWebsiteEnv(t *testing.T, blacklist func(string) bool, remoteXML, trustAP
 	return env
 }
 
-func (e *websiteEnv) eventsFor(base string) []Event {
-	var out []Event
-	for _, ev := range e.obs.events {
-		if strings.HasSuffix(ev.Path, base) {
-			out = append(out, ev)
-		}
-	}
-	return out
-}
-
 // hasMessage reports whether one recorded message carries every token. It lets
 // a test ask the question once, instead of looping and then re-asking the
 // environment for the same list to build the failure message.

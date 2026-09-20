@@ -50,21 +50,19 @@ type recordingObserver struct {
 
 func (o *recordingObserver) OnEvent(ev Event) { o.events = append(o.events, ev) }
 
-// testCDN serves the compressed chunk bytes and counts the hits per path.
+// testCDN serves the compressed chunk bytes.
 type testCDN struct {
 	*httptest.Server
 
-	mu       sync.Mutex
-	bodies   map[string][]byte
-	requests map[string]int
+	mu     sync.Mutex
+	bodies map[string][]byte
 }
 
 func newTestCDN(t *testing.T) *testCDN {
 	t.Helper()
-	c := &testCDN{bodies: map[string][]byte{}, requests: map[string]int{}}
+	c := &testCDN{bodies: map[string][]byte{}}
 	c.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c.mu.Lock()
-		c.requests[r.URL.Path]++
 		body, ok := c.bodies[r.URL.Path]
 		c.mu.Unlock()
 
@@ -73,7 +71,7 @@ func newTestCDN(t *testing.T) *testCDN {
 			return
 		}
 		if status := r.Header.Get("X-Serve-Status"); status != "" {
-			// A requested failure status still consumes the hit.
+			// The requested status is served as itself.
 			w.WriteHeader(416)
 			return
 		}
@@ -87,12 +85,6 @@ func (c *testCDN) set(path string, body []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.bodies[path] = body
-}
-
-func (c *testCDN) hits(path string) int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.requests[path]
 }
 
 func (c *testCDN) url(path string) string { return c.URL + path }

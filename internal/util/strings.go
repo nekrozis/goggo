@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/nekrozis/goggo/internal/jsonread"
 )
 
 // strippedAllowed reports whether a byte survives StrippedString: an ASCII
@@ -61,7 +63,7 @@ func ManualURLsFromJSON(v jsontext.Value) ([]string, error) {
 func collectManualURLs(v jsontext.Value, urls *[]string) error {
 	switch v.Kind() {
 	case jsontext.KindBeginObject:
-		obj, err := memberObject(v)
+		obj, err := jsonread.Object(v)
 		if err != nil {
 			return err
 		}
@@ -72,7 +74,7 @@ func collectManualURLs(v jsontext.Value, urls *[]string) error {
 		sort.Strings(keys)
 		for _, k := range keys {
 			if k == "manualUrl" {
-				s, err := memberText(obj[k])
+				s, err := jsonread.Text(obj[k])
 				if err != nil {
 					return fmt.Errorf("util: manualUrl: %w", err)
 				}
@@ -84,7 +86,7 @@ func collectManualURLs(v jsontext.Value, urls *[]string) error {
 			}
 		}
 	case jsontext.KindBeginArray:
-		arr, err := memberArray(v)
+		arr, err := jsonread.Array(v)
 		if err != nil {
 			return err
 		}

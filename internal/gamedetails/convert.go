@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -167,7 +167,7 @@ func convertProduct(ctx context.Context, product map[string]jsontext.Value, cfg 
 		return GameDetails{}, wrap("gamedetails", err)
 	}
 	for i, node := range dlcs {
-		dlc, err := memberObject(node)
+		dlc, err := jsonread.Object(node)
 		if err != nil {
 			return GameDetails{}, wrap(fmt.Sprintf("gamedetails: expanded_dlcs[%d]", i), err)
 		}
@@ -203,7 +203,7 @@ func gameFiles(ctx context.Context, gamename, title, label string, nodes []jsont
 	isExtra := typeValue&config.GFBaseExtra != 0
 
 	for i, node := range nodes {
-		info, err := memberObject(node)
+		info, err := jsonread.Object(node)
 		if err != nil {
 			return nil, wrap(fmt.Sprintf("gamedetails: %s[%d]", label, i), err)
 		}
@@ -251,7 +251,7 @@ func gameFiles(ctx context.Context, gamename, title, label string, nodes []jsont
 			return nil, wrap(fmt.Sprintf("gamedetails: %s[%d]", label, i), err)
 		}
 		for j, fileNode := range files {
-			entry, err := memberObject(fileNode)
+			entry, err := jsonread.Object(fileNode)
 			if err != nil {
 				return nil, wrap(fmt.Sprintf("gamedetails: %s[%d].files[%d]", label, i, j), err)
 			}
@@ -353,7 +353,7 @@ func wrap(where string, err error) error {
 
 // fieldString reads a string field.
 func fieldString(obj map[string]jsontext.Value, name string) (string, error) {
-	value, err := stringOnly(obj[name])
+	value, err := jsonread.Text(obj[name])
 	if err != nil {
 		return "", wrap(name, err)
 	}
@@ -372,27 +372,27 @@ func fieldString(obj map[string]jsontext.Value, name string) (string, error) {
 // name, version and downlink stay free strings under fieldString's strict gate, and
 // `id` is the one family read through a conversion.
 func idString(obj map[string]jsontext.Value, name string) (string, error) {
-	value, err := identifierText(obj[name])
+	value, err := jsonread.Scalar(obj[name])
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", name, err)
 	}
 	return value, nil
 }
 
-// fieldObject reads an object field. memberObject is itself a shape assertion, so
+// fieldObject reads an object field. jsonread.Object is itself a shape assertion, so
 // it needs no separate gate. A missing member yields a nil map, which every reader
 // below treats as empty.
 func fieldObject(obj map[string]jsontext.Value, name string) (map[string]jsontext.Value, error) {
-	value, err := memberObject(obj[name])
+	value, err := jsonread.Object(obj[name])
 	if err != nil {
 		return nil, wrap(name, err)
 	}
 	return value, nil
 }
 
-// fieldArray reads an array field; memberArray is the shape assertion.
+// fieldArray reads an array field; jsonread.Array is the shape assertion.
 func fieldArray(obj map[string]jsontext.Value, name string) ([]jsontext.Value, error) {
-	value, err := memberArray(obj[name])
+	value, err := jsonread.Array(obj[name])
 	if err != nil {
 		return nil, wrap(name, err)
 	}
@@ -402,23 +402,12 @@ func fieldArray(obj map[string]jsontext.Value, name string) ([]jsontext.Value, e
 // fieldInt reads an integer field under the same rule as fieldString: a number,
 // never a numeric string.
 func fieldInt(obj map[string]jsontext.Value, name string) (int64, error) {
-	raw := obj[name]
-	if raw.Kind() == jsontext.KindInvalid || raw.Kind() == jsontext.KindNull {
-		return 0, nil
-	}
-	if raw.Kind() != jsontext.KindNumber {
-		return 0, fmt.Errorf("%s: expected a JSON number, got %s", name, jsonKind(raw))
-	}
-	value, err := memberInt(raw)
+	value, err := jsonread.Int(obj[name])
 	if err != nil {
 		return 0, wrap(name, err)
 	}
 	return value, nil
 }
-
-// maxUint64Exclusive is 2^64 — the first value past uint64. sizeString compares
-// its float fallback against it.
-const maxUint64Exclusive = float64(1 << 64)
 
 // sizeString renders a file entry's size as the decimal text GameFile.Size carries: a
 // string value is taken verbatim, and any other value becomes its unsigned decimal text
@@ -426,29 +415,24 @@ const maxUint64Exclusive = float64(1 << 64)
 // boolean have no unsigned form and render as "" — a missing size must not turn into a
 // plausible-looking number.
 //
-// The member is a JSON number, so the token form answers for a whole value in
-// uint64 range and the float fallback covers a literal such as "1024.0".
+// A number is read as a whole unsigned one, so a negative value, a fraction and
+// a literal past the uint64 range have no size and render as "".
 func sizeString(v jsontext.Value) string {
 	switch v.Kind() {
 	case jsontext.KindString:
-		tok, err := tokenOf(v)
+		// A string is taken verbatim, numeric or not: the field is the API's
+		// own spelling of the size.
+		s, err := jsonread.Text(v)
 		if err != nil {
 			return ""
 		}
-		return tok.String()
+		return s
 	case jsontext.KindNumber:
-		tok, err := tokenOf(v)
+		u, err := jsonread.Uint(v)
 		if err != nil {
 			return ""
 		}
-		if u, err := tok.Uint(); err == nil {
-			return strconv.FormatUint(u, 10)
-		}
-		f, err := tok.Float()
-		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 || f != math.Trunc(f) || f >= maxUint64Exclusive {
-			return ""
-		}
-		return strconv.FormatUint(uint64(f), 10)
+		return strconv.FormatUint(u, 10)
 	default:
 		// A boolean, a container, a missing member and a null all have no
 		// unsigned size.

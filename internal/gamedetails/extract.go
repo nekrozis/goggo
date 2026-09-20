@@ -4,6 +4,8 @@ import (
 	"encoding/json/jsontext"
 	"regexp"
 	"strings"
+
+	"github.com/nekrozis/goggo/internal/jsonread"
 )
 
 // This file holds the two extractions the save-* output face performs on the
@@ -37,10 +39,12 @@ func SerialsFromCDKey(cdKey string) (text string, unsupported bool) {
 // error, never a coercion.
 func ChangelogFromJSON(doc map[string]jsontext.Value) (string, error) {
 	raw, ok := doc["changelog"]
-	if !ok || raw == nil {
+	if !ok || raw.Kind() == jsontext.KindInvalid || raw.Kind() == jsontext.KindNull {
 		return "", nil
 	}
-	changelog, err := memberText(raw)
+	// A member of the wrong shape is an error, never a coercion: this field is
+	// free text and a number or a boolean here is a protocol error.
+	changelog, err := jsonread.Text(raw)
 	if err != nil {
 		return "", err
 	}
@@ -49,7 +53,7 @@ func ChangelogFromJSON(doc map[string]jsontext.Value) (string, error) {
 	}
 	title := "Changelog"
 	if rawTitle, has := doc["title"]; has {
-		t, err := memberText(rawTitle)
+		t, err := jsonread.Text(rawTitle)
 		if err != nil {
 			return "", err
 		}

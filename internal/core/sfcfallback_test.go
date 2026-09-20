@@ -97,7 +97,7 @@ func (fi *sfcInstallFixture) downloader(t *testing.T, console *fakeConsole) *Dow
 // to end: the manifest's sfcRef points the member at bytes that are not its own,
 // so the extraction refuses to write them and the install downloads the member
 // through the ordinary transfer instead. The first install then holds what the
-// manifest declares, which is the whole point of D4 (review S9-R).
+// manifest declares, which is the whole point of D4.
 func TestInstallDownloadsAContainerMemberTheContainerCannotSupply(t *testing.T) {
 	fi := newSFCInstallFixture(t, "bytes that are not the member's", true)
 	console := newFakeConsole()
@@ -121,7 +121,7 @@ func TestInstallDownloadsAContainerMemberTheContainerCannotSupply(t *testing.T) 
 }
 
 // TestInstallFailsWhenTheContainerMemberCannotBeDownloaded locks the failure
-// side (review S9-R, ruling 3): the extraction refuses the member, the direct
+// side: the extraction refuses the member, the direct
 // download cannot supply it either, and the install must NOT report success over
 // the missing file — the same rule D43 states for a state that could not be
 // verified.

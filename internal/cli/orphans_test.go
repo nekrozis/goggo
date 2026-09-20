@@ -37,8 +37,8 @@ func TestRenderOrphansListsTheObjects(t *testing.T) {
 	}
 }
 
-// TestRenderOrphansEmpty locks the empty answer, in upstream's wording: nothing
-// found is a result, not a silent success.
+// TestRenderOrphansEmpty locks the empty answer: nothing found is a result, not
+// a silent success.
 func TestRenderOrphansEmpty(t *testing.T) {
 	var out bytes.Buffer
 	renderOrphans(&out, core.OrphansResult{InstallPath: "/games/hoMM3"})
@@ -71,7 +71,7 @@ func TestDeleteQuestion(t *testing.T) {
 	}
 }
 
-// TestConfirm locks what counts as a yes (review S6, ruling 4): an explicit
+// TestConfirm locks what counts as a yes: an explicit
 // y/yes in any case, and nothing else — an empty line, a stray keystroke and an
 // answer that cannot be read all mean "do not delete". The prompt goes to the
 // error stream, like every other prompt.
@@ -106,7 +106,7 @@ func TestConfirm(t *testing.T) {
 }
 
 // TestOrphansRemoveHelpStatesBothRolesOfYes ties the documentation to the
-// behaviour the tests above lock (review S6-R1): --yes both skips the question and
+// behaviour the tests above lock: --yes both skips the question and
 // is what makes a run without a terminal possible. The help said so before the
 // code did, so a topic that loses either half is a contract change.
 func TestOrphansRemoveHelpStatesBothRolesOfYes(t *testing.T) {
@@ -124,7 +124,7 @@ func TestOrphansRemoveHelpStatesBothRolesOfYes(t *testing.T) {
 	}
 }
 
-// TestOrphansRemoveWithoutATerminalNeedsYes locks T12's refusal: a removal that
+// TestOrphansRemoveWithoutATerminalNeedsYes locks the refusal: a removal that
 // cannot ask for authorization and was not given one fails as a usage error, and
 // it does so before any session work — the runner's input here is not a terminal,
 // so nothing is asked for and nothing is opened.
@@ -143,8 +143,7 @@ func TestOrphansRemoveWithoutATerminalNeedsYes(t *testing.T) {
 
 // orphansRemovalFixture puts two files under a temp root and returns the result a
 // walk would have produced. The empty downloader is enough: applying a removal
-// reads no downloader state, it removes the paths it was handed (review S6, the
-// "RemoveOrphans(res) deletes exactly res.Files" contract).
+// reads no downloader state, it removes the paths it was handed.
 func orphansRemovalFixture(t *testing.T) (core.OrphansResult, *core.Downloader, []string) {
 	t.Helper()
 	root := t.TempDir()
@@ -162,10 +161,10 @@ func orphansRemovalFixture(t *testing.T) (core.OrphansResult, *core.Downloader, 
 	return core.OrphansResult{InstallPath: root, Files: files}, &core.Downloader{}, files
 }
 
-// TestRemoveOrphansWithYesDoesNotAsk locks the meaning of --yes (D16, review
-// S6-R1): it IS the authorization, so a removal that was given it goes straight to
-// the deletion — no question is printed, and the files are gone. Asking anyway
-// would make the flag useless exactly where it matters, on a terminal.
+// TestRemoveOrphansWithYesDoesNotAsk locks the meaning of --yes (D16): it IS
+// the authorization, so a removal that was given it goes straight to the
+// deletion — no question is printed, and the files are gone. Asking anyway would
+// make the flag useless exactly where it matters, on a terminal.
 func TestRemoveOrphansWithYesDoesNotAsk(t *testing.T) {
 	res, d, files := orphansRemovalFixture(t)
 	// A console whose reader has nothing to give: if the code asked, the answer

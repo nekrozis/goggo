@@ -9,23 +9,19 @@ import (
 )
 
 // ErrLowSpeed reports that a transfer was aborted because it stayed below the
-// configured rate. It is the Go counterpart of curl aborting a transfer with
-// CURLE_OPERATION_TIMEDOUT through CURLOPT_LOW_SPEED_TIME /
-// CURLOPT_LOW_SPEED_LIMIT (util.cpp:717-718).
+// configured rate.
 //
 // The sentinel carries the identity, the wrap carries the numbers:
 //
-//	errors.Is(err, httpx.ErrLowSpeed)                        // true
+//	errors.Is(err, httpx.ErrLowSpeed) // true
 //	err.Error() == "httpx: transfer stalled: below 200 B/s for 30s"
 //
 // The message never contains the request URL (see SafeError).
 var ErrLowSpeed = errors.New("httpx: transfer stalled")
 
-// Low-speed guard defaults. They mirror the upstream CLI defaults
-// (--lowspeed-timeout 30 s, --lowspeed-rate 200 B/s, main.cpp:314-315) and are
-// owned by the transport layer: a caller that configures nothing still gets the
-// upstream behaviour, and Config.DisableLowSpeedGuard is the explicit off
-// switch, so a zero value is never load-bearing for the semantics.
+// Low-speed guard defaults. They are owned by the transport layer: a caller that
+// configures nothing still gets a guard, and Config.DisableLowSpeedGuard is the
+// explicit off switch, so a zero value is never load-bearing for the semantics.
 const (
 	// DefaultLowSpeedLimit is the abort threshold in bytes per second.
 	DefaultLowSpeedLimit = 200
@@ -35,8 +31,7 @@ const (
 )
 
 // belowLimit reports whether a window that moved bytes over elapsed is slower
-// than limit. The comparison is strict: exactly limit is NOT slow, matching
-// upstream, which aborts below the configured rate rather than at it.
+// than limit. The comparison is strict: exactly limit is NOT slow.
 func belowLimit(bytes int64, elapsed time.Duration, limit int64) bool {
 	if elapsed <= 0 {
 		return false
@@ -46,8 +41,8 @@ func belowLimit(bytes int64, elapsed time.Duration, limit int64) bool {
 
 // lowSpeedBody is a response body with a low-speed watchdog.
 //
-// The semantics reproduce the OBSERVABLE upstream behaviour, not curl's
-// internal algorithm:
+// The semantics are defined by observable behaviour, not by an internal
+// algorithm:
 //
 //   - the clock starts on the FIRST Read, so a response whose headers arrived
 //     but whose body is never read is never judged slow;

@@ -30,9 +30,9 @@ func testConfig() config.DownloadConfig {
 	}
 }
 
-// stubResolver is the seam as GD1 sees it: it derives a path by a rule the tests
-// can predict. The real derivation (galaxy.PathFromDownlinkURL) is deliberately
-// NOT imported here — it is GD2's integration concern (review GD1 §4.2).
+// stubResolver derives a path by a rule the tests can predict. The real
+// derivation (galaxy.PathFromDownlinkURL) is deliberately not imported here: it
+// belongs to the integration layer.
 func stubResolver(failFor map[string]error) DownlinkResolver {
 	return func(_ context.Context, gamename, downlinkURL string) (ResolvedFile, error) {
 		if err, ok := failFor[downlinkURL]; ok {
@@ -94,7 +94,7 @@ func product(fields map[string]any) map[string]any {
 
 // TestProductInfoToGameDetailsMapsStringsAndImages locks the metadata mapping:
 // slug/id/title, the unconditional "https:" prefix on both images, the logo
-// rename and the optional changelog (galaxyapi.cpp:395-402).
+// rename and the optional changelog.
 func TestProductInfoToGameDetailsMapsStringsAndImages(t *testing.T) {
 	doc := product(map[string]any{
 		"images": map[string]any{
@@ -134,11 +134,9 @@ func TestProductInfoToGameDetailsMapsStringsAndImages(t *testing.T) {
 	}
 }
 
-// TestProductInfoToGameDetailsGatesVectorsByMask locks the mask gate, including
-// the upstream composite behaviour: the gate is the composite bit
-// (base|dlc), so a mask that only carries the DLC installer bit still converts
-// the base installers vector (galaxyapi.cpp:404-410). That is upstream's own
-// behaviour and is kept deliberately.
+// TestProductInfoToGameDetailsGatesVectorsByMask locks the mask gate: the gate is
+// the composite bit (base|dlc), so a mask that only carries the DLC installer bit
+// still converts the base installers vector.
 func TestProductInfoToGameDetailsGatesVectorsByMask(t *testing.T) {
 	doc := product(map[string]any{
 		"downloads": map[string]any{
@@ -165,7 +163,7 @@ func TestProductInfoToGameDetailsGatesVectorsByMask(t *testing.T) {
 		t.Fatalf("convert dlc-only: %v", err)
 	}
 	if len(dlcOnly.Installers) != 1 {
-		t.Errorf("installers = %d, want the base vector converted too (composite gate, upstream behaviour)",
+		t.Errorf("installers = %d, want the base vector converted too (the composite gate)",
 			len(dlcOnly.Installers))
 	}
 	if len(dlcOnly.Extras)+len(dlcOnly.Patches)+len(dlcOnly.LanguagePacks) != 0 {
@@ -183,7 +181,7 @@ func TestProductInfoToGameDetailsGatesVectorsByMask(t *testing.T) {
 }
 
 // TestProductInfoToGameDetailsFiltersByPlatformAndLanguage locks the entry
-// filter and the extras exemption (galaxyapi.cpp:516-537): installers are kept
+// filter and the extras exemption: installers are kept
 // only when their os/language intersects the configuration, extras are exempt.
 func TestProductInfoToGameDetailsFiltersByPlatformAndLanguage(t *testing.T) {
 	doc := product(map[string]any{
@@ -214,10 +212,9 @@ func TestProductInfoToGameDetailsFiltersByPlatformAndLanguage(t *testing.T) {
 		t.Errorf("extras = %+v, want both entries: extras are not filtered", gd.Extras)
 	}
 	for _, gf := range gd.Extras {
-		// Upstream's Windows/English defaults live in local variables that are
-		// only used for the filter it skips for extras: neither the filter nor
-		// the assignment runs, so the entry keeps the zero platform/language
-		// (galaxyapi.cpp:516-537, 566-570).
+		// The Windows/English defaults are only used by the filter extras skip,
+		// so neither the filter nor the assignment runs and the entry keeps the
+		// zero platform and language.
 		if gf.Platform != 0 || gf.Language != 0 {
 			t.Errorf("extras entry = %+v, want platform/language left at zero", gf)
 		}
@@ -251,8 +248,7 @@ func TestProductInfoToGameDetailsSkipsEmptyEntries(t *testing.T) {
 }
 
 // TestProductInfoToGameDetailsSkipsUnusableFiles locks the two per-file skips:
-// a resolver that fails, and a path upstream rejects with "/securex?$"
-// (galaxyapi.cpp:530-557).
+// a resolver that fails, and a resolved path that does not point at a file.
 func TestProductInfoToGameDetailsSkipsUnusableFiles(t *testing.T) {
 	doc := product(map[string]any{
 		"downloads": map[string]any{
@@ -285,7 +281,7 @@ func TestProductInfoToGameDetailsSkipsUnusableFiles(t *testing.T) {
 
 // TestProductInfoToGameDetailsKeepsTheResolvedPath locks the seam contract:
 // Path is what the resolver reported, GalaxyDownlinkJSONURL is the original
-// downlink, and no resolved-URL field exists on GameFile (ruling A1).
+// downlink, and no resolved-URL field exists on GameFile.
 func TestProductInfoToGameDetailsKeepsTheResolvedPath(t *testing.T) {
 	doc := product(map[string]any{
 		"downloads": map[string]any{
@@ -316,12 +312,12 @@ func TestProductInfoToGameDetailsKeepsTheResolvedPath(t *testing.T) {
 		t.Error("GameFile grew a resolved-URL field: the resolved URL is intermediate only")
 	}
 	if gf.Updated != 0 {
-		t.Errorf("updated = %d, want the upstream 'assume not updated' 0", gf.Updated)
+		t.Errorf("updated = %d, want the 'assume not updated' 0", gf.Updated)
 	}
 }
 
 // TestProductInfoToGameDetailsDuplicateHandler locks the two behaviours of the
-// duplicate handler (galaxyapi.cpp:571-586): one row per path, and a language
+// duplicate handler: one row per path, and a language
 // union when the same path is offered for several languages.
 func TestProductInfoToGameDetailsDuplicateHandler(t *testing.T) {
 	doc := product(map[string]any{
@@ -356,15 +352,13 @@ func TestProductInfoToGameDetailsDuplicateHandler(t *testing.T) {
 	}
 }
 
-// TestIdentifierFieldsLiveAPIShapes locks what DEFECT-GD3-1 proved about the
-// live API: the identifier fields are NOT strings. These fixtures are parsed
-// from JSON text (not hand-built maps) so the numbers decode the way the wire
-// decodes them — a float64 — and the documents carry the exact shapes the
-// probe captured from api.gog.com (evidence dev/audit/evidence/): a main
-// document with a numeric id, a DLC with a numeric id, and the installer /
-// bonus-content vectors whose file ids are a string and a number side by side.
-// Upstream reads all of these through jsoncpp's asString() (galaxyapi.cpp:384,
-// 416, 460, 563), and this port's idString mirrors that semantics.
+// TestIdentifierFieldsLiveAPIShapes locks the identifier reading against the
+// shapes the live API sends: the identifier fields are not strings. These
+// fixtures are parsed from JSON text (not hand-built maps) so the numbers decode
+// the way the wire decodes them — a float64 — and the documents carry the shapes
+// the probe captured from api.gog.com: a main document with a numeric id, a DLC
+// with a numeric id, and the installer / bonus-content vectors whose file ids are
+// a string and a number side by side.
 func TestIdentifierFieldsLiveAPIShapes(t *testing.T) {
 	doc := mustDocumentJSON(t, `{
 		"id": 1207658991,
@@ -394,8 +388,8 @@ func TestIdentifierFieldsLiveAPIShapes(t *testing.T) {
 		t.Errorf("extras = %+v, want the numeric file id stringified", gd.Extras)
 	}
 
-	// bool and missing: jsoncpp renders "true" (the port's locked precedent),
-	// and an absent id is the empty string — neither is an error.
+	// bool and missing: true renders as "true", and an absent id is the empty
+	// string — neither is an error.
 	for _, tc := range []struct {
 		name string
 		id   string // JSON literal for the id member ("" = omit it)
@@ -464,7 +458,7 @@ func TestIdentifierFieldsLiveAPIShapes(t *testing.T) {
 
 // mustDocumentJSON parses fixture text the way the wire does, so a JSON number
 // arrives as the float64 json.Unmarshal yields — the exact shape that broke
-// the strict gate on live data (DEFECT-GD3-1).
+// the strict gate on live data.
 func mustDocumentJSON(t *testing.T, body string) map[string]any {
 	t.Helper()
 	var doc map[string]any
@@ -485,7 +479,7 @@ func dlcNode(id, title string, downloads map[string]any) map[string]any {
 }
 
 // TestProductInfoToGameDetailsDLCSubtree locks the DLC rules
-// (galaxyapi.cpp:436-495): the ownership filter, the received type
+// : the ownership filter, the received type
 // retyping, the basegame back-fill and the drop-if-empty rule.
 func TestProductInfoToGameDetailsDLCSubtree(t *testing.T) {
 	dlcDownloads := func(name string) map[string]any {
@@ -531,7 +525,7 @@ func TestProductInfoToGameDetailsDLCSubtree(t *testing.T) {
 		t.Errorf("file basegame fields = %q/%q", dlc.Installers[0].TitleBasegame, dlc.Installers[0].GamenameBasegame)
 	}
 
-	// An empty owned set means no filtering at all (upstream tests emptiness).
+	// An empty owned set means no filtering at all.
 	unfiltered, err := ProductInfoToGameDetails(context.Background(), doc, testConfig(), map[string]bool{}, stubResolver(nil))
 	if err != nil {
 		t.Fatalf("convert unfiltered: %v", err)
@@ -541,9 +535,9 @@ func TestProductInfoToGameDetailsDLCSubtree(t *testing.T) {
 	}
 }
 
-// TestProductInfoToGameDetailsNestedDLCs exercises the recursion the way the
-// S-GD1 review asked (Δ-GD1-R1): two DLC levels deep, where the second level
-// must still be filtered, retyped and back-filled correctly.
+// TestProductInfoToGameDetailsNestedDLCs exercises the recursion two DLC levels
+// deep, where the second level must still be filtered, retyped and back-filled
+// correctly.
 func TestProductInfoToGameDetailsNestedDLCs(t *testing.T) {
 	level2 := dlcNode("1000", "Level 2", map[string]any{
 		"patches": nodeList(infoNode("p2", "windows", "en", fileEntry("p2-1", "p2.exe", "10"))),
@@ -595,10 +589,10 @@ func TestProductInfoToGameDetailsNestedDLCs(t *testing.T) {
 	}
 }
 
-// TestProductInfoToGameDetailsRejectsWrongFieldShapes locks the type rule and
-// the transaction boundary the review asked for: a field that is read and has
-// the wrong JSON type is an error, and the caller gets the ZERO GameDetails —
-// never a half-built tree it could mistake for a result.
+// TestProductInfoToGameDetailsRejectsWrongFieldShapes locks the type rule and the
+// transaction boundary: a field that is read and has the wrong JSON type is an
+// error, and the caller gets the ZERO GameDetails — never a half-built tree it
+// could mistake for a result.
 func TestProductInfoToGameDetailsRejectsWrongFieldShapes(t *testing.T) {
 	withDownloads := func(downloads any) map[string]any {
 		return product(map[string]any{"downloads": downloads})
@@ -638,10 +632,9 @@ func TestProductInfoToGameDetailsRejectsWrongFieldShapes(t *testing.T) {
 			},
 			"expanded_dlcs": map[string]any{},
 		})},
-		// A structured dlc id is the one shape the identifier reader refuses
-		// (jsoncpp's asString crashes on it). A NUMBER id — the live API's
-		// shape, DEFECT-GD3-1 — used to sit in this list; it belongs to the
-		// identifier test instead, because upstream never gated it.
+		// A structured dlc id is the one shape the identifier reader refuses. A
+		// numeric id belongs to the identifier test instead: it is read through a
+		// conversion, not gated here.
 		{"dlc id is an object", product(map[string]any{
 			"expanded_dlcs": []any{map[string]any{"id": map[string]any{}}}})},
 	}
@@ -661,8 +654,8 @@ func TestProductInfoToGameDetailsRejectsWrongFieldShapes(t *testing.T) {
 		})
 	}
 
-	// The same document with the fields absent converts to zero values: absence
-	// is the upstream lenient reading, not an error.
+	// The same document with the fields absent converts to zero values: absence is
+	// not an error.
 	bare, err := ProductInfoToGameDetails(context.Background(), product(nil), testConfig(), nil, stubResolver(nil))
 	if err != nil {
 		t.Fatalf("absent fields must not fail the conversion: %v", err)
@@ -675,7 +668,7 @@ func TestProductInfoToGameDetailsRejectsWrongFieldShapes(t *testing.T) {
 // TestPackageStaysOffTheNetwork is the purity guard: neither the production code
 // nor the tests of this package may reach for the API client, the transport,
 // the transfer layer or the command layers. The conversion is pure data, and
-// the downlink seam is what keeps it that way (review GD1 §4.3).
+// the downlink seam is what keeps it that way.
 func TestPackageStaysOffTheNetwork(t *testing.T) {
 	forbidden := []string{
 		"internal/galaxy",

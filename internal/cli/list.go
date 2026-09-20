@@ -14,7 +14,7 @@ import (
 	"github.com/nekrozis/goggo/internal/util"
 )
 
-// ansii colour codes used by the game listing (downloader.cpp:525-532).
+// ansii colour codes used by the game listing.
 const (
 	ansiNewGame  = "\033[01;34m"
 	ansiUpdated  = "\033[32m"
@@ -26,11 +26,9 @@ const (
 // The data always comes from internal/catalog (or webapi for the tag table);
 // the CLI never re-implements filtering or mapping here.
 //
-// The fetching still happens on this side of the boundary: S17 moved the
-// session and the Galaxy commands into internal/core but deliberately left the
-// listing command where it was (review ruling D17=b), so the orchestration it
-// needs is reached through the two accessors below. The whole function moves
-// into internal/core when the listing does.
+// The fetching still happens on this side of the boundary: the listing command
+// was deliberately left out of internal/core (D17), so the orchestration it
+// needs is reached through the two accessors below.
 func renderList(ctx context.Context, d *core.Downloader, format uint32, w io.Writer) error {
 	cfg := d.Config()
 	web := d.Web()
@@ -73,10 +71,9 @@ func renderList(ctx context.Context, d *core.Downloader, format uint32, w io.Wri
 	}
 }
 
-// renderGames mirrors Downloader::listGames for LIST_FORMAT_GAMES
-// (downloader.cpp:507-538): the name, an update counter in brackets when there
-// are updates, the new-game colouring when colours are on, then one "+> " line
-// per DLC name.
+// renderGames prints the games listing: the name, an update counter in brackets
+// when there are updates, the new-game colouring when colours are on, then one
+// "+> " line per DLC name.
 func renderGames(w io.Writer, items []model.GameItem, color bool) error {
 	for _, item := range items {
 		name := item.Name
@@ -105,8 +102,7 @@ func renderGames(w io.Writer, items []model.GameItem, color bool) error {
 	return nil
 }
 
-// renderTags mirrors the LIST_FORMAT_TAGS branch (downloader.cpp:540-552). The
-// C++ source iterates a std::map, so the output is ordered by tag id.
+// renderTags prints the tag table, ordered by tag id.
 func renderTags(w io.Writer, tags map[string]string) error {
 	ids := make([]string, 0, len(tags))
 	for id := range tags {
@@ -121,11 +117,10 @@ func renderTags(w io.Writer, tags map[string]string) error {
 	return nil
 }
 
-// renderWishlist mirrors Downloader::showWishlist (downloader.cpp:2530-2565).
+// renderWishlist prints the wishlist.
 //
-// The release date is rendered in UTC: the C++ value goes through
-// boost::posix_time::from_time_t, which is defined as the epoch plus the given
-// seconds with no timezone conversion (boost date_time conversion.hpp).
+// The release date is rendered in UTC: the stored value is the epoch plus the
+// given seconds, with no timezone conversion.
 func renderWishlist(w io.Writer, items []model.WishlistItem) error {
 	for _, item := range items {
 		tags := ""

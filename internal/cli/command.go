@@ -2,18 +2,18 @@ package cli
 
 import "github.com/nekrozis/goggo/internal/config"
 
-// The command tree the CLI is built on (CLI1, review D1/D13/D14).
+// The command tree the CLI is built on (D1, D13, D14).
 //
 // This file is the parser's data and vocabulary: which commands exist, how they
 // nest, what each node accepts, and what a resolved command carries. It holds no
 // behaviour — no core calls, no rendering — so the tree can be read as the
 // product surface it is: only commands this build actually supports appear here
 // (D14), namespaces exist only where several natural actions share a stable
-// domain (D13: auth, orphans), and every other upstream verb is absent rather
-// than present-and-unimplemented.
+// domain (D13: auth, orphans). A verb that is not in the tree is absent, never
+// present-and-unimplemented.
 
 // sessionClass is what a command needs from the session before it can run, and
-// whether it may create one (review CLI1 §7).
+// whether it may create one.
 //
 // It is declared on the tree rather than decided in the dispatcher, so the login
 // contract sits next to the command it governs and a new command cannot be added
@@ -109,8 +109,7 @@ const (
 
 // target is the "<product id or gamename>[/<build id or index>]" argument the
 // Galaxy-backed commands take. Splitting it is the parser's job: the dispatcher
-// receives the two parts, never the joined string (review D17 — the CLI's
-// vocabulary is its own).
+// receives the two parts, never the joined string (D17).
 type target struct {
 	Product string
 	Build   string
@@ -129,7 +128,7 @@ type invocation struct {
 	cmd commandID
 	// session is the resolved command's session class, copied from its tree
 	// node — never re-derived here, so the declaration the help shows and the
-	// policy the dispatcher applies are the same value (review S4).
+	// policy the dispatcher applies are the same value.
 	session sessionClass
 	target  target
 	// args carries the one-or-more positional arguments of the variadic
@@ -138,7 +137,7 @@ type invocation struct {
 	args []string
 	// outputFile is the -o value of download file, kept raw: the parser
 	// refuses it with several specs, and the dispatcher refuses a
-	// directory (upstream main.cpp:563, downloader.cpp:2404).
+	// directory.
 	outputFile string
 	// yes carries the destructive-confirmation flag. Only the destructive
 	// commands accept it (D16).
@@ -152,7 +151,7 @@ type invocation struct {
 // not "every command accepts it" (D15). id is cmdNone for pure namespaces;
 // "download" is the one node that is both a leaf and a namespace — a first
 // word matching a child dispatches the subcommand, anything else is an
-// argument of the leaf itself (GD4 ruling 9).
+// argument of the leaf itself.
 //
 // session is what the command needs from the session before it can run. Every
 // leaf declares one; namespaces and the meta commands do not, because nothing
@@ -165,17 +164,15 @@ type commandNode struct {
 	options  []optionID
 	children []commandNode
 	// notes are the lines a reader must see before running the command: the
-	// help prints them between the summary and the options (review §5,
-	// constraint B).
+	// help prints them between the summary and the options.
 	notes []string
 }
 
 // orphanNotes is the warning both orphan commands carry.
 //
-// The single-manifest ledger is this port's model — upstream forces every
-// platform and language when it checks orphans (downloader.cpp:1678-1685) — so
+// Orphan detection uses the manifest of the selected platform and language, so
 // files belonging to another variant can be reported as orphaned. A destructive
-// command must say that before it runs, not only in an audit file.
+// command must say that before it runs, not only in a log.
 var orphanNotes = []string{
 	"Orphan detection uses the manifest of the selected platform and language:",
 	"files belonging to other variants may be reported as orphaned.",
@@ -184,11 +181,10 @@ var orphanNotes = []string{
 // The installation-locating options, shared by every command that has to
 // resolve an install path.
 //
-// installPath is derived from all of these at once
-// (core/plan.go: directory + the resolved subdirectory template under the
-// selected platform/language/arch), so a command that accepts only some of them
-// would resolve a different root than its siblings and report on the wrong tree
-// (review §13⑤).
+// installPath is derived from all of these at once — the directory plus the
+// resolved subdirectory template under the selected platform, language and arch
+// — so a command that accepts only some of them would resolve a different root
+// than its siblings and report on the wrong tree.
 var installTargetOptions = []optionID{
 	optDirectory,
 	optInstallDir,
@@ -217,11 +213,10 @@ var listGamesOptions = []optionID{
 	optInstallerLanguage,
 }
 
-// saveOptions are the six GD5 artifact switches. On download they fetch AND
-// write; on list details/json they gate the fetch and the display only —
-// list never writes (GD5 ruling 9). download file accepts none of them:
-// upstream's single-file chain has no save section, and an option that does
-// nothing is not offered (D14).
+// saveOptions are the six artifact switches. On download they fetch AND write;
+// on list details/json they gate the fetch and the display only — list never
+// writes. download file accepts none of them: an option that does nothing is not
+// offered (D14).
 var saveOptions = []optionID{
 	optSaveSerials,
 	optSaveChangelogs,
@@ -231,9 +226,9 @@ var saveOptions = []optionID{
 	optSaveProductJSON,
 }
 
-// detailsOptions are what the two GD5 list leaves accept: the account
-// filters, the conversion mask, the blacklist the text renderer honours,
-// the save flags as fetch/display gates, and the acquisition worker count.
+// detailsOptions are what the two list leaves accept: the account filters, the
+// conversion mask, the blacklist the text renderer honours, the save flags as
+// fetch/display gates, and the acquisition worker count.
 var detailsOptions = joinOptions(listGamesOptions,
 	[]optionID{optInclude, optExclude, optBlacklist},
 	saveOptions,
@@ -244,12 +239,12 @@ var detailsOptions = joinOptions(listGamesOptions,
 var listDetailsNotes = []string{
 	"Read-only: this command writes no files and downloads nothing.",
 	"Serials and changelog appear only with the matching --save-* flag,",
-	"which gates the fetch upstream-style (GD5 ruling 9) — not the display.",
+	"which gates whether they are fetched at all — not the display.",
 }
 
-// verifyOptions are what a read-only verification honours. Upstream's
-// --status filters by the include mask and honours the blacklist, so verify
-// follows it; the orphan walk does not (D2 in the CLI1 plan, §13①).
+// verifyOptions are what a read-only verification honours: it filters by the
+// include mask and honours the blacklist, while the orphan walk does neither
+// (D2).
 var verifyOptions = []optionID{
 	optInclude,
 	optExclude,
@@ -257,17 +252,15 @@ var verifyOptions = []optionID{
 }
 
 // orphansOptions are the filter files the walk consults. include/exclude are
-// deliberately absent: upstream checks orphans over everything ("Always check
-// everything when checking for orphaned files", downloader.cpp:1678-1685).
+// deliberately absent: the walk never narrows by them.
 var orphansOptions = []optionID{
 	optIgnorelist,
 	optBlacklist,
 }
 
-// subdirOptions are the six website subdirectory layout options. They belong
-// to the download commands only: the install face resolves its own root
-// through --install-dir, and these fill DirectoryConfig for MakeFilepaths
-// (GD4 §3.3).
+// subdirOptions are the six website subdirectory layout options. They belong to
+// the download commands only: the install face resolves its own root through
+// --install-dir, and these fill DirectoryConfig for MakeFilepaths.
 var subdirOptions = []optionID{
 	optSubdirInstallers,
 	optSubdirExtras,
@@ -336,7 +329,7 @@ var commandTree = []commandNode{
 		// "download" is both a leaf (batch download of games) and a
 		// namespace (download file). The word "file" after "download"
 		// always selects the subcommand — a game literally named "file"
-		// cannot be batch-downloaded by name (GD4 ruling 9).
+		// cannot be batch-downloaded by name.
 		name:    "download",
 		summary: "Download website files (installers, patches, extras, language packs)",
 		id:      cmdDownload,
@@ -371,9 +364,9 @@ var commandTree = []commandNode{
 		id:      cmdVerify,
 		session: sessionRequired,
 		options: joinOptions(installTargetOptions, verifyOptions),
-		// The report's vocabulary is the upstream status codes, so the topic has
-		// to define them; and a verification never repairs, which a reader has
-		// to know before relying on it (review S5).
+		// The report's vocabulary is the status codes, so the topic has to
+		// define them; and a verification never repairs, which a reader has
+		// to know before relying on it.
 		notes: []string{
 			"Status codes: OK (matches), ND (not downloaded), MD5 (content differs),",
 			"FS (size differs). Nothing is repaired: a mismatch is reported, never fixed.",

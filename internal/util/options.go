@@ -10,18 +10,17 @@ import (
 
 var integerRE = regexp.MustCompile(`^[+-]?\d+$`)
 
-// OptionValue mirrors Util::getOptionValue (util.cpp:513-549). The match
+// OptionValue resolves a command-line option value against options. The match
 // order is fixed and must not be reordered:
 //
-//  1. str == "all"            -> OR of every option ID
-//  2. allowInt and integer    -> parse with 32-bit bounds like std::stoi; an
-//     in-range value is stored into uint32, so a negative literal wraps
-//     (e.g. -1 -> 0xFFFFFFFF); an out-of-int32-range literal (C++: uncaught
-//     std::out_of_range) maps to 0
+//  1. str == "all" -> OR of every option ID
+//  2. allowInt and an integer literal -> parsed with 32-bit bounds; an in-range
+//     value is stored into uint32, so a negative literal wraps (e.g. -1 ->
+//     0xFFFFFFFF); a literal outside the int32 range maps to 0
 //  3. walk options in table order and for each entry:
 //     a. if the entry has a non-empty Regexp and str matches it as a whole
 //     (case-insensitive, anchored) -> that ID wins
-//     b. otherwise if str == entry.Code (string) -> that ID wins
+//     b. otherwise if str == entry.Code -> that ID wins
 //  4. no match -> 0
 //
 // Steps 3a/3b are evaluated per entry sequentially: an earlier entry's Code
@@ -36,12 +35,9 @@ func OptionValue(str string, options []config.Option, allowInt bool) uint32 {
 	}
 
 	if allowInt && integerRE.MatchString(str) {
-		// C++ uses std::stoi (a 32-bit int) and assigns the result to an
-		// unsigned int, so an in-range negative literal wraps (e.g. -1 ->
-		// 0xFFFFFFFF). stoi throws std::out_of_range for literals outside
-		// [-2147483648, 2147483647], which in the C++ program is an
-		// uncaught abort; here that case maps to 0 (no match). ParseInt is
-		// called with 32-bit bounds so behaviour follows std::stoi.
+		// The literal is parsed with 32-bit bounds and stored into uint32, so
+		// an in-range negative value wraps (e.g. -1 -> 0xFFFFFFFF). A literal
+		// outside the int32 range maps to 0 (no match).
 		n, err := strconv.ParseInt(str, 10, 32)
 		if err != nil {
 			return 0
@@ -61,7 +57,7 @@ func OptionValue(str string, options []config.Option, allowInt bool) uint32 {
 }
 
 // matchOptionRegexp reports whether s fully matches rexp, case-insensitively,
-// mirroring the anchored "^(" + regexp + ")$" search of util.cpp:533.
+// using an anchored "^(" + rexp + ")$" pattern.
 func matchOptionRegexp(s, rexp string) bool {
 	re, err := regexp.Compile("(?i)^(" + rexp + ")$")
 	if err != nil {
@@ -70,9 +66,8 @@ func matchOptionRegexp(s, rexp string) bool {
 	return re.MatchString(s)
 }
 
-// OptionNameString mirrors Util::getOptionNameString (util.cpp:551-560): it
-// collects the Name of every option whose ID is fully contained in value,
-// preserving table order, joined with ", ".
+// OptionNameString collects the Name of every option whose ID is fully contained
+// in value, preserving table order, joined with ", ".
 func OptionNameString(value uint32, options []config.Option) string {
 	var names []string
 	for _, o := range options {
@@ -83,13 +78,11 @@ func OptionNameString(value uint32, options []config.Option) string {
 	return strings.Join(names, ", ")
 }
 
-// OptionByID mirrors the tail of Util::getOptionValue (util.cpp:529-540): the
-// entry whose ID equals value exactly.
+// OptionByID returns the entry whose ID equals value exactly.
 //
-// A composite mask matches nothing, which is what the C++ loop does too — the
-// caller then falls back to its own default. This is how the Galaxy language
-// expression and the Galaxy architecture code are looked up
-// (downloader.cpp:3904-3922).
+// A composite mask matches nothing, so the caller falls back to its own default.
+// This is how the Galaxy language expression and the Galaxy architecture code
+// are looked up.
 func OptionByID(value uint32, options []config.Option) (config.Option, bool) {
 	for _, o := range options {
 		if o.ID == value {
@@ -99,9 +92,8 @@ func OptionByID(value uint32, options []config.Option) (config.Option, bool) {
 	return config.Option{}, false
 }
 
-// ParseOptionString mirrors Util::parseOptionString (util.cpp:563-579). The
-// input uses "," to separate priority groups and "+" to combine values
-// inside one group.
+// ParseOptionString parses a priority expression: "," separates priority groups
+// and "+" combines values inside one group.
 //
 // Duplicates: entries inside one "+" group collapse (the group value is the
 // OR of its parts, so "a+a" yields a single "a"); duplicates across ","

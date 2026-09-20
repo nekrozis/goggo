@@ -11,15 +11,12 @@ import (
 )
 
 // totpCodeLength is the authenticator (TOTP) one-time code length; the other
-// flavour is the 4-character second-step code (website.cpp:515-525). webapi
-// deliberately hides which flavour it is (the distinction is a protocol detail)
-// and exposes only CodeLength, so the wording is chosen from the length.
+// flavour is the 4-character second-step code. webapi exposes only CodeLength,
+// so the wording is chosen from the length.
 const totpCodeLength = 6
 
-// Every prompt in this file writes to stderr, mirroring the C++ source, which
-// uses std::cerr for all interactive input (downloader.cpp:267,270,
-// website.cpp:519,524,614-617). stdout therefore carries program output only,
-// which is what makes `goggo --list games > file` usable.
+// Every prompt in this file writes to stderr, so stdout carries program output
+// only — which is what makes `goggo list games > file` usable.
 
 // confirm asks a yes/no question on the error stream and reads one line.
 //
@@ -27,7 +24,7 @@ const totpCodeLength = 6
 // must not be authorized by a stray keystroke or an empty line, which is what the
 // [y/N] default in the question says, and an answer that cannot be read at all is
 // a no for the same reason: when the front end cannot tell what the user meant,
-// the safe reading is "do not delete" (review S6, ruling 4). That is also why this
+// the safe reading is "do not delete". That is also why this
 // returns no error: there is nothing to report that changes the outcome.
 func (c *console) confirm(question string) bool {
 	fmt.Fprint(c.errOut, question)
@@ -63,8 +60,7 @@ func (c *console) PromptEmail() (string, error) {
 // Abort limitation (documented, not hardened): term.ReadPassword restores the
 // terminal mode that was saved when it started. A Ctrl+C delivered in the
 // middle of the read can leave the console with echo switched off, because the
-// saved mode is the one that was already in effect. The restore path is
-// unchanged from the standard library's behaviour; see the audit note.
+// saved mode is the one that was already in effect.
 func (c *console) PromptPassword() (string, error) {
 	if fd, ok := c.terminalFd(); ok {
 		fmt.Fprint(c.errOut, "Password: ")
@@ -89,9 +85,8 @@ func (c *console) PromptPassword() (string, error) {
 // consumed exactly once by webapi, so a failure here is reported rather than
 // retried with the same challenge.
 //
-// The wording is the C++ one: "Security code: " for the second-step code and
-// "Authenticator security code: " for the TOTP code (website.cpp:519,524), and
-// the four-line browser block (website.cpp:614-617).
+// The wording: "Security code: " for the second-step code and "Authenticator
+// security code: " for the TOTP code, plus the four-line browser block.
 func (c *console) ResolveChallenge(ctx context.Context, web *webapi.Client, ch *webapi.LoginChallenge) error {
 	switch ch.Kind {
 	case webapi.ChallengeTwoFactor:

@@ -62,7 +62,7 @@ func TestFormatIncludesPrefixOnlyWhenSet(t *testing.T) {
 		t.Errorf("prefix suppressed Format = %q", got)
 	}
 
-	// Empty prefix must never introduce an extra space (message.h:106-107).
+	// Empty prefix must never introduce an extra space.
 	if got := base.Format(false, true); got != "2026-Sep-09 23:46:13 msg" {
 		t.Errorf("empty prefix Format = %q", got)
 	}

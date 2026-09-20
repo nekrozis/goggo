@@ -15,7 +15,7 @@ import (
 // root that no expected path accounts for, plus the diagnostics the walk and the
 // plan produced.
 //
-// Files is the whole contract of the walk (review S6): a caller lists it, shows
+// Files is the whole contract of the walk: a caller lists it, shows
 // it, and — when the user authorizes it — hands exactly this value back for
 // deletion. Nothing re-derives the set afterwards, so what was shown is what is
 // removed.
@@ -44,7 +44,7 @@ func (r OrphansResult) Relative(path string) string { return orphanDisplayPath(r
 // The walk is the one the install tail has always run — every entry under the
 // install root, the ignorelist and then the blacklist consulted before the
 // ledger, directories never orphans, symlinks never followed, no special case
-// for the install metadata file. Only the ledger's SOURCE changed (review S6):
+// for the install metadata file. Only the ledger's SOURCE changed:
 // it is the plan's Expected set, the same one a verification reads, instead of a
 // set rebuilt from the tasks, the containers and the skipped destinations.
 //
@@ -66,8 +66,7 @@ func (d *Downloader) CheckOrphans(ctx context.Context, req InstallRequest) (Orph
 
 // DeletionAttempt is one deletion of one orphaned file. Err is nil when the file
 // was removed; anything else is that file's own failure, reported while the rest
-// of the batch goes on — upstream reports a failed delete per file too
-// (downloader.cpp:4329-4332).
+// of the batch goes on.
 type DeletionAttempt struct {
 	Path string
 	Err  error
@@ -75,23 +74,23 @@ type DeletionAttempt struct {
 
 // RemoveOrphans deletes exactly the files an OrphansResult lists, in order, and
 // reports the outcome of each attempt. It never re-derives the set: the contract
-// is "the caller showed this list and the user authorized it" (review S6).
+// is "the caller showed this list and the user authorized it".
 //
 // A cancelled context stops the loop; the attempts made so far come back with
 // the error, because a destructive operation has to be auditable even when it
-// was interrupted (review D33, D20).
+// was interrupted (D33, D20).
 func (d *Downloader) RemoveOrphans(ctx context.Context, res OrphansResult) ([]DeletionAttempt, error) {
 	return d.deleteOrphans(ctx, res.Files)
 }
 
 // CheckOrphanedFiles reports — and, when the legacy configuration gate is on,
-// removes — the files under the install root that no expected path accounts for
-// (downloader.cpp:4312-4343). It runs inline at the tail of an install.
+// removes — the files under the install root that no expected path accounts for.
+// It runs inline at the tail of an install.
 //
 // Under this CLI the gate is unreachable: --delete-orphans is gone and the
-// destructive path is the `orphans remove` command. The field and the branch stay
-// because they mirror the upstream configuration, which S24's option table may
-// carry again (review S6, ruling 6).
+// destructive path is the `orphans remove` command. The field and the branch
+// stay because they mirror the configuration, which the option table may carry
+// again.
 func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) error {
 	fmt.Fprintln(d.ui.Out(), "Checking for orphaned files")
 
@@ -106,7 +105,7 @@ func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) err
 		return nil
 	}
 	// A deletion is a destructive action, so its objects stay auditable by
-	// default (review UI1-R2 §5, amended): a header states the scale, then
+	// default: a header states the scale, then
 	// one indented line names each file actually removed — a "deleted N"
 	// summary alone would hide WHICH mods or patches disappeared. The lines
 	// are relative to the install root; a failed delete stays its own
@@ -128,8 +127,7 @@ func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) err
 
 // walkOrphans is the walk itself, and it takes exactly what it reads: the root
 // and the set of paths the installation owns. Nothing here can reach back into
-// the plan's tasks or containers, which is what keeps the ledger single (review
-// S6).
+// the plan's tasks or containers, which is what keeps the ledger single.
 //
 // The filter files are consulted with the same absolute-path matching the plan
 // builder uses, ignorelist first: a path they exclude is neither reported nor
@@ -138,7 +136,7 @@ func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) err
 // It takes no context on purpose: this step replaces the ledger and nothing
 // else, and an install's orphan walk has never been interruptible. Cancellation
 // stops the deletion loop below, which is where an interruption has something to
-// preserve (review S6).
+// preserve.
 func (d *Downloader) walkOrphans(root string, expected []InstalledFile) ([]string, []Notice, error) {
 	installed := make(map[string]bool, len(expected))
 	for _, file := range expected {

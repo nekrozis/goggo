@@ -14,9 +14,8 @@ import (
 // logout clears the local login state: the Galaxy token store and the cookie
 // jar.
 //
-// This is a goggo extension. Upstream lgogdownloader has no logout option and
-// no remote logout API, so nothing here talks to GOG — it removes local files
-// and nothing else.
+// It is local only: there is no remote logout, so nothing here talks to GOG —
+// it removes files and nothing else.
 //
 // The scope is exactly the two authentication files. They sit in the
 // configuration directory next to files that are NOT authentication state

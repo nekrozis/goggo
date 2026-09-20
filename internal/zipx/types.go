@@ -1,7 +1,6 @@
 package zipx
 
-// EOCD mirrors struct zipEOCD (ziputil.h:24-36). Field order follows the
-// memory-minimisation rule (string block first, then integers by size).
+// EOCD is the End Of Central Directory record.
 type EOCD struct {
 	Comment        string
 	Signature      uint32
@@ -14,8 +13,8 @@ type EOCD struct {
 	CommentLength  uint16
 }
 
-// Zip64EOCD mirrors struct zip64EOCD (ziputil.h:38-52). The zip64 locator
-// record is not parsed (the original code does not read it either).
+// Zip64EOCD is the ZIP64 End Of Central Directory record. The ZIP64 locator
+// record is not parsed.
 type Zip64EOCD struct {
 	Comment             string
 	DirectoryRecordSize uint64
@@ -30,9 +29,8 @@ type Zip64EOCD struct {
 	CDOffset            uint64
 }
 
-// CDEntry mirrors struct zipCDEntry (ziputil.h:54-79). IsLocal is true when
-// the entry was read from a local file header; central-directory-only
-// fields are then zero (ziputil.cpp:258-314).
+// CDEntry is one ZIP entry header. IsLocal is true when the entry was read from
+// a local file header; central-directory-only fields are then zero.
 type CDEntry struct {
 	Extra             []byte
 	FileName          string

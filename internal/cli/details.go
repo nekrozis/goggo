@@ -12,15 +12,14 @@ import (
 	"github.com/nekrozis/goggo/internal/util"
 )
 
-// This file renders GD5's two list leaves. The text renderer is the port of
-// printGameDetailsAsText / printGameFileDetailsAsText (downloader.cpp:
-// 6721-6838) down to the trailing spaces and the DLC vector order; the JSON
-// renderer emits the getDetailsAsJson contract through the one styled writer.
-// Both are display-only: list never writes and never transfers (ruling 7).
+// This file renders the two list leaves. The text renderer prints the download
+// face of each game, down to the trailing spaces and the DLC vector order; the
+// JSON renderer emits the same data as JSON through the one styled writer. Both
+// are display-only: list never writes and never transfers.
 
 // runListDetails acquires and renders one of the two detail formats. A
 // blacklist failure is fatal for the text format (its file rows depend on
-// the filter) and irrelevant for JSON (upstream filters neither).
+// the filter) and irrelevant for JSON (it filters nothing).
 func runListDetails(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer) outcome {
 	games, err := d.ListGameDetails(ctx, inv.args)
 	if err != nil {
@@ -44,12 +43,9 @@ func runListDetails(ctx context.Context, d *core.Downloader, inv invocation, std
 	return outcomeOK
 }
 
-// renderArtifacts turns the write side's ledger into lines. The wordings are
-// upstream's where upstream has one ("Saving serials:", "Changelog unchanged.
-// Skipping:", "Saving JSON data:"); serials finding an existing file prints
-// NOTHING because upstream's saveSerials returns silently on that branch —
-// the skip is recorded in the ledger, and the exit code is unaffected. The
-// two image kinds and the fail-closed warning are this port's wordings.
+// renderArtifacts turns the write side's ledger into lines. Serials finding an
+// existing file prints NOTHING — the skip is recorded in the ledger, and the
+// exit code is unaffected.
 func renderArtifacts(out, errOut io.Writer, saved []core.SavedArtifact) {
 	for _, a := range saved {
 		switch a.Action {
@@ -65,7 +61,7 @@ func renderArtifacts(out, errOut io.Writer, saved []core.SavedArtifact) {
 				fmt.Fprintf(out, "Saving %s: %s\n", a.Kind, a.Path)
 			}
 		case core.ArtifactSkippedExists:
-			// silent — the upstream contract
+			// silent by design
 		case core.ArtifactSkippedUnchanged:
 			fmt.Fprintf(out, "Changelog unchanged. Skipping: %s\n", a.Path)
 		case core.ArtifactSkippedFormat:
@@ -88,7 +84,7 @@ func printGameDetailsText(out, errOut io.Writer, gd *gamedetails.GameDetails, bl
 	if gd.Serials != "" {
 		fmt.Fprintf(out, "serials:\n%s\n", gd.Serials)
 	}
-	// The base vector order, with the upstream trailing-space headers.
+	// The base vector order, with the trailing-space headers.
 	for _, v := range []struct {
 		header string
 		list   []gamedetails.GameFile
@@ -112,12 +108,11 @@ func printGameDetailsText(out, errOut io.Writer, gd *gamedetails.GameDetails, bl
 			dlc := &gd.DLCs[i]
 			fmt.Fprintf(out, "DLC gamename: %s\nproduct id: %s\n", dlc.Gamename, dlc.ProductID)
 			if dlc.Serials != "" {
-				// The DLC serials line has no newline after the label —
-				// the C++ prints "serials:" << dlc.serials << endl.
+				// The DLC serials line has no newline after the label.
 				fmt.Fprintf(out, "serials:%s\n", dlc.Serials)
 			}
-			// The DLC vector order is upstream's: installers, patches,
-			// extras, language packs — WITHOUT section headers.
+			// The DLC vector order: installers, patches, extras,
+			// language packs — WITHOUT section headers.
 			for _, list := range [][]gamedetails.GameFile{dlc.Installers, dlc.Patches, dlc.Extras, dlc.LanguagePacks} {
 				for j := range list {
 					printGameFileDetailsText(out, errOut, &list[j], bl, verbose)

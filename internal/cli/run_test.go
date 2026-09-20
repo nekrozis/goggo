@@ -37,8 +37,8 @@ func TestRunHelpAndVersion(t *testing.T) {
 		}
 	}
 
-	// --version carries the full identity: our version plus the upstream
-	// release this port tracks.
+	// --version carries the full identity: our version plus the compatibility
+	// baseline it tracks.
 	for _, arg := range []string{"--version", "version"} {
 		code, out, _ := run(t, "", arg)
 		if code != 0 {
@@ -60,10 +60,10 @@ func TestRunHelpAndVersion(t *testing.T) {
 	}
 }
 
-// TestRunFailures locks the failure contract (review CLI1 §8): anything the
+// TestRunFailures locks the failure contract: anything the
 // parser or the command tree refuses is a usage failure and exits 2, with the
-// diagnostic on stderr and nothing on stdout. Removed upstream commands are
-// unknown commands now, not "not implemented" options (D1/D14).
+// diagnostic on stderr and nothing on stdout. Removed commands are unknown
+// commands now, not "not implemented" options (D1/D14).
 //
 // secret is the value a case hands to an option, when that value is something
 // that must not come back out: the refusal may name the option, never what was
@@ -171,8 +171,7 @@ func TestRenderTags(t *testing.T) {
 	}
 }
 
-// TestRenderWishlist locks the showWishlist layout (downloader.cpp:2530-2565),
-// including the UTC release date.
+// TestRenderWishlist locks the wishlist layout, including the UTC release date.
 func TestRenderWishlist(t *testing.T) {
 	items := []model.WishlistItem{
 		{
@@ -215,14 +214,13 @@ func TestRenderWishlist(t *testing.T) {
 	}
 }
 
-// TestGalaxyCommandArgument locks the split of the "<product id or
 // The old argument helper (galaxyCommandArgument) is gone: splitting
 // "<game>[/<build>]" now happens in the parser, and its shape rules are locked
 // by TestParseTargetErrors and TestParseShowCommands in options_test.go.
 
 // TestRunMalformedTargetFailsOffline locks that a malformed target fails before
 // any session work: the parser answers, so no directory is created and no
-// request is made (review CLI1 §6 — the argument is the parser's business now).
+// request is made.
 func TestRunMalformedTargetFailsOffline(t *testing.T) {
 	for _, args := range [][]string{
 		{"show", "builds", "/"},
@@ -242,9 +240,9 @@ func TestRunMalformedTargetFailsOffline(t *testing.T) {
 	}
 }
 
-// TestRunHelpListsTheCommandSurface keeps the interim help in step with the
-// parser: every command and every shared option the CLI accepts is listed, and
-// nothing it removed is (review D14 — the help shows the supported surface).
+// TestRunHelpListsTheCommandSurface keeps the help in step with the parser:
+// every command and every shared option the CLI accepts is listed, and nothing
+// it removed is (D14).
 func TestRunHelpListsTheCommandSurface(t *testing.T) {
 	_, out, _ := run(t, "", "--help")
 	for _, want := range []string{
@@ -254,7 +252,7 @@ func TestRunHelpListsTheCommandSurface(t *testing.T) {
 		"install", "verify", "orphans", "check", "remove",
 		"help", "version",
 		// The root topic shows the shared options; a command's own options
-		// (--threads, --directory, ...) belong to its topic.
+		// (--threads, --directory,...) belong to its topic.
 		"--verbose", "--no-color", "--no-unicode", "--unit-format",
 	} {
 		if !strings.Contains(out, want) {
@@ -289,7 +287,7 @@ func TestRunHelpForACommandAndRemovedCommands(t *testing.T) {
 // The install argument is parsed by the same target rules as the show commands,
 // so its malformed cases are covered by TestRunMalformedTargetFailsOffline.
 
-// TestRenderBuilds locks the listing line (downloader.cpp:4906-4913).
+// TestRenderBuilds locks the listing line.
 func TestRenderBuilds(t *testing.T) {
 	var buf bytes.Buffer
 	rows := []core.BuildRow{
@@ -314,10 +312,10 @@ func TestRenderBuilds(t *testing.T) {
 	}
 }
 
-// TestRenderManifest locks the three properties the C++ StyledStreamWriter
-// output has: tab indentation, keys in byte order and no HTML escaping. A user
-// pasting the document into a tool must find the URLs intact, so the & of a
-// query string may not become \u0026.
+// TestRenderManifest locks the three properties of the styled output: tab
+// indentation, keys in byte order and no HTML escaping. A user pasting the
+// document into a tool must find the URLs intact, so the & of a query string may
+// not become \u0026.
 func TestRenderManifest(t *testing.T) {
 	var buf bytes.Buffer
 	doc := map[string]any{
@@ -341,8 +339,7 @@ func TestRenderManifest(t *testing.T) {
 	}
 }
 
-// TestRenderCDNNames locks the one-name-per-line output
-// (downloader.cpp:4394-4395).
+// TestRenderCDNNames locks the one-name-per-line output.
 func TestRenderCDNNames(t *testing.T) {
 	var buf bytes.Buffer
 	if err := renderCDNNames(&buf, []string{"gog-cdn-fastly", "gog-cdn-cloudflare"}); err != nil {
@@ -353,8 +350,8 @@ func TestRenderCDNNames(t *testing.T) {
 	}
 }
 
-// TestRenderNotice locks the stream split: the C++ source prints the support and
-// generation messages to stdout and the argument-resolution failures to stderr.
+// TestRenderNotice locks the stream split: support and generation messages go to
+// stdout, argument-resolution failures to stderr.
 func TestRenderNotice(t *testing.T) {
 	var out, errOut bytes.Buffer
 
@@ -381,7 +378,7 @@ func TestRenderNotice(t *testing.T) {
 	}
 }
 
-// TestRunHelpTopicsLockTheirContent locks the layered help (review S3 §12): the
+// TestRunHelpTopicsLockTheirContent locks the layered help: the
 // root topic lists the surface and says how to reach a command's own options, a
 // command topic lists exactly what that command accepts (with the sentences a
 // user needs), and the orphan topics carry the cross-platform warning before a
@@ -402,9 +399,7 @@ func TestRunHelpTopicsLockTheirContent(t *testing.T) {
 		}
 	}
 	// The install topic names the templates --install-dir accepts, because a
-	// whitelist the user cannot read is a whitelist the user cannot use
-	// (review GD3 §3.3, ruling B — this replaces the earlier wording, which
-	// said --install-dir was not a template at all).
+	// whitelist the user cannot read is a whitelist the user cannot use.
 	for _, template := range core.InstallSubdirTemplates {
 		if !strings.Contains(install, template) {
 			t.Errorf("install topic must name the %s template: %q", template, install)

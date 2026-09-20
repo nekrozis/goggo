@@ -6,8 +6,7 @@ import (
 	"io"
 )
 
-// readEOCD parses an EOCD structure at the current stream position
-// (ziputil.cpp:164-204).
+// readEOCD parses an EOCD structure at the current stream position.
 func readEOCD(r io.Reader) (EOCD, error) {
 	var e EOCD
 	var err error
@@ -48,7 +47,7 @@ func readEOCD(r io.Reader) (EOCD, error) {
 	return e, nil
 }
 
-// readZip64EOCD parses a ZIP64 EOCD structure (ziputil.cpp:206-251). The
+// readZip64EOCD parses a ZIP64 EOCD structure. The
 // trailing extensible data sector is intentionally not read.
 func readZip64EOCD(r io.Reader) (Zip64EOCD, error) {
 	var e Zip64EOCD

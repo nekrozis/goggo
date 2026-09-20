@@ -16,9 +16,8 @@ import (
 // client and the Galaxy client stay built here, from the caller's
 // configuration, because handing them in prebuilt would let a caller pair a
 // webapi client with a different transport than the cookie jar this package
-// persists through (the ownership rule of S12-R), and neither client exposes an
-// interface to fake — a rewriting RoundTripper already covers every offline
-// scenario.
+// persists through, and neither client exposes an interface to fake — a
+// rewriting RoundTripper already covers every offline scenario.
 //
 // Fields are added only together with their first consumer.
 type Dependencies struct {
@@ -30,9 +29,8 @@ type Dependencies struct {
 	HTTPTransport http.RoundTripper
 
 	// Progress, when non-nil, is the registry an install run publishes its
-	// per-task byte counts into (review S-ETA2). It is a plain carrier: this
-	// package only passes it through to the transfer run, and the front end
-	// that wants the counts polls the same pointer. A nil registry leaves the
-	// run exactly as it was before the surface existed.
+	// per-task byte counts into. It is a plain carrier: this package only
+	// passes it through to the transfer run, and the front end that wants the
+	// counts polls the same pointer. A nil registry leaves the run unchanged.
 	Progress *transfer.Progress
 }

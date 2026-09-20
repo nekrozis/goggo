@@ -41,8 +41,7 @@ func newSFCFixture(t *testing.T) *sfcFixture {
 				Items: []model.GalaxyDepotItem{
 					{Path: "game/one.txt", ProductID: "42", SFCOffset: 0, SFCSize: 8},
 					{Path: "game/sub/two.txt", ProductID: "42", SFCOffset: 16, SFCSize: 8},
-					// A member of another product: the extraction skips it,
-					// the way the product_id filter does upstream.
+					// A member of another product: the extraction skips it.
 					{Path: "game/foreign.txt", ProductID: "99", SFCOffset: 0, SFCSize: 4},
 				},
 			}},
@@ -179,7 +178,7 @@ func newSFCBodyFixture(t *testing.T, body string, items []model.GalaxyDepotItem)
 // without being identical, because it packs unique blobs and a member's range
 // can run into another member's. Each such member is judged on its own bytes —
 // one member's verdict must not carry over to the other, and neither read may
-// walk the offset backwards (review S9-R).
+// walk the offset backwards.
 func TestExtractValidatesPartiallyOverlappingRegionsIndependently(t *testing.T) {
 	const body = "0123456789AB"
 	first := model.GalaxyDepotItem{
@@ -224,12 +223,12 @@ func TestExtractValidatesPartiallyOverlappingRegionsIndependently(t *testing.T) 
 	}
 }
 
-// TestExtractFailsAndKeepsTheContainerWhenReadingItFails locks the failure class
-// the S9-R review separated out: a member whose content is wrong is repaired
+// TestExtractFailsAndKeepsTheContainerWhenReadingItFails locks the failure
+// class: a member whose content is wrong is repaired
 // (pending + direct download), but a container that cannot be READ is an
 // observation failure — the extraction cannot tell what any later member holds,
 // so the install must not claim it converged, and the container must survive as
-// the only copy of those bytes (decisions D43, D49).
+// the only copy of those bytes (D43, D49).
 //
 // The container is a directory here: opening it succeeds, the first read fails.
 // That makes the read path fail without asserting anything about permissions.
@@ -261,7 +260,7 @@ func TestExtractFailsAndKeepsTheContainerWhenReadingItFails(t *testing.T) {
 }
 
 // TestExtractTreatsANonMissingOpenFailureAsFatal covers the other half of the
-// container-access rule (review S9-R): "not on disk" is the only open failure
+// container-access rule: "not on disk" is the only open failure
 // that may be passed over. A path the filesystem refuses — here one carrying a
 // NUL byte, the project's environment-independent way to make a path unopenable
 // — is an observation failure like a failed read, and nothing may be extracted
@@ -355,7 +354,7 @@ func TestExtractTreatsAMidReadFailureAsFatal(t *testing.T) {
 }
 
 // TestContainerStreamServesRegionsInOneRead locks the reader's guarantee
-// (review S9-R): regions are served in ascending offset order out of one
+// : regions are served in ascending offset order out of one
 // forward pass, so a region repeated by another member or one that starts inside
 // the buffered tail costs no second read.
 func TestContainerStreamServesRegionsInOneRead(t *testing.T) {
@@ -399,7 +398,7 @@ func TestContainerStreamServesRegionsInOneRead(t *testing.T) {
 // TestExtractReadsAContiguousContainerOnce pins the same guarantee at the
 // extraction level: 128 members covering a container end to end cost one read,
 // not one per member. Without it the fix would trade a silent wrong file for
-// thousands of redundant reads (review S9-R).
+// thousands of redundant reads.
 func TestExtractReadsAContiguousContainerOnce(t *testing.T) {
 	body := bytes.Repeat([]byte("z"), 4096)
 	items := make([]model.GalaxyDepotItem, 0, 128)

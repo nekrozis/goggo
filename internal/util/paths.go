@@ -7,13 +7,11 @@ import (
 	"runtime"
 )
 
-// HomeDir mirrors Util::getHomeDir (util.cpp:460-470). The C++ code prints an
-// error and exits when $HOME is missing; Go returns an error instead
-// (intentional difference: keep the failure, drop the process exit).
+// HomeDir returns $HOME. A missing HOME is an error rather than a process exit.
 //
-// The HOME-only meaning is kept on every platform. It is used by the XDG branch
-// below only, so a missing HOME no longer blocks startup on the platforms that
-// resolve their roots through the standard library.
+// HOME is only consulted by the XDG branch below, so a missing HOME does not
+// block startup on the platforms that resolve their roots through the standard
+// library.
 func HomeDir() (string, error) {
 	home, ok := os.LookupEnv("HOME")
 	if !ok {
@@ -29,22 +27,21 @@ func HomeDir() (string, error) {
 // ~/Library/Caches. Linux and the BSDs keep the XDG rules.
 //
 // os.UserConfigDir must NOT be used on Linux: it falls back to $HOME/.config
-// when an XDG variable is set but empty, whereas the upstream getenv semantics
-// (and the S06 review lock) require that case to yield "".
+// when an XDG variable is set but empty, whereas an empty-but-set variable must
+// yield "".
 func usesStdlibRoots() bool {
 	return runtime.GOOS == "windows" || runtime.GOOS == "darwin"
 }
 
 // ConfigHome returns the per-user configuration root.
 //
-// Platform split (intentional difference: upstream applies the XDG rules
-// everywhere, util.cpp:472-481):
+// Platform split:
 //
 //   - Windows: %AppData% (roaming).
 //   - macOS: ~/Library/Application Support.
 //   - Linux/BSD: XDG_CONFIG_HOME when the variable is set — even when it is
-//     empty, which yields "" exactly like C++ — otherwise $HOME/.config, and a
-//     missing HOME is an error.
+//     empty, which yields "" — otherwise $HOME/.config; a missing HOME is an
+//     error.
 func ConfigHome() (string, error) {
 	if usesStdlibRoots() {
 		return os.UserConfigDir()
@@ -60,7 +57,7 @@ func ConfigHome() (string, error) {
 }
 
 // CacheHome returns the per-user cache root; same platform split and the same
-// empty-vs-missing semantics as ConfigHome (util.cpp:483-492).
+// empty-vs-missing semantics as ConfigHome.
 func CacheHome() (string, error) {
 	if usesStdlibRoots() {
 		return os.UserCacheDir()

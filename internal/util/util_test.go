@@ -57,12 +57,12 @@ func TestOptionValueIntegerConversion(t *testing.T) {
 	if got := OptionValue("123", config.Platforms, false); got != 0 {
 		t.Errorf("OptionValue(\"123\", allowInt=false) = %d, want 0", got)
 	}
-	// Negative wraps through int32, mirroring std::stoi into unsigned int.
+	// A negative literal wraps through int32 into the unsigned mask.
 	neg := int32(-5)
 	if got := OptionValue("-5", config.Platforms, true); got != uint32(neg) {
 		t.Errorf("OptionValue(\"-5\") = %d, want %d", got, uint32(neg))
 	}
-	// int32 boundary extremes (std::stoi range semantics).
+	// int32 boundary extremes.
 	wrap := func(w int64) uint32 { return uint32(int32(w)) }
 	extremes := []struct {
 		in      string
@@ -72,8 +72,7 @@ func TestOptionValueIntegerConversion(t *testing.T) {
 		{"-1", true, wrap(-1)},
 		{"-2147483648", true, wrap(-2147483648)},
 		{"2147483647", true, wrap(2147483647)},
-		// Out of int32 range: std::stoi throws std::out_of_range (aborts in
-		// C++); Go maps the case to 0 (no match).
+		// Out of int32 range: the value maps to 0 (no match).
 		{"-2147483649", false, 0},
 		{"2147483648", false, 0},
 		{"99999999999999999999", false, 0},
@@ -161,8 +160,8 @@ func TestOptionByID(t *testing.T) {
 	if _, ok := OptionByID(0, config.Languages); ok {
 		t.Error("0 must match no entry")
 	}
-	// A composite flag equals no single entry, which is what the C++ loop finds
-	// too: it compares id for equality.
+	// A composite flag equals no single entry: the lookup compares IDs for
+	// equality.
 	if _, ok := OptionByID(config.LangEN|config.LangDE, config.Languages); ok {
 		t.Error("a composite flag must match no entry")
 	}
@@ -375,7 +374,7 @@ func TestConfigHomeSemantics(t *testing.T) {
 		t.Errorf("ConfigHome set = %q", got)
 	}
 
-	// XDG set but empty -> empty string (C++ getenv returns "").
+	// XDG set but empty -> empty string.
 	t.Setenv("XDG_CONFIG_HOME", "")
 	got, err = ConfigHome()
 	if err != nil || got != "" {
@@ -407,7 +406,7 @@ func TestCacheHomeSemantics(t *testing.T) {
 	}
 }
 
-// TestConfigHomeUsesPlatformRoots locks the platform split (S12.2): on Windows
+// TestConfigHomeUsesPlatformRoots locks the platform split: on Windows
 // and macOS the configuration root comes from the standard library, which is
 // what lets the CLI start when HOME is not set.
 func TestConfigHomeUsesPlatformRoots(t *testing.T) {
@@ -484,8 +483,7 @@ func TestReplaceAll(t *testing.T) {
 	if !ok || out != "aXaX" {
 		t.Errorf("ReplaceAll = %q, %v", out, ok)
 	}
-	// Go semantics: replaced segments are not rescanned (C++ re-searches and
-	// would loop forever on this input; the difference is documented).
+	// Replaced segments are not rescanned, so this input terminates.
 	out, ok = ReplaceAll("a", "a", "aa")
 	if !ok || out != "aa" {
 		t.Errorf("ReplaceAll rescan case = %q, %v", out, ok)

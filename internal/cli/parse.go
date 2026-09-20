@@ -11,9 +11,8 @@ import (
 	"github.com/nekrozis/goggo/internal/util"
 )
 
-// msgLevelVerbose is the level --verbose selects. It mirrors MSGLEVEL_VERBOSE
-// (message.h:19) the way core does; keeping the two in step is the price of
-// core owning its own copy of the upstream enum.
+// msgLevelVerbose is the level --verbose selects. core owns the same value for
+// its own console, so the two must stay in step.
 const msgLevelVerbose = 1
 
 // optionID identifies one option. The ids exist so the command tree can state
@@ -66,8 +65,8 @@ const (
 	// show builds.
 	optSort
 
-	// website subdirectory layout (GD4, the download commands only). The
-	// whitelist for each lives in config.SubdirOptions.
+	// website subdirectory layout; the whitelist for each lives in
+	// config.SubdirOptions.
 	optSubdirInstallers
 	optSubdirExtras
 	optSubdirPatches
@@ -78,7 +77,7 @@ const (
 	// download file only.
 	optOutputFile
 
-	// GD5 save-* artifacts (download writes them; list details/json let them
+	// The save-* artifacts (download writes them; list details/json let them
 	// gate what the acquisition fetches and the display shows) and the
 	// acquisition worker count.
 	optSaveSerials
@@ -140,7 +139,7 @@ type optionSpec struct {
 	parse  func(inv *invocation, value string) error
 }
 
-// optionTable is the CLI's complete option vocabulary (CLI1 v8 §5). The six
+// optionTable is the CLI's complete option vocabulary. The six
 // website subdirectory options are generated from config.SubdirOptions so the
 // whitelist, the defaults and the help text cannot drift from that table.
 var optionTable = append([]optionSpec{
@@ -220,10 +219,10 @@ var optionTable = append([]optionSpec{
 		parse: func(inv *invocation, v string) error {
 			// A value carrying a placeholder must be one of the templates the
 			// installer actually resolves. The list comes from core so the
-			// whitelist cannot drift from the resolver (review GD3 §3.3);
+			// whitelist cannot drift from the resolver;
 			// anything else with a "%" in it would be a half-exposed template
 			// language, and the resolver would keep it as a literal directory
-			// name (review CLI1 §5, constraint A).
+			// name.
 			if strings.ContainsRune(v, '%') && !core.IsInstallSubdirTemplate(v) {
 				return usagef("--install-dir takes a directory name or one of the known templates (%q)", v)
 			}
@@ -256,7 +255,7 @@ var optionTable = append([]optionSpec{
 		summary: "Language of the build that is installed (default: en)",
 		parse: func(inv *invocation, v string) error {
 			// An unmatched value leaves 0, which the Galaxy layer reads as
-			// English — the upstream behaviour (downloader.cpp:3904-3913).
+			// English.
 			inv.cfg.DownloadConfig.GalaxyLanguage = util.OptionValue(v, config.Languages, true)
 			return nil
 		},
@@ -284,7 +283,7 @@ var optionTable = append([]optionSpec{
 				return usagef("invalid value for --threads: %q", v)
 			}
 			// An explicit value always wins over the parser's default, and 0
-			// keeps its meaning of "let the runtime fall back" (review D9/D46);
+			// keeps its meaning of "let the runtime fall back" (D9, D46);
 			// it is not a second spelling of "auto".
 			inv.cfg.Threads = uint32(n)
 			return nil
@@ -298,8 +297,7 @@ var optionTable = append([]optionSpec{
 			if err != nil {
 				return usagef("invalid value for --progress-interval: %q", v)
 			}
-			// Clamp, the way the upstream front end does (main.cpp:519-523):
-			// an out-of-range value is bounded, never silently replaced by the
+			// An out-of-range value is clamped, never silently replaced by the
 			// default.
 			switch {
 			case n < progressIntervalMin:
@@ -440,8 +438,8 @@ var optionTable = append([]optionSpec{
 		id: optSort, long: "sort", value: valueRequired, arg: "<date|score|none>",
 		summary: "Build sorting order (default: score)",
 		parse: func(inv *invocation, v string) error {
-			// Stored unvalidated, as upstream does: an unknown order simply
-			// does not reorder anything (downloader.cpp:6826-6830).
+			// Stored unvalidated: an unknown order simply does not reorder
+			// anything.
 			inv.cfg.GalaxyBuildSortingOrder = v
 			return nil
 		},
@@ -479,10 +477,9 @@ var optionTable = append([]optionSpec{
 			return nil
 		},
 	},
-	// The six save-* switches (main.cpp:301-310, all zero_tokens default
-	// false). Their meaning differs per command and the topics say so: on
-	// download they fetch AND write; on list details/json they only gate the
-	// fetch and the display — list never writes (GD5 ruling 9).
+	// The six save-* switches. Their meaning differs per command and the topics
+	// say so: on download they fetch AND write; on list details/json they only
+	// gate the fetch and the display — list never writes.
 	{
 		id: optSaveSerials, long: "save-serials",
 		summary: "Save serial numbers",
@@ -539,7 +536,7 @@ var subdirOptionIDs = map[string]optionID{
 
 // subdirOptionSpecs generates the six --subdir-* options from the config
 // table: same long names, same defaults (declared in the summary), same
-// per-field whole-template whitelist (GD4 plan 3.3). The defaults themselves
+// per-field whole-template whitelist. The defaults themselves
 // are applied by applyParseDefaults, which reads the same table.
 func subdirOptionSpecs() []optionSpec {
 	specs := make([]optionSpec, 0, len(config.SubdirOptions))
@@ -566,8 +563,8 @@ func subdirOptionSpecs() []optionSpec {
 			parse: func(inv *invocation, v string) error {
 				// A value carrying a placeholder must be one of the whole
 				// templates this field renders; anything else with a "%" in
-				// it is a half-exposed template language (review GD3 3.3,
-				// same rule as --install-dir, own table per GD4 ruling 3).
+				// it is a half-exposed template language (same rule as
+				// --install-dir, with its own table per field).
 				if !config.SubdirValueAccepted(opt, v) {
 					return usagef("--subdir-%s takes a directory name or one of the known templates (%q)", opt.Name, v)
 				}
@@ -585,7 +582,7 @@ func subdirOptionSpecs() []optionSpec {
 // declared single-letter aliases. Looking each shape up in its own table is what
 // makes "-version", "-threads 8" and "--h" unknown options instead of accepted
 // spellings: folding the prefixes together (or stripping every leading dash)
-// would quietly widen the grammar (review S1-R1).
+// would quietly widen the grammar.
 var (
 	longByName  = map[string]*optionSpec{}
 	shortByName = map[string]*optionSpec{}
@@ -615,7 +612,7 @@ func splitOption(token string) (name, value string, hasValue bool) {
 //
 // It exists for one reason: the diagnosis. The parser still fails on the option
 // (unknown option, exit 2) — nothing is translated, nothing is accepted twice
-// (review §11) — but a user following older documentation gets told where the
+// — but a user following older documentation gets told where the
 // capability went instead of guessing.
 var removedOptions = map[string]string{
 	"login":                  "goggo auth login",
@@ -651,7 +648,7 @@ var removedOptions = map[string]string{
 //
 // It is the parser's single failure shape: the caller maps it onto the usage
 // exit code (2), so "the user asked for something the CLI does not offer" is
-// never mistaken for "the operation failed" (review D2/D3).
+// never mistaken for "the operation failed" (D2, D3).
 type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
@@ -670,7 +667,7 @@ func isUsageError(err error) bool {
 //
 // Options may appear anywhere on the line; the first bare token starts the
 // command path, and the tokens after it are subcommands while the tree has a
-// matching child, then the command's arguments (review §6). The parse is
+// matching child, then the command's arguments. The parse is
 // deliberately two-phase: the command path is resolved first, and only then are
 // the options checked against what that command accepts (D15) — so
 // "goggo list --threads 8" fails as an unaccepted option rather than being
@@ -771,8 +768,7 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 	// ("goggo auth -h" is help for the auth namespace, not a
 	// missing-subcommand error) and must not check the command's arity (D18).
 	// Both spellings — this shortcut and the help command — resolve their topic
-	// with the SAME rule, so they can never disagree about what a topic is
-	// (review S2: the two used to differ on unknown and leftover words).
+	// with the SAME rule, so they can never disagree about what a topic is.
 	if helpSeen {
 		topic, err := resolveHelpTopic(words)
 		if err != nil {
@@ -852,9 +848,9 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 		}
 		inv.target = tgt
 	case count < 0:
-		// -1 requires at least one (checked above), -2 (GD5's list
-		// details/json) accepts none — the empty set means "the whole
-		// account", a read-only default the download commands refuse (ruling 7).
+		// -1 requires at least one (checked above), -2 accepts none — the
+		// empty set means "the whole account", a read-only default the
+		// download commands refuse.
 		inv.args = append([]string{}, rest...)
 	}
 
@@ -868,9 +864,8 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 		}
 	}
 
-	// -o names one output file, so it belongs to exactly one spec. Upstream
-	// refuses it at dispatch (main.cpp:563); this CLI refuses it where the
-	// shape is known — the parser (GD4 Gate 1 ruling 5).
+	// -o names one output file, so it belongs to exactly one spec; the parser
+	// refuses it where the shape is known.
 	if node.id == cmdDownloadFile && inv.outputFile != "" && len(inv.args) > 1 {
 		return invocation{}, usagef("download file takes -o with exactly one spec, got %d", len(inv.args))
 	}
@@ -883,7 +878,7 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 
 	inv.cmd = node.id
 	// The session class travels with the command: the dispatcher applies the
-	// declaration instead of deciding it (review S4).
+	// declaration instead of deciding it.
 	inv.session = node.session
 	// Directory arguments are normalised once parsing is over: an empty value
 	// means the current directory, and any other value ends in a separator.
@@ -936,7 +931,7 @@ func resolveCommand(words []string) (commandNode, []string, []string, error) {
 	}
 	// A node that is both leaf and namespace ("download") that got here with
 	// a first word no child matched dispatches as the leaf: the leftover
-	// words are its arguments (GD4 ruling 9).
+	// words are its arguments.
 	return node, path, words[idx:], nil
 }
 
@@ -949,9 +944,9 @@ func childNames(node commandNode) string {
 }
 
 // commandArity says what a command takes after its path: the argument's name
-// and how many — 0 for none, 1 for exactly one, -1 for one or more (GD4's
-// download commands), -2 for zero or more (GD5's list details/json, where the
-// empty set means the whole account, read-only).
+// and how many — 0 for none, 1 for exactly one, -1 for one or more (the
+// download commands), -2 for zero or more (list details/json, where the empty
+// set means the whole account, read-only).
 func commandArity(id commandID) (string, int) {
 	switch id {
 	case cmdInstall, cmdVerify, cmdShowBuilds, cmdShowManifest, cmdShowCDNs,
@@ -969,13 +964,12 @@ func commandArity(id commandID) (string, int) {
 
 // parseTarget splits "<product id or gamename>[/<build id or index>]".
 //
-// The split is done here rather than through util.Split: that helper mirrors the
-// upstream tokenizer and DROPS empty tokens, which is exactly what would hide a
-// malformed argument ("/2" would silently become the game "2"). The shape is
-// therefore checked on the raw string. More than two parts, or an empty game, is
-// a usage error rather than a silently ignored tail (D2) — the C++ front end
-// ignored the remainder; this CLI refuses what it does not understand. An empty
-// build is read as "no build given", the way the upstream tokenizer reads it.
+// The split is done here rather than through util.Split: that helper DROPS
+// empty tokens, which is exactly what would hide a malformed argument ("/2"
+// would silently become the game "2"). The shape is therefore checked on the
+// raw string. More than two parts, or an empty game, is a usage error rather
+// than a silently ignored tail (D2). An empty build is read as "no build
+// given".
 func parseTarget(arg string) (target, error) {
 	parts := strings.SplitN(arg, "/", 3)
 	if len(parts) > 2 {
@@ -993,16 +987,16 @@ func parseTarget(arg string) (target, error) {
 
 // resolveHelpTopic turns the words after a help request into a topic path.
 //
-// One rule serves both spellings (review S3):
+// One rule serves both spellings:
 //
-//	no words                  → the root topic
+//	no words → the root topic
 //	longest resolvable prefix → that node's topic
 //	pure namespace with leftovers → usage error: unknown subcommand
 //	leaf with at most one argument → its topic (help does NOT require the
 //	                                  argument the command would need to run)
-//	leaf with more leftovers  → usage error, except the variadic download
+//	leaf with more leftovers → usage error, except the variadic download
 //	                           commands, which take one or more
-//	nothing resolvable        → usage error: unknown command
+//	nothing resolvable → usage error: unknown command
 //
 // The alternative — printing the root help for anything unrecognised — would
 // answer a question the user did not ask while looking like success, which is
@@ -1052,8 +1046,7 @@ func resolveHelpTopic(words []string) ([]string, error) {
 }
 
 // unknownOption builds the failure for an option this CLI does not have, adding
-// the migration hint when the option is one of the upstream flags the redesign
-// removed.
+// the migration hint when the option is one the redesign removed.
 func unknownOption(name string) error {
 	if suggestion, ok := removedOptions[name]; ok && suggestion != "" {
 		return usagef("unknown option --%s\nhint: use '%s'", name, suggestion)
@@ -1062,7 +1055,7 @@ func unknownOption(name string) error {
 }
 
 // unknownCommand builds the failure for a verb outside the tree, with the same
-// migration hint for the upstream commands that became something else.
+// migration hint for the commands that became something else.
 func unknownCommand(name string) error {
 	if suggestion, ok := removedOptions[name]; ok && suggestion != "" {
 		return usagef("unknown command %q\nhint: use '%s'", name, suggestion)
@@ -1096,15 +1089,11 @@ func applyParseDefaults(cfg *config.Config) {
 	cfg.DownloadConfig.GalaxyLanguage = util.OptionValue(defaultGalaxyLanguage, config.Languages, true)
 	cfg.DownloadConfig.GalaxyArch = util.OptionValue(defaultGalaxyArch, config.GalaxyArchs, false)
 	cfg.DownloadConfig.GalaxyCDNPriority = util.Split(defaultGalaxyCDNPriority, ",")
-	// The installer platform/language the website conversion gates on.
-	// Upstream declares them as front-end default_values ("w+l" and "en",
-	// main.cpp:280-281) and parses each into the priority list AND the
-	// installer mask (Util::parseOptionString, util.cpp:312). Leaving them
-	// zero made every non-extras vector drop silently — GD4's download
-	// commands are the conversion's first production consumers and exposed
-	// it on the real account (audit GD4, DEFECT-GD4-1). The parser declares
-	// the defaults from the same constants config.NewConfig installs, and
-	// the --installer-platform/--installer-language closures are the single
+	// The installer platform/language the website conversion gates on. Each is
+	// parsed into the priority list AND the installer mask; leaving them zero
+	// makes every non-extras vector drop silently. The parser declares the
+	// defaults from the same constants config.NewConfig installs, and the
+	// --installer-platform/--installer-language closures are the single
 	// override path.
 	platformPriority, installerPlatform := util.ParseOptionString(config.DefaultPlatformPriority, config.Platforms)
 	cfg.DownloadConfig.PlatformPriority = platformPriority
@@ -1112,16 +1101,14 @@ func applyParseDefaults(cfg *config.Config) {
 	languagePriority, installerLanguage := util.ParseOptionString(config.DefaultLanguagePriority, config.Languages)
 	cfg.DownloadConfig.LanguagePriority = languagePriority
 	cfg.DownloadConfig.InstallerLanguage = installerLanguage
-	// Remote XML is on unless --no-remote-xml says otherwise (main.cpp:282
-	// and 541: bRemoteXML = !bNoRemoteXML, default false). With it off the
-	// installer/patch version check silently disappears, so the parser
-	// declares the upstream default (the option itself is not registered —
-	// D14 keeps the surface to what is wired; the field is settable by a
-	// future config layer).
+	// Remote XML is on by default. With it off the installer/patch version check
+	// silently disappears, so the parser declares it true; the option itself is
+	// not registered (D14 keeps the surface to what is wired), so the field is
+	// only settable by a future config layer.
 	cfg.DownloadConfig.RemoteXML = true
 	cfg.Directories.GalaxyInstallSubdir = defaultGalaxyInstallSubdir
 	// The six website subdirectory defaults come from the config table —
-	// the same single source the whitelist and the help text read (GD4 3.3).
+	// the same single source the whitelist and the help text read.
 	for _, opt := range config.SubdirOptions {
 		opt.Set(&cfg.Directories, opt.Default)
 	}

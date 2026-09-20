@@ -108,11 +108,11 @@ func TestListMapsProductsAndReturnsOwnedIDs(t *testing.T) {
 	}
 }
 
-// TestListProductIDShapes locks the `isInt() ? to_string : asString` rule.
+// TestListProductIDShapes locks the integer-shaped stringification rule.
 //
-// The boolean entries pin the shape gate: jsoncpp's isInt() is false for a
-// boolean, so it must stringify ("true"/"false") instead of falling into
-// jsonval.Int, which would coerce true to "1". Do not widen that gate later.
+// The boolean entries pin the shape gate: a boolean must stringify
+// ("true"/"false") instead of falling into jsonval.Int, which would coerce true
+// to "1". Do not widen that gate.
 func TestListProductIDShapes(t *testing.T) {
 	ff := &fakeFetcher{pages: onePage(
 		product("int", float64(12), nil),
@@ -131,9 +131,9 @@ func TestListProductIDShapes(t *testing.T) {
 	}
 }
 
-// TestListProductUpdatesShapes locks the std::stoi semantics of the updates
-// member. The boolean entry pins the same shape gate as productID: isInt() is
-// false for a boolean, so it goes through stoi("true") and yields 0, not 1.
+// TestListProductUpdatesShapes locks the parsing of the updates member. The
+// boolean entry pins the same shape gate as productID: a boolean goes through the
+// string parser and yields 0, not 1.
 func TestListProductUpdatesShapes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -205,13 +205,13 @@ func TestListNewOnlyAndGameFilters(t *testing.T) {
 	if got := list(t, &fakeFetcher{pages: pages()}, ListOptions{GameRegex: "alpha"}).Games; len(got) != 2 {
 		t.Errorf("GameRegex games = %+v", got)
 	}
-	// A pattern is a substring match (boost::regex_search), not anchored.
+	// A pattern is a substring match, not anchored.
 	if got := list(t, &fakeFetcher{pages: pages()}, ListOptions{GameRegex: "^alpha$"}).Games; len(got) != 0 {
 		t.Errorf("anchored GameRegex games = %+v, want none", got)
 	}
 }
 
-// TestListHiddenPass walks the two-round pagination of website.cpp:111-140.
+// TestListHiddenPass walks the two-round pagination of the hidden-products pass.
 func TestListHiddenPass(t *testing.T) {
 	ff := &fakeFetcher{pages: []webapi.ProductPage{
 		{Page: 1, TotalPages: 1, Products: []map[string]any{product("zeta", float64(1), nil)}},
@@ -260,7 +260,7 @@ func TestListTotalPagesZeroIsEmpty(t *testing.T) {
 	}
 }
 
-// TestListPropagatesOwnedError locks E1: a failing owned-ids fetch fails the
+// TestListPropagatesOwnedError locks that a failing owned-ids fetch fails the
 // listing instead of looking like an account without games.
 func TestListPropagatesOwnedError(t *testing.T) {
 	boom := errors.New("boom")
@@ -281,7 +281,8 @@ func TestListPropagatesPageError(t *testing.T) {
 	}
 }
 
-// TestListInvalidRegexFailsBeforeFetching locks review point D.
+// TestListInvalidRegexFailsBeforeFetching locks that an invalid pattern fails the
+// listing before any request is made.
 func TestListInvalidRegexFailsBeforeFetching(t *testing.T) {
 	ff := &fakeFetcher{}
 	if _, err := List(context.Background(), ff, ListOptions{GameRegex: "("}); err == nil {

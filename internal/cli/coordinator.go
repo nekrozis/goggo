@@ -8,7 +8,7 @@ import (
 )
 
 // terminalCoordinator is the single terminal-visible writer for an install
-// run's TTY lifetime (review UI1 v3 §6.C): every byte that reaches the
+// run's TTY lifetime: every byte that reaches the
 // terminal while the run is live goes through one of its three transactions —
 // Frame, Diagnostic, Stop — so the cursor always has exactly one owner.
 //

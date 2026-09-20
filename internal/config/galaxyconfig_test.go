@@ -134,7 +134,7 @@ func TestTokenGettersReturnStoredValues(t *testing.T) {
 }
 
 func TestEmptyClientOverrideReturnedVerbatim(t *testing.T) {
-	// Mirrors C++: an existing (even empty) member is returned as-is.
+	// An existing (even empty) member is returned as-is.
 	g := NewGalaxyConfig()
 	g.SetJSON(map[string]any{"client_id": ""})
 	if v := g.GetClientID(); v != "" {
@@ -222,7 +222,7 @@ func TestGalaxyConfigConcurrentAccess(t *testing.T) {
 }
 
 // TestSetJSONNeverMutatesCallerMap covers every injection path: the caller's
-// map must come back unchanged (C1).
+// map must come back unchanged.
 func TestSetJSONNeverMutatesCallerMap(t *testing.T) {
 	cases := []struct {
 		name string
@@ -247,7 +247,7 @@ func TestSetJSONNeverMutatesCallerMap(t *testing.T) {
 }
 
 // TestGetJSONDeepCopiesNestedContainers locks the output side: mutating a
-// nested container of the returned map must not reach the store (C2).
+// nested container of the returned map must not reach the store.
 func TestGetJSONDeepCopiesNestedContainers(t *testing.T) {
 	g := NewGalaxyConfig()
 	g.SetJSON(map[string]any{

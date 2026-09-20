@@ -1,17 +1,9 @@
 package model
 
-// WishlistItem mirrors struct wishlistItem (util.h:45-58): one entry of the
-// account wishlist with the display strings the C++ source pre-formats.
-//
-// Differences from the C++ struct (intentional): the Hungarian/short member
-// names are dropped, and the field order follows the project layout rule
-// instead of the original declaration order.
-//
-// Fields are ordered to minimise padding: the slice (24B), the strings (16B
-// each), the int64/uint32 pair, then the bools.
+// WishlistItem is one entry of the account wishlist, with the display strings
+// pre-formatted for the listing.
 type WishlistItem struct {
-	// Tags holds the display tags in the order the C++ source pushes them:
-	// "Coming soon", "Discount", "Movie".
+	// Tags holds the display tags: "Coming soon", "Discount", "Movie".
 	Tags []string
 
 	// Title is the product title; Currency and the four price strings that
@@ -26,8 +18,7 @@ type WishlistItem struct {
 	StoreCredit     string
 	URL             string
 
-	// ReleaseDateTime is the release date as a Unix timestamp, 0 when unknown
-	// (website.cpp:744-769).
+	// ReleaseDateTime is the release date as a Unix timestamp, 0 when unknown.
 	ReleaseDateTime int64
 
 	// Platform is the worksOn mask; it stays 0 for movies.

@@ -75,7 +75,7 @@ func TestOwnedGameIDs(t *testing.T) {
 	if *lastURI != "/www/user/data/games" {
 		t.Errorf("request URI = %q", *lastURI)
 	}
-	want := []string{"a", "b", "1207659156"} // numbers stringify like jsoncpp asString
+	want := []string{"a", "b", "1207659156"} // a number stringifies
 	if len(got) != len(want) {
 		t.Fatalf("ids = %v, want %v", got, want)
 	}
@@ -87,7 +87,7 @@ func TestOwnedGameIDs(t *testing.T) {
 }
 
 // TestOwnedGameIDsDegenerateShapes: a missing or non-array owned field yields an
-// empty result without an error, mirroring jsoncpp's empty scalar iteration.
+// empty result without an error.
 func TestOwnedGameIDsDegenerateShapes(t *testing.T) {
 	for _, body := range []string{`{}`, `{"owned":null}`, `{"owned":"a"}`, `{"owned":5}`} {
 		t.Run(body, func(t *testing.T) {
@@ -131,8 +131,8 @@ func TestTagsArrayShape(t *testing.T) {
 	}
 }
 
-// TestTagsObjectShape covers the object-of-objects shape: jsoncpp ranges over
-// member values, so both shapes must work.
+// TestTagsObjectShape covers the object-of-objects shape: member values are
+// ranged over, so both shapes must work.
 func TestTagsObjectShape(t *testing.T) {
 	body := `{"tags":{"a":{"id":"gog","name":"GOG.com"}}}`
 	srv, _ := accountServer(t, body, http.StatusOK)
@@ -196,8 +196,7 @@ func TestTagsRejectsNonObjectEntry(t *testing.T) {
 	}
 }
 
-// TestTagsMissingIDAndName: absent members read as null and stringify to "",
-// exactly like jsoncpp's asString() on a missing member.
+// TestTagsMissingIDAndName: absent members read as "".
 func TestTagsMissingIDAndName(t *testing.T) {
 	srv, _ := accountServer(t, `{"tags":[{"id":"only-id"}]}`, http.StatusOK)
 	cl, _ := newTestClient(t, srv, 0)
@@ -212,7 +211,7 @@ func TestTagsMissingIDAndName(t *testing.T) {
 }
 
 // TestTagsNotJSON: an HTML login page is ErrNotJSON so the CLI can print the
-// "--login" hint the C++ source used to print before exiting.
+// "--login" hint.
 func TestTagsNotJSON(t *testing.T) {
 	srv, _ := accountServer(t, "<html>login</html>", http.StatusOK)
 	cl, _ := newTestClient(t, srv, 0)

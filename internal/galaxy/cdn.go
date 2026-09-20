@@ -11,49 +11,37 @@ import (
 )
 
 // GalaxyPathPlaceholder is the marker CdnURLTemplatesFromJSON leaves in a
-// template where the caller has to insert the expanded galaxy path
-// (galaxyapi.cpp:783).
+// template where the caller has to insert the expanded galaxy path.
 //
 // It is a contract between this package and the download layer, not wire text:
-// the GOG API never sends it, and the callers substitute it before a request is
-// built (downloader.cpp:4655 and 4661). Upstream wrote the same idea as
-// "{LGOGDOWNLOADER_GALAXY_PATH}", appended to the path parameter's value by its
-// own template builder (galaxyapi.cpp:781-784); the API's url_format itself
-// spells the path parameter "{path}", and this port keeps that spelling as the
-// internal marker instead of carrying upstream's long name.
+// the API never sends it, and callers substitute it before a request is built.
+// The API's url_format spells the path parameter "{path}", and this package
+// keeps that spelling as the internal marker.
 //
-// Two properties make the shared spelling safe:
-//
-//   - The parameter pass replaces "{path}" with the parameter value plus the
-//     re-attached marker in ONE pass (util.ReplaceAll is not a loop, unlike the
-//     upstream while-loop that would never terminate if its marker equalled its
-//     search string).
-//   - The final consumer's ReplaceAll therefore only ever hits the re-attached
-//     marker. Should a url_format carry "{path}" without a matching parameter —
-//     a case where upstream would leave the API placeholder unsubstituted and
-//     produce a broken URL — this port fills it with the galaxy path, which is
-//     the useful reading of that template.
+// The shared spelling is safe because the parameter pass replaces "{path}" with
+// the parameter value plus the re-attached marker in ONE pass, so the final
+// consumer's replacement only ever hits the re-attached marker. Should a
+// url_format carry "{path}" without a matching parameter, this package fills it
+// with the galaxy path, which is the useful reading of that template.
 const GalaxyPathPlaceholder = "{path}"
 
 // CdnURLTemplatesFromJSON builds the ordered list of CDN URL templates from a
-// link document (galaxyapi.cpp:740-811).
+// link document.
 //
 // Every entry of "urls" contributes one template. Its place in the result comes
 // from the endpoint's rank in cdnPriority: the index of the first match, or
 // len(cdnPriority)+i, which puts an endpoint that is not listed behind every
 // listed one and keeps unlisted endpoints in document order. The list is sorted
-// by rank, lowest first, with a STABLE sort — std::sort leaves the order of
-// equally ranked endpoints (the same name twice) undefined, and this defines it.
+// by rank, lowest first, with a STABLE sort, so equally ranked endpoints (the
+// same name twice) keep document order.
 //
 // Inside url_format every "{parameter}" is replaced by that member of
-// "parameters", repeatedly, the way upstream replaces it. The members are
-// visited in ascending key order, which is how jsoncpp reports them and, because
-// a value may itself contain another placeholder, part of the behaviour rather
-// than an implementation detail.
+// "parameters". The members are visited in ascending key order, which is
+// observable: a value may itself contain another parameter's placeholder.
 //
 // "{path}" is special: the marker is APPENDED to its value instead of replacing
-// it (galaxyapi.cpp:781-784), so the caller can fill in the path later. No
-// normalisation is done here — no slash folding, no cleaning, no URL parsing.
+// it, so the caller can fill in the path later. No normalisation is done here —
+// no slash folding, no cleaning, no URL parsing.
 //
 // A document whose "urls" is missing or null produces no templates. A section
 // that is present in another shape is reported, as elsewhere in this package: an
@@ -99,8 +87,9 @@ func CdnURLTemplatesFromJSON(json map[string]any, cdnPriority []string) ([]strin
 	return templates, nil
 }
 
-// cdnRank is the score of galaxyapi.cpp:750-767: the index of the endpoint in
-// the configured priority, or len(cdnPriority)+index when it is not listed.
+// cdnRank scores an endpoint: its index in the configured priority, or
+// len(cdnPriority)+index when it is not listed, which ranks it behind every
+// listed endpoint.
 func cdnRank(endpointName string, cdnPriority []string, index int) int {
 	for i, name := range cdnPriority {
 		if endpointName == name {
@@ -110,12 +99,11 @@ func cdnRank(endpointName string, cdnPriority []string, index int) int {
 	return len(cdnPriority) + index
 }
 
-// urlTemplate renders one entry's url_format with its parameters applied
-// (galaxyapi.cpp:769-786).
+// urlTemplate renders one entry's url_format with its parameters applied.
 //
-// The keys are collected and sorted before the replacements run: jsoncpp hands
-// them back in ascending key order, and the order is observable when one
-// parameter's value contains another parameter's placeholder.
+// The keys are collected and sorted before the replacements run, because the
+// order is observable when one parameter's value contains another parameter's
+// placeholder.
 func urlTemplate(entry map[string]any) (string, error) {
 	format, err := jsonval.Str(entry["url_format"])
 	if err != nil {
@@ -124,8 +112,7 @@ func urlTemplate(entry map[string]any) (string, error) {
 
 	raw, ok := entry["parameters"]
 	if !ok || raw == nil {
-		// jsoncpp reports no member names for a null value, so a null
-		// parameters object means "nothing to replace".
+		// A null parameters object means "nothing to replace".
 		return format, nil
 	}
 	parameters, err := jsonval.Object(raw)
@@ -152,31 +139,27 @@ func urlTemplate(entry map[string]any) (string, error) {
 	return format, nil
 }
 
-// PathFromDownlinkURL derives the depot-relative path from a downlink URL
-// (galaxyapi.cpp:676-739).
+// PathFromDownlinkURL derives the depot-relative path from a downlink URL.
 //
-// The C++ version percent-decodes the URL, removes one trailing slash, starts the
-// path at the last "/<gamename>/" when that is present (otherwise after the last
-// "/"), ends it before the query string, guarantees the "/<gamename>/" prefix,
-// and finally applies the workaround for
-// https://github.com/Sude-/lgogdownloader/issues/126, which cuts a path whose "?"
-// follows its last "/".
+// The URL is percent-decoded, one trailing slash is removed, the path starts at
+// the last "/<gamename>/" when that is present (otherwise after the last "/"),
+// ends before the query string, and always carries the "/<gamename>/" prefix. A
+// "?" after the last "/" means the URL format was unexpected, so the path is cut
+// there; a path with no slash at all is left alone.
 //
 // It returns a string rather than an error because there is nothing here that can
 // fail usefully: the input is a URL, not a document, so there is no shape to
 // validate, and the purpose is to recover a path — the caller decides whether the
 // result is usable (the download path rejects one that ends in "/secure").
 //
-// The cases C++ leaves undefined are defined here:
+// The corner cases are defined here:
 //
 //   - percent-decoding uses url.PathUnescape, which decodes %XX but does not turn
-//     "+" into a space (QueryUnescape would). Unlike curl it reports an invalid
-//     escape; the original text is kept in that case, which is what a lenient
-//     decoder produces too.
-//   - an empty URL skips the trailing-slash step, where C++ calls back();
-//     an empty result becomes "/<gamename>/".
-//   - an end position before the start position is clamped, where C++ would form
-//     an invalid range.
+//     "+" into a space (QueryUnescape would). An invalid escape reports an error,
+//     in which case the original text is kept.
+//   - an empty URL skips the trailing-slash step; an empty result becomes
+//     "/<gamename>/".
+//   - an end position before the start position is clamped.
 func PathFromDownlinkURL(downlinkURL, gameName string) string {
 	decoded, err := url.PathUnescape(downlinkURL)
 	if err != nil {
@@ -221,10 +204,8 @@ func PathFromDownlinkURL(downlinkURL, gameName string) string {
 		path = "/" + gameName + "/" + path
 	}
 
-	// Issue #126: a "?" after the last "/" means the URL format was unexpected.
-	// The C++ test compares against find_last_of("/"), which is npos when there
-	// is no slash at all, and npos loses every comparison — so a path without a
-	// slash is NOT truncated. The requirement that a slash exists keeps that.
+	// A "?" after the last "/" means the URL format was unexpected; a path with
+	// no slash at all is not truncated.
 	if q := strings.LastIndexByte(path, '?'); q >= 0 {
 		if slash := strings.LastIndexByte(path, '/'); slash >= 0 && q > slash {
 			path = path[:q]

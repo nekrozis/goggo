@@ -6,7 +6,7 @@
 // and only the transport is doubled, so the URLs under test are the ones the
 // package itself builds — endpoints, hosts and all. The alternative (reaching
 // into the unexported endpoint block, as the unit tests do) would bypass exactly
-// the wiring this step exists to check.
+// the wiring this test exists to check.
 //
 // Every path the CDN must answer is derived from the fixture's own bytes and
 // hashes rather than written down: the chunk's md5 comes from one byte slice,
@@ -16,11 +16,10 @@
 //
 // What this does NOT cover is deliberate: choosing a build (sorting, build ids),
 // the DLC include filter, retries, resume, the small-files container and the
-// downloader state machine all belong to S17 and later. The fixture picks
-// items[0] and requires generation 2 as a stand-in for that selection logic; it is
-// a simplification of the S16 harness, not the final assembly strategy.
+// downloader state machine are all out of scope here. The fixture picks items[0]
+// and requires generation 2 as a stand-in for that selection logic.
 //
-// Decompression is out of scope as well (S19/S20): the chunk's uncompressed md5
+// Decompression is out of scope as well: the chunk's uncompressed md5
 // and size are structural placeholders, while the chain that is verified is
 // compressedMd5 → galaxy path → manifest → download.
 package galaxy_test
@@ -128,7 +127,7 @@ func newChainFixture(t *testing.T, opts ...func(*chainFixture)) *chainFixture {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/products/"+chainProductID+"/os/windows/builds", func(w http.ResponseWriter, r *http.Request) {
 		// The link ends in the build hash, which is how the download path
-		// derives it (downloader.cpp:4923-4926).
+		// derives it.
 		fmt.Fprintf(w, `{"items":[{"generation":2,"build_id":"b1","link":%q}]}`,
 			"https://cdn.gog.com"+f.buildManifestPath)
 	})
@@ -225,9 +224,8 @@ func (f *chainFixture) fetch(t *testing.T, rawURL string) []byte {
 // firstDepotEntry fetches the build manifest through the client and returns the
 // depot entry the download path would expand.
 //
-// Picking depots[0] stands in for the S17 selection logic (build ids, sorting,
-// the DLC include filter); it is a harness simplification, not the final
-// assembly strategy.
+// Picking depots[0] stands in for the real selection logic (build ids, sorting,
+// the DLC include filter); it is a harness simplification.
 func (f *chainFixture) firstDepotEntry(t *testing.T) map[string]any {
 	t.Helper()
 	manifest, err := f.client.ManifestV2(context.Background(), chainBuildHash, false)
@@ -292,8 +290,7 @@ func TestChainProductDownload(t *testing.T) {
 		t.Fatalf("templates = %v, want both endpoints", templates)
 	}
 	// The document lists cdnAlt first; the priority must move cdnMain ahead of
-	// it, because the download path only ever uses templates[0]
-	// (downloader.cpp:4652).
+	// it, because the download path only ever uses templates[0].
 	if !strings.HasPrefix(templates[0], "https://cdn.gog.com/chunks") {
 		t.Fatalf("templates[0] = %q, want the endpoint the priority names", templates[0])
 	}
@@ -301,8 +298,7 @@ func TestChainProductDownload(t *testing.T) {
 		t.Fatalf("template = %q, want the galaxy path marker", templates[0])
 	}
 
-	// 7. The normal download path fills the marker with "/" + galaxy path
-	//    (downloader.cpp:4659-4661).
+	// 7. The normal download path fills the marker with "/" + galaxy path.
 	chunkURL := strings.ReplaceAll(templates[0], galaxy.GalaxyPathPlaceholder, "/"+f.depChunkPath)
 	if strings.Contains(chunkURL, galaxy.GalaxyPathPlaceholder) {
 		t.Errorf("chunk URL = %q, still carries the marker", chunkURL)
@@ -346,7 +342,7 @@ func TestChainProductDownload(t *testing.T) {
 
 // TestChainDependencyDownload covers the second use of the marker: a dependency
 // chunk is fetched through the dependency manifest and the dependency link, and
-// the marker is removed rather than filled in (downloader.cpp:4653-4657).
+// the marker is removed rather than filled in.
 func TestChainDependencyDownload(t *testing.T) {
 	f := newChainFixture(t)
 	ctx := context.Background()
@@ -416,10 +412,9 @@ func TestChainFilterStopsTheChain(t *testing.T) {
 	assertSequence(t, f.calls(), []string{f.buildManifestPath})
 }
 
-// TestChainDownlinkPathRecovery covers the other upstream entry that resolves a
-// download path: a link document's downlink URL (galaxyapi.cpp:547-552,
-// downloader.cpp:2514). The unit matrix for this function lives in S15c; this is
-// the single end-to-end-shaped case.
+// TestChainDownlinkPathRecovery covers the other entry that resolves a download
+// path: a link document's downlink URL. This is the single end-to-end-shaped
+// case; the unit matrix for PathFromDownlinkURL lives in cdn_test.go.
 func TestChainDownlinkPathRecovery(t *testing.T) {
 	downlink := "https://cdn.gog.com/" + chainGameName + "/dir/file.bin?token=TTT"
 	if got := galaxy.PathFromDownlinkURL(downlink, chainGameName); got != "/"+chainGameName+"/dir/file.bin" {
@@ -460,7 +455,7 @@ func quoteAll(values []string) string {
 
 // depotManifestBody is a depot manifest with one single-chunk entry. The chunk's
 // md5 is the fixture's own; its uncompressed md5 and size are placeholders,
-// because this step does not decompress anything (S19/S20 owns that).
+// because this test does not decompress anything.
 func depotManifestBody(path, chunkMD5 string) string {
 	return fmt.Sprintf(`{"depot":{"items":[{"path":%q,"chunks":[{"compressedMd5":%q,"md5":%q,`+
 		`"compressedSize":%d,"size":%d}]}]}}`, path, chunkMD5, "uncompressed-md5-placeholder",

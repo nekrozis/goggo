@@ -24,10 +24,8 @@ var ErrNotImplemented = errors.New("not implemented in this build")
 // messages — streams through the front end's console as it happens.
 //
 // Task failures during the transfer leave as error events and do not fail the
-// run: the C++ source never folds them into the exit code either
-// (downloader.cpp:886 calls a void function; review D65a). The post-transfer
-// steps run only when the transfer itself returned without a cancelled
-// context, mirroring the C++ sequence after the thread join.
+// run. The post-transfer steps run only when the transfer itself returned
+// without a cancelled context.
 func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 	res, err := d.BuildPlan(ctx, req)
 	d.emitNotices(res.Messages)
@@ -35,7 +33,7 @@ func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 		return err
 	}
 	// Hand the plan's semantic install root to a front end that renders task
-	// rows (UI1-R2): the rows display paths relative to this root, never a
+	// rows: the rows display paths relative to this root, never a
 	// guessed one (cfg.Directories.Directory and the resolved %install_dir%
 	// are not the same when a subdir template is in play). Plain consoles
 	// simply do not answer the assertion.
@@ -56,17 +54,16 @@ func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 	// The skipped set was a planning-time observation, so the install closes
 	// the window that observation opened: every destination the plan marked
 	// "already up to date" is re-checked here, after the transfer finished
-	// and before any post-transfer step consumes the installation (review
-	// RES1 v2 §2, RES1-R1). A file that changed meanwhile fails the install —
-	// no task is recreated, nothing is re-downloaded, no file is touched;
-	// rerunning the install reconciles it.
+	// and before any post-transfer step consumes the installation. A file that
+	// changed meanwhile fails the install — no task is recreated, nothing is
+	// re-downloaded, no file is touched; rerunning the install reconciles it.
 	if err := revalidateSkipped(res.Skipped); err != nil {
 		return err
 	}
 
-	// The post-transfer steps (downloader.cpp:4265-4343): the small-files
-	// containers unpack and the orphan check. Both print as they go and both
-	// are non-fatal in their per-item failures, the way the C++ source is.
+	// The post-transfer steps: the small-files containers unpack and the
+	// orphan check. Both print as they go and both are non-fatal in their
+	// per-item failures.
 	pending, err := d.ExtractSmallFilesContainers(ctx, res)
 	if err != nil {
 		return err
@@ -98,7 +95,7 @@ func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 
 // runTransfer is the one place a task list reaches the transfer layer: the
 // install's main pass and the small-files fallback share it, so both publish the
-// same events and the same progress to the front end (review S9-R).
+// same events and the same progress to the front end.
 func (d *Downloader) runTransfer(ctx context.Context, tasks []model.FileTask) error {
 	return transfer.Run(ctx, tasks, d.transferOptions(), transfer.RunDeps{
 		HTTP:     d.http,
@@ -111,7 +108,7 @@ func (d *Downloader) runTransfer(ctx context.Context, tasks []model.FileTask) er
 // revalidateSkipped re-observes the plan's skipped destinations and fails on
 // the first one that no longer satisfies its item. An observation failure
 // (an unreadable file) is an installation error too: the install must not
-// report success over a state it could not verify (decisions D43, RES1-R1).
+// report success over a state it could not verify (D43).
 func revalidateSkipped(skipped []SkippedFile) error {
 	for _, sf := range skipped {
 		complete, err := reconcile.IsComplete(sf.Item, sf.Destination)
@@ -128,7 +125,7 @@ func revalidateSkipped(skipped []SkippedFile) error {
 // transferObserver picks the observer for a transfer run. A front end that can
 // consume the whole event stream — the CLI renderer — gets it through the
 // optional-ability assertion; a plain Console keeps the message-only adapter
-// (review D75). The capability interface stays unexported; the CLI satisfies
+// (D75). The capability interface stays unexported; the CLI satisfies
 // it structurally.
 func (d *Downloader) transferObserver() transfer.Observer {
 	if sink, ok := d.ui.(transferEventSink); ok {
@@ -150,10 +147,8 @@ func (d *Downloader) emitNotices(notices []Notice) {
 }
 
 // onTransferEvent adapts transfer events to the front end's console. Every
-// message kind lands on the output stream, the way the C++ message queue does
-// (downloader.cpp:3538-3541 renders the whole queue via std::cout); the two
-// task-transition kinds and per-chunk progress are rendered by the progress
-// step (S20) and are ignored here for now.
+// message kind lands on the output stream; the two task-transition kinds and
+// per-chunk progress are rendered by the progress step and are ignored here.
 func (d *Downloader) onTransferEvent(ev transfer.Event) {
 	switch ev.Kind {
 	case transfer.EventMessageInfo, transfer.EventMessageWarning,
@@ -163,8 +158,7 @@ func (d *Downloader) onTransferEvent(ev transfer.Event) {
 }
 
 // transferOptions maps the configuration onto the transfer tuning. Both
-// durations convert from milliseconds, the upstream unit of --wait and
-// --progress-interval (main.cpp:292,313).
+// durations are configured in milliseconds.
 func (d *Downloader) transferOptions() transfer.Options {
 	return transfer.Options{
 		Workers:          int(d.cfg.Threads),

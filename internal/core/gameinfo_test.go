@@ -32,14 +32,14 @@ type gameInfoFixture struct {
 	list     string
 	failures map[string]int
 	probe    *requestProbe
-	// files and dlDocs are GD4 additions: the bytes the website transfer
-	// fetches from the downlink url, and whole-document overrides for the
-	// /dl/<name> answers (a checksum member the default document lacks).
+	// files and dlDocs are the transfer's inputs: the bytes the website
+	// transfer fetches from the downlink url, and whole-document overrides for
+	// the /dl/<name> answers (a checksum member the default document lacks).
 	// Unset means today's behaviour: 404 for files, the default document.
 	files  map[string]string
 	dlDocs map[string]string
 	// gameDetails serves the /account/gameDetails/<id>.json documents the
-	// GD5 save-* acquisition fetches.
+	// save-* acquisition fetches.
 	gameDetails map[string]string
 }
 
@@ -319,7 +319,7 @@ func newGameInfoDownloader(t *testing.T, f *gameInfoFixture, cfg config.Config) 
 
 // The document builders below render the members the expansion, the conversion
 // and the DLC gate actually read — in the shapes the live API sends them
-// (DEFECT-GD3-1 evidence): the product and DLC ids are JSON numbers, a file
+// : the product and DLC ids are JSON numbers, a file
 // entry's id is a string on installers ("en1installer0") and a number on
 // bonus content (13403), so the acquisition chain exercises both forms
 // end-to-end through the real conversion and expansion code.
@@ -371,7 +371,7 @@ func windowsInstaller(file string) []string {
 	return []string{gameInfoNode(file, "windows", "en")}
 }
 
-// gameInfoDocArrayDLCs is the DEFECT-GD3-2 shape: "dlcs":[] (what the live API
+// gameInfoDocArrayDLCs is the empty-DLC-list shape: "dlcs":[] (what the live API
 // sends for most products of a probed account), spelled through the same
 // numeric-id wire format as every other acquisition fixture.
 func gameInfoDocArrayDLCs(id, slug, title string, installers []string) string {
@@ -384,7 +384,7 @@ func gameInfoDocArrayDLCs(id, slug, title string, installers []string) string {
 
 // TestGameDetailsSkipsAnArrayShapedDLCsMember locks D52 end-to-end: a product
 // whose dlcs is the empty array acquires like any DLC-less product — no error,
-// no expansion request, zero DLCs — instead of failing the run at Product().
+// no expansion request, zero DLCs — instead of failing the run at Product.
 // This is the exact live shape (heroes_of_might_and_magic_3_complete_edition)
 // that the pre-fix build rejected.
 func TestGameDetailsSkipsAnArrayShapedDLCsMember(t *testing.T) {
@@ -452,7 +452,7 @@ func TestGameDetailsMixesDLCBearingAndArrayProducts(t *testing.T) {
 
 // TestGameDetailsSortsByGamename locks the ordering: the result follows the
 // gamename, not the request order and not the order the workers finished in
-// (downloader.cpp:499). Each product is read once, and each of its files
+// . Each product is read once, and each of its files
 // through the resolver once.
 func TestGameDetailsSortsByGamename(t *testing.T) {
 	f := newGameInfoFixture(t)
@@ -606,8 +606,7 @@ func TestGameDetailsWorkerCount(t *testing.T) {
 
 // TestGameDetailsOwnedGating locks where the owned set comes from: the include
 // mask asks for DLC content, so that is when the account's list is read and the
-// DLCs are filtered against it. Without the DLC bit neither happens
-// (review GD3 §3, plan divergence 3).
+// DLCs are filtered against it. Without the DLC bit neither happens.
 func TestGameDetailsOwnedGating(t *testing.T) {
 	const (
 		baseID = "100"
@@ -677,8 +676,8 @@ func TestGameDetailsOwnedGating(t *testing.T) {
 			if got := len(res[0].DLCs); got != c.wantDLCs {
 				t.Errorf("dlcs = %d, want %d", got, c.wantDLCs)
 			}
-			// Ruling C: the fetch is the faithful superset — Product expands the
-			// DLCs whatever the mask says, and the owned gate is applied by the
+			// The fetch is the faithful superset — Product expands the DLCs
+			// whatever the mask says, and the owned gate is applied by the
 			// conversion afterwards. So the expansion request count is one here
 			// even when nothing survives it.
 			if got := f.count("/dlc-expanded"); got != 1 {
@@ -690,8 +689,7 @@ func TestGameDetailsOwnedGating(t *testing.T) {
 
 // TestGameDetailsPriorityFilterAppliesToDLCSubtree locks the filter chain on
 // the result: with both platforms accepted by the conversion, the priority list
-// is what keeps the best-ranked entries — inside the DLC subtree too
-// (gamedetails.cpp:19-34).
+// is what keeps the best-ranked entries — inside the DLC subtree too.
 func TestGameDetailsPriorityFilterAppliesToDLCSubtree(t *testing.T) {
 	const (
 		baseID = "100"
@@ -735,8 +733,7 @@ func TestGameDetailsPriorityFilterAppliesToDLCSubtree(t *testing.T) {
 // half of the filter chain on a real acquisition: the conversion gates each
 // vector by its COMPOSITE mask, so a mask holding only the DLC installer bit
 // still converts the base installers — and FilterWithType is what removes them
-// afterwards, upstream's two-step exactly (galaxyapi.cpp:404-425 and
-// gamedetails.cpp:268-281).
+// afterwards.
 func TestGameDetailsTypeFilterDropsWhatTheCompositeGateConverted(t *testing.T) {
 	const (
 		baseID = "100"
@@ -771,10 +768,9 @@ func TestGameDetailsTypeFilterDropsWhatTheCompositeGateConverted(t *testing.T) {
 	}
 }
 
-// TestGameDetailsRefreshesBeforeTheFirstRequest locks the order upstream has
-// (downloader.cpp:3731-3739): the credentials are refreshed before the product
-// document is read, and once for the whole run — the shared refresher makes the
-// other workers pay nothing.
+// TestGameDetailsRefreshesBeforeTheFirstRequest locks the order: the
+// credentials are refreshed before the product document is read, and once for
+// the whole run — the shared refresher makes the other workers pay nothing.
 func TestGameDetailsRefreshesBeforeTheFirstRequest(t *testing.T) {
 	f := newGameInfoFixture(t)
 	for _, id := range []string{"100", "200", "300"} {
@@ -831,7 +827,7 @@ func TestGameDetailsRefreshesBeforeTheFirstRequest(t *testing.T) {
 // TestGameDetailsIsCompleteOrNothing locks the failure contract: every failure
 // mode ends the run with an error and NO results, never with the products that
 // happened to succeed. A caller that got a short list could not tell it from
-// "this product has no files" (review GD3 §3).
+// "this product has no files".
 func TestGameDetailsIsCompleteOrNothing(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -896,8 +892,8 @@ func TestGameDetailsIsCompleteOrNothing(t *testing.T) {
 
 // TestGameDetailsWritesNothing locks the purity of the layer: an acquisition
 // run that does not have to refresh the credentials writes no file anywhere
-// under the run's directories (review GD3 §6: no cache, no --save-* artifact,
-// no makeFilepaths).
+// under the run's directories (no cache, no --save-* artifact, no
+// makeFilepaths).
 func TestGameDetailsWritesNothing(t *testing.T) {
 	dir := t.TempDir()
 	f := newGameInfoFixture(t)
@@ -927,7 +923,7 @@ func TestGameDetailsWritesNothing(t *testing.T) {
 
 // TestGameDetailsToleratesASkippedFile locks the one failure that is NOT fatal:
 // a resolver that cannot resolve a file skips that file and the product is still
-// produced (GD1's DownlinkResolver contract). The run stays complete, which is
+// produced. The run stays complete, which is
 // what keeps the fail-fast rule above from turning a single missing downlink
 // into a failed acquisition.
 func TestGameDetailsToleratesASkippedFile(t *testing.T) {

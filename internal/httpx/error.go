@@ -10,9 +10,6 @@ import (
 // and the response body was fully consumed (GetBytes/GetBytesWithRetry).
 // The raw transport layer (Do/Get) returns *http.Response instead so that
 // retry and streaming decisions stay with the caller.
-//
-// Fields are ordered to minimise padding: the string block (16B each) first,
-// then the 8B int.
 type StatusError struct {
 	Method string
 	URL    string

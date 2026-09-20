@@ -36,7 +36,7 @@ func (r *pieceReader) Read(p []byte) (int, error) {
 
 // TestProgressWithoutASlot locks the "no sampling state" contract: a nil
 // registry, an unknown task and a nil slot all answer false rather than
-// pretending the task is at zero bytes (review S-ETA2).
+// pretending the task is at zero bytes.
 func TestProgressWithoutASlot(t *testing.T) {
 	var nilProgress *Progress
 	if v, ok := nilProgress.Bytes("x"); ok || v != 0 {
@@ -70,7 +70,7 @@ func TestProgressWithoutASlot(t *testing.T) {
 
 // TestProgressQueueSnapshot locks the run-level snapshot: Run publishes the task
 // count and their summed compressed size before dispatching, and the snapshot
-// outlives the run even though the task's own slot does not (review S-ETA3).
+// outlives the run even though the task's own slot does not.
 func TestProgressQueueSnapshot(t *testing.T) {
 	cdn := newTestCDN(t)
 	chunk := chunked(t, cdn, "queue snapshot")
@@ -104,7 +104,7 @@ func TestProgressQueueSnapshot(t *testing.T) {
 
 // TestProgressQueueSnapshotEmptyRun locks that an empty run publishes an empty
 // snapshot rather than publishing nothing: "no snapshot" and "empty queue" are
-// different answers (review S-ETA3).
+// different answers.
 func TestProgressQueueSnapshotEmptyRun(t *testing.T) {
 	hx, err := httpx.New(httpx.Config{UserAgent: "goggo-test/1.0"})
 	if err != nil {
@@ -165,11 +165,11 @@ func TestProgressReaderPublishesAbsoluteProgress(t *testing.T) {
 	}
 }
 
-// TestProgressReaderStopsAtTheChunkEnd locks the logical upper bound (review
-// S-ETA2 R1): a resume whose server ignores the Range and answers 200 with the
-// whole chunk reads more bytes than the chunk has left, and the sample must
-// stop at the chunk's end — past it, the caller's 200-fold would look like a
-// decrease and reset the ETA window for no reason.
+// TestProgressReaderStopsAtTheChunkEnd locks the logical upper bound: a resume
+// whose server ignores the Range and answers 200 with the whole chunk reads more
+// bytes than the chunk has left, and the sample must stop at the chunk's end —
+// past it, the caller's 200-fold would look like a decrease and reset the ETA
+// window for no reason.
 func TestProgressReaderStopsAtTheChunkEnd(t *testing.T) {
 	p := NewProgress()
 	slot := p.start("task", 2000)
@@ -197,9 +197,9 @@ func TestProgressReaderStopsAtTheChunkEnd(t *testing.T) {
 	}
 }
 
-// TestProgressTotalMatchesTheTaskTotal locks the review's Total constraint: it
-// is the file's logical total — the same number the progress events carry — not
-// a chunk size and not the size of the response body.
+// TestProgressTotalMatchesTheTaskTotal locks the Total constraint: it is the
+// file's logical total — the same number the progress events carry — not a chunk
+// size and not the size of the response body.
 func TestProgressTotalMatchesTheTaskTotal(t *testing.T) {
 	p := NewProgress()
 	p.start("task", 4096)
@@ -226,10 +226,10 @@ func compressed(t *testing.T, content string) []byte {
 	return buf.Bytes()
 }
 
-// TestProgressPublishesWhileTheChunkIsStillArriving is the F1 invariant: the
-// sampler must see a transfer in flight, not only the chunk boundary the
-// events report. The handler holds the second half of the body until the test
-// has looked, so the partial reading is not a race.
+// TestProgressPublishesWhileTheChunkIsStillArriving locks the in-flight
+// invariant: the sampler must see a transfer in flight, not only the chunk
+// boundary the events report. The handler holds the second half of the body until
+// the test has looked, so the partial reading is not a race.
 func TestProgressPublishesWhileTheChunkIsStillArriving(t *testing.T) {
 	const content = "progress sampling payload"
 	body := compressed(t, content)

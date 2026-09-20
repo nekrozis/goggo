@@ -3,13 +3,12 @@ package config
 import "strings"
 
 // This file is the single source of truth for the six website subdirectory
-// options (GD4 plan 3.3): the field each one fills, its upstream default and
-// the whole values carrying a placeholder that it accepts. The CLI parser and
-// the help text both read this table, so the whitelist cannot drift from it —
-// the same rule GD3 established for --install-dir (review GD3 3.3).
+// options: the field each one fills, its default and the whole values carrying
+// a placeholder that it accepts. The CLI parser and the help text both read this
+// table, so the whitelist cannot drift from it.
 //
 // The subdir template family and the install-dir template family are two
-// DIFFERENT languages and deliberately share no table (GD4 Gate 1 ruling 3):
+// DIFFERENT languages and deliberately share no table:
 // --install-dir resolves through core.ResolveInstallSubdir (a document-backed
 // lookup), while these values are expanded by gamedetails.makeFilepath's
 // placeholder pass over each file's own fields. Only placeholders that render
@@ -17,14 +16,14 @@ import "strings"
 // only as a WHOLE value — a placeholder embedded in a longer path is refused,
 // exactly like the install-dir whitelist refuses half-exposed templates the
 // resolver would keep literal. The transformed-gamename placeholders are
-// absent everywhere: their backing transformations JSON is not ported, so
-// they render empty (gamedetails.go, review D-GD5).
+// absent everywhere: their backing transformations JSON is not implemented, so
+// they would render empty.
 
 // SubdirOption describes one --subdir-* option.
 type SubdirOption struct {
 	// Name is the option's suffix: --subdir-<Name>.
 	Name string
-	// Default is the upstream boost default_value (main.cpp:293-298).
+	// Default is the directory name used when the option is not given.
 	Default string
 	// Templates lists the whole values that may carry a placeholder for
 	// this field. A value without '%' is a literal directory name and is
@@ -34,8 +33,7 @@ type SubdirOption struct {
 	Set func(conf *DirectoryConfig, value string)
 }
 
-// SubdirOptions are the six website subdirectory domains, in the order the
-// upstream option table declares them.
+// SubdirOptions are the six website subdirectory domains.
 var SubdirOptions = []SubdirOption{
 	{
 		Name:      "installers",
@@ -62,8 +60,8 @@ var SubdirOptions = []SubdirOption{
 		Set:       func(c *DirectoryConfig, v string) { c.LanguagePackSubdir = v },
 	},
 	{
-		// The DLC default is itself a whole allowed value: a literal
-		// segment plus one placeholder, exactly as upstream declares it.
+		// The DLC default is itself a whole allowed value: a literal segment
+		// plus one placeholder.
 		Name:      "dlc",
 		Default:   "dlc/%dlcname%",
 		Templates: []string{"%dlcname%", "%dlc_title%", "%dlc_title_stripped%", "dlc/%dlcname%"},

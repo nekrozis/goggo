@@ -47,7 +47,7 @@ func jsonBody(body string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, body) }
 }
 
-// TestSecureLinkURL locks the request of galaxyapi.cpp:229-234, and with it the
+// TestSecureLinkURL locks the request of
 // no-encoding rule: a url.Values-based query would have produced "path=%2F",
 // so asserting the literal "/" is what proves the path goes out as given.
 func TestSecureLinkURL(t *testing.T) {
@@ -76,8 +76,8 @@ func TestSecureLinkURL(t *testing.T) {
 	}
 }
 
-// TestDependencyLinkURL locks the request of galaxyapi.cpp:236-241; the path is
-// an expanded galaxy path whose separators are not encoded either.
+// TestDependencyLinkURL locks the request; the path is an expanded galaxy path
+// whose separators are not encoded either.
 func TestDependencyLinkURL(t *testing.T) {
 	var gotURI string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,10 +108,9 @@ func TestSecureLinkNonObjectIsErrNotJSON(t *testing.T) {
 	}
 }
 
-// TestDependenciesJSONTwoSteps locks the two-step flow of galaxyapi.cpp:608-624:
-// the repository document names the manifest URL, the SECOND document is
-// returned, and both requests carry the same bearer authentication (upstream
-// fetches both through getResponse).
+// TestDependenciesJSONTwoSteps locks the two-step flow: the repository document
+// names the manifest URL, the SECOND document is returned, and both requests
+// carry the same bearer authentication.
 func TestDependenciesJSONTwoSteps(t *testing.T) {
 	repository := func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"repository_manifest":"http://%s/manifest.json"}`, r.Host)
@@ -143,9 +142,9 @@ func TestDependenciesJSONTwoSteps(t *testing.T) {
 	}
 }
 
-// TestDependenciesJSONEmptyRepository locks the first two rows of the reviewed
-// boundary: an empty or non-object repository document is "no repository", not a
-// failure, and no manifest request follows.
+// TestDependenciesJSONEmptyRepository locks the "no repository" boundary: an
+// empty or non-object repository document is not a failure, and no manifest
+// request follows.
 func TestDependenciesJSONEmptyRepository(t *testing.T) {
 	cases := []struct {
 		name string
@@ -211,7 +210,7 @@ func TestDependenciesJSONEmptyManifestURL(t *testing.T) {
 }
 
 // TestDependenciesJSONMalformedManifestMember: a member that is not a scalar is
-// a real problem and is reported (the C++ source would throw on asString here).
+// a real problem and is reported.
 func TestDependenciesJSONMalformedManifestMember(t *testing.T) {
 	srv, seen := depsServer(t, jsonBody(`{"repository_manifest":{"url":"x"}}`), jsonBody(`{"depots":[]}`))
 
@@ -224,9 +223,9 @@ func TestDependenciesJSONMalformedManifestMember(t *testing.T) {
 	}
 }
 
-// TestDependenciesJSONHTTPError locks the reviewed boundary on the other side:
-// an HTTP failure on either step is a real fetch failure and is returned, unlike
-// the upstream behaviour of turning every failure into an empty document.
+// TestDependenciesJSONHTTPError locks the other side of that boundary: an HTTP
+// failure on either step is a real fetch failure and is returned, unlike a
+// "no repository" answer, which is not.
 func TestDependenciesJSONHTTPError(t *testing.T) {
 	failing := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusInternalServerError) }
 	repository := func(w http.ResponseWriter, r *http.Request) {

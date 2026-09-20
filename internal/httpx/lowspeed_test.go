@@ -59,7 +59,7 @@ func TestLowSpeedTrickleAborts(t *testing.T) {
 	if !errors.Is(err, ErrLowSpeed) {
 		t.Fatalf("err = %v, want ErrLowSpeed", err)
 	}
-	// The message must not leak the request URL (the R4a rule).
+	// The message must not leak the request URL.
 	if msg := err.Error(); strings.Contains(msg, srv.URL) || strings.Contains(msg, "http://") {
 		t.Errorf("error %q must not carry the URL", msg)
 	}

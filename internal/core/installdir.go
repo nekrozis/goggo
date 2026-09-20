@@ -32,8 +32,7 @@ func IsInstallSubdirTemplate(name string) bool {
 }
 
 // InstallSubdirNeedsProductInfo reports whether a template's value comes from
-// the product document, so a caller can fetch it only when it is needed
-// (downloader.cpp:6679-6691).
+// the product document, so a caller can fetch it only when it is needed.
 func InstallSubdirNeedsProductInfo(template string) bool {
 	switch template {
 	case "%gamename%", "%title%", "%title_stripped%":
@@ -43,49 +42,44 @@ func InstallSubdirNeedsProductInfo(template string) bool {
 	}
 }
 
-// ResolveInstallSubdir expands one install subdirectory template
-// (Downloader::getGalaxyInstallDirectory, downloader.cpp:6659-6700).
+// ResolveInstallSubdir expands one install subdirectory template.
 //
 // The template is matched WHOLE: it must be exactly one of the names below, and
-// anything else comes back unchanged. That is what the C++ source does — it
-// looks the value up in a map instead of substituting placeholders inside a
-// longer path — so "--install-dir %install_dir%/data" keeps its literal text
-// rather than gaining an expanded prefix.
+// anything else comes back unchanged, so "--install-dir %install_dir%/data"
+// keeps its literal text rather than gaining an expanded prefix.
 //
-//	%install_dir%          manifest.installDirectory
-//	%product_id%           manifest.baseProductId, not the requested id
+//	%install_dir% manifest.installDirectory
+//	%product_id% manifest.baseProductId, not the requested id
 //	%install_dir_stripped% %install_dir% with everything but letters, digits,
-//	                       spaces and - _ . ( ) [ ] { } removed
-//	%gamename%             product.slug
-//	%title%                product.title
-//	%title_stripped%       %title% stripped, registered only with %title%
+//	                       spaces and - _. [ ] { } removed
+//	%gamename% product.slug
+//	%title% product.title
+//	%title_stripped% %title% stripped, registered only with %title%
 //
 // product is the document of manifest.baseProductId, or nil when the caller
 // did not need it (see InstallSubdirNeedsProductInfo) or could not name the
 // product. The three templates that read it are registered only when the
 // document actually carries a non-empty value, so a missing or empty slug or
 // title leaves the NAME ITSELF as the result: "%title%/setup" must not collapse
-// to "/setup" (review GD3, ruling D). The two stripped names follow upstream's
-// key test rather than a value test — %title_stripped% appears exactly when
-// %title% does, so it is a literal again when there is no title.
+// to "/setup". The two stripped names are keyed off the unstripped entry rather
+// than off a value test — %title_stripped% appears exactly when %title% does,
+// so it is a literal again when there is no title.
 //
-// The lookup-miss rule is the C++ map's: a name that was never registered falls
-// through unchanged. That covers an unknown name, a template embedded in a
-// longer path, and the empty-value cases above.
+// A name that was never registered falls through unchanged. That covers an
+// unknown name, a template embedded in a longer path, and the empty-value cases
+// above.
 //
 // This function is pure — it issues no request — which is why the predicate
-// above exists next to it (review GD3 §3.1): the caller decides whether to
-// fetch the document, and this function only reads it. The caller also owns the
-// bSubDirectories test the C++ source performs before calling this at all
-// (downloader.cpp:4078-4081); installing without subdirectories leaves
-// install_directory empty.
+// above exists next to it: the caller decides whether to fetch the document,
+// and this function only reads it. The caller also owns the subdirectories
+// test: installing without subdirectories leaves the install directory empty.
 func ResolveInstallSubdir(template string, manifest, product map[string]any) (string, error) {
 	installDir, err := documentString(manifest, "installDirectory")
 	if err != nil {
 		return "", err
 	}
-	// The C++ source reads baseProductId before it checks anything, so a
-	// malformed one is an error whatever the template turns out to be.
+	// baseProductId is read before anything else, so a malformed one is an
+	// error whatever the template turns out to be.
 	productID, err := documentString(manifest, "baseProductId")
 	if err != nil {
 		return "", err
@@ -94,8 +88,7 @@ func ResolveInstallSubdir(template string, manifest, product map[string]any) (st
 	name := map[string]string{
 		"%install_dir%": installDir,
 		"%product_id%":  productID,
-		// The C++ source derives this from the %install_dir% entry, which is
-		// always present in its map.
+		// Derived from the %install_dir% entry, which is always present here.
 		"%install_dir_stripped%": util.StrippedString(installDir),
 	}
 
@@ -128,10 +121,9 @@ func ResolveInstallSubdir(template string, manifest, product map[string]any) (st
 }
 
 // documentString reads one document member as a string: a missing member or a
-// null one is the empty string, and a structured one is an error rather than
-// the crash jsoncpp's asString() would raise. That contract matches the other
-// document readers in this port, and it serves both the manifest and the
-// product document the install directory is derived from.
+// null one is the empty string, and a structured one is an error. That contract
+// matches the other document readers in this package, and it serves both the
+// manifest and the product document the install directory is derived from.
 func documentString(doc map[string]any, key string) (string, error) {
 	v, err := jsonval.Str(doc[key])
 	if err != nil {

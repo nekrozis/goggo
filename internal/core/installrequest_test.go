@@ -43,7 +43,7 @@ func TestNewInstallRequestResolvesValues(t *testing.T) {
 }
 
 // TestNewInstallRequestPlatform locks the manifest path segment the API is
-// called with (downloader.cpp:4035-4043).
+// called with.
 func TestNewInstallRequestPlatform(t *testing.T) {
 	cases := []struct {
 		name string
@@ -67,8 +67,8 @@ func TestNewInstallRequestPlatform(t *testing.T) {
 }
 
 // TestNewInstallRequestLanguage locks the flag-to-expression mapping and its
-// fallback (downloader.cpp:3904-3913): an unmatched value leaves no entry
-// behind, and the C++ loop then keeps the English expression.
+// fallback: an unmatched value leaves no entry behind and the English
+// expression is kept.
 func TestNewInstallRequestLanguage(t *testing.T) {
 	cases := []struct {
 		name string
@@ -81,7 +81,7 @@ func TestNewInstallRequestLanguage(t *testing.T) {
 		{name: "unmatched falls back to english", flag: 0, want: defaultLanguageRegex},
 		{
 			// A composite flag equals no single entry, so the lookup misses and
-			// the fallback applies — the same outcome the C++ loop produces.
+			// the fallback applies.
 			name: "composite flag matches no entry",
 			flag: config.LangEN | config.LangDE,
 			want: defaultLanguageRegex,
@@ -99,7 +99,7 @@ func TestNewInstallRequestLanguage(t *testing.T) {
 }
 
 // TestNewInstallRequestDependencies locks the --galaxy-no-dependencies
-// direction: the setting is the positive value (main.cpp:544).
+// direction: the setting is the positive value.
 func TestNewInstallRequestDependencies(t *testing.T) {
 	cfg := installTestConfig(t)
 	cfg.DownloadConfig.GalaxyDependencies = false

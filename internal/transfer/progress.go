@@ -15,26 +15,24 @@ import (
 // when the task ends. A reader therefore learns what is still *pending* by
 // subtracting what it has seen start from the queue snapshot, and what is
 // *active* from the slots — the pending/active split stays explicit and nothing
-// is counted twice (review S-ETA3).
+// is counted twice.
 //
 // The asymmetry between the two layers is deliberate: Queue keeps answering
 // after Run returns, while Bytes and Total answer false once a task's slot is
-// gone (review S-ETA3).
+// gone.
 //
 // transfer publishes into it as bytes arrive from the network and the front end
-// polls it, the way upstream's curl progress callback writes vDownloadInfo and
-// printProgress reads it (downloader.cpp:3445-3499, 3545-3561). It carries no
-// front-end concept of its own: no method calls out to a renderer or an
-// observer, and the counts are maintained whether or not anyone reads them
-// (review S-ETA2).
+// polls it. It carries no front-end concept of its own: no method calls out to a
+// renderer or an observer, and the counts are maintained whether or not anyone
+// reads them.
 //
 // A nil *Progress is a usable no-op: readers get "no sampling state" and the
 // run loop builds no wrapper around the response bodies, so a run without a
 // registry behaves exactly as it did before this type existed.
 //
-// The registry is task-keyed rather than galaxy-specific on purpose — the
-// website path can publish into it later — but only the chunk path feeds it
-// today (review S-ETA2).
+// The registry is task-keyed rather than galaxy-specific, so the website path
+// can publish into it without a change to this type; only the chunk path does
+// so today.
 type Progress struct {
 	mu    sync.Mutex
 	slots map[string]*progressSlot
@@ -44,7 +42,7 @@ type Progress struct {
 // progressQueue is the run-level queue snapshot: how many tasks the run started
 // with and how many compressed bytes they carry. published says whether a
 // snapshot exists at all, which is what keeps "no snapshot" distinct from "an
-// empty queue" (review S-ETA3).
+// empty queue".
 type progressQueue struct {
 	bytes     int64
 	tasks     int
@@ -82,7 +80,7 @@ func (p *Progress) Bytes(task string) (int64, bool) {
 // Total returns the task's logical total bytes — the same number the progress
 // events carry as Total, which is the file's compressed size. It is not a
 // chunk size, not a remaining count and not the size of the current response
-// body (review S-ETA2).
+// body.
 func (p *Progress) Total(task string) (int64, bool) {
 	if p == nil {
 		return 0, false
@@ -98,7 +96,7 @@ func (p *Progress) Total(task string) (int64, bool) {
 // Queue returns the run-level queue snapshot: how many tasks the last run was
 // handed and their summed compressed size. ok is false when no run has
 // published a snapshot yet — never "the queue is empty", which is what an empty
-// run publishes instead (review S-ETA3).
+// run publishes instead.
 //
 // The snapshot outlives the run: it is a static fact about the queue, while
 // Bytes and Total describe a task's lifecycle and stop answering once the task
@@ -117,7 +115,7 @@ func (p *Progress) Queue() (tasks int, bytes int64, ok bool) {
 
 // setQueue publishes the queue snapshot. Run calls it once, before the first
 // dispatch, so a reader can compute what is still pending from the tasks it has
-// seen start (review S-ETA3).
+// seen start.
 func (p *Progress) setQueue(tasks int, bytes int64) {
 	if p == nil {
 		return
@@ -185,13 +183,11 @@ type progressSink struct {
 // bytes already in memory monotone without any accumulator to get wrong, and it
 // is bounded by the chunk's logical end: a server that ignores the Range and
 // re-sends the whole chunk cannot push the sample past the end, which would
-// otherwise turn the caller's 200-fold into an artificial decrease
-// (review S-ETA2 R1).
+// otherwise turn the caller's 200-fold into an artificial decrease.
 //
 // A decrease is still possible and deliberate: when a failed hash discards the
 // chunk buffer, the next attempt starts from the chunk's offset again. The
-// window that consumes these samples treats any decrease as a restart
-// (review S-ETA2).
+// window that consumes these samples treats any decrease as a restart.
 type progressReader struct {
 	r    io.Reader
 	slot *progressSlot

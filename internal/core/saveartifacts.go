@@ -11,19 +11,18 @@ import (
 	"github.com/nekrozis/goggo/internal/transfer"
 )
 
-// This file is the GD5 write side: the save-* artifacts of one download run
-// (downloader.cpp:682-760). It is core's first deliberate disk writer, so the
-// three upstream writer contracts are separate functions with separate
-// semantics, never one generic write-if-needed (ruling 4):
+// This file is the save-* write side: the artifacts of one download run. The
+// three writer contracts are separate functions with separate semantics, never
+// one generic write-if-needed:
 //
-//	serials    existing file  ⇒ skip (never overwritten)
-//	changelog  equal content  ⇒ skip; different ⇒ overwrite
-//	json       existing file  ⇒ overwrite, unconditional
-//	logo/icon  re-downloaded every run through the shared attempt loop
+//	serials existing file ⇒ skip (never overwritten)
+//	changelog equal content ⇒ skip; different ⇒ overwrite
+//	json existing file ⇒ overwrite, unconditional
+//	logo/icon re-downloaded every run through the shared attempt loop
 //
 // Every outcome lands in a SavedArtifact; the CLI renders the text, and only
-// ArtifactFailed moves the exit code (Gate 1 approval: continue per item,
-// never hide a failure).
+// ArtifactFailed moves the exit code. A per-item failure continues the run
+// rather than hiding itself.
 
 // ArtifactKind names the six save-* artifacts.
 type ArtifactKind uint8
@@ -66,7 +65,7 @@ const (
 	ArtifactSkippedExists
 	// ArtifactSkippedUnchanged: the changelog content matched byte for byte.
 	ArtifactSkippedUnchanged
-	// ArtifactSkippedFormat: the <span> fail-closed (ruling 1) — a warning;
+	// ArtifactSkippedFormat: the <span> fail-closed — a warning;
 	// it does NOT move the exit code.
 	ArtifactSkippedFormat
 	// ArtifactFailed: the write or download failed; Err is set; the command
@@ -85,10 +84,10 @@ type SavedArtifact struct {
 	Err      error
 }
 
-// saveGameArtifacts runs the upstream save section for one product: the base
-// game's artifacts, then each DLC's. game-details.json is decided by its
-// path: MakeFilepaths gives it to the base game only (gamedetails.cpp:102,
-// 135-141), so a DLC simply has no path to write to.
+// saveGameArtifacts runs the save section for one product: the base game's
+// artifacts, then each DLC's. game-details.json is decided by its path:
+// MakeFilepaths gives it to the base game only, so a DLC simply has no path to
+// write to.
 func (d *Downloader) saveGameArtifacts(ctx context.Context, gd *gamedetails.GameDetails) []SavedArtifact {
 	artifacts := d.saveArtifactsFor(ctx, gd)
 	for i := range gd.DLCs {
@@ -97,11 +96,10 @@ func (d *Downloader) saveGameArtifacts(ctx context.Context, gd *gamedetails.Game
 	return artifacts
 }
 
-// saveArtifactsFor evaluates one product level's six artifacts under the
-// upstream gate: flag AND non-empty field. An empty field with the flag on
-// records WHY when there is a reason to tell (fail-closed format, swallowed
-// fetch failure) and stays silent otherwise — the C++ gate emits nothing for
-// "nothing to save".
+// saveArtifactsFor evaluates one product level's six artifacts under the gate
+// "flag AND non-empty field". An empty field with the flag on records WHY when
+// there is a reason to tell (fail-closed format, swallowed fetch failure) and
+// stays silent otherwise: there is nothing to save.
 func (d *Downloader) saveArtifactsFor(ctx context.Context, gd *gamedetails.GameDetails) []SavedArtifact {
 	cfg := d.cfg.DownloadConfig
 	var out []SavedArtifact
@@ -144,8 +142,7 @@ func (d *Downloader) saveArtifactsFor(ctx context.Context, gd *gamedetails.GameD
 	return out
 }
 
-// writeSerials is contract one: an existing file is NEVER overwritten
-// (downloader.cpp:2295-2300 — the exists test comes before anything else).
+// writeSerials is contract one: an existing file is NEVER overwritten.
 func writeSerials(path, content, gamename string) SavedArtifact {
 	a := SavedArtifact{Kind: ArtifactSerials, Gamename: gamename, Path: path}
 	if _, err := os.Stat(path); err == nil {
@@ -157,7 +154,7 @@ func writeSerials(path, content, gamename string) SavedArtifact {
 }
 
 // writeChangelog is contract two: skip only when the existing content is
-// byte-equal, otherwise overwrite (downloader.cpp:2341-2390).
+// byte-equal, otherwise overwrite.
 func writeChangelog(path, content, gamename string) SavedArtifact {
 	a := SavedArtifact{Kind: ArtifactChangelog, Gamename: gamename, Path: path}
 	if existing, err := os.ReadFile(path); err == nil && string(existing) == content {
@@ -168,17 +165,16 @@ func writeChangelog(path, content, gamename string) SavedArtifact {
 	return a
 }
 
-// writeJSONFile is contract three: unconditional overwrite
-// (downloader.cpp:2254-2293 — no exists test at all).
+// writeJSONFile is contract three: unconditional overwrite.
 func writeJSONFile(path, content string, kind ArtifactKind, gamename string) SavedArtifact {
 	a := SavedArtifact{Kind: kind, Gamename: gamename, Path: path}
 	a.Action, a.Err = writeOrFail(path, content)
 	return a
 }
 
-// writeOrFail prepares the parent directory and writes, mapping the two
-// upstream failure prints ("is not directory", "Failed to create directory",
-// "Failed to create file") onto the failed action.
+// writeOrFail prepares the parent directory and writes, mapping the three
+// failure messages ("is not directory", "Failed to create directory", "Failed
+// to create file") onto the failed action.
 func writeOrFail(path, content string) (ArtifactAction, error) {
 	if err := prepareArtifactDir(path); err != nil {
 		return ArtifactFailed, err
@@ -189,8 +185,8 @@ func writeOrFail(path, content string) (ArtifactAction, error) {
 	return ArtifactWrote, nil
 }
 
-// prepareArtifactDir mirrors the C++ directory step: an existing parent must
-// BE a directory, a missing one is created.
+// prepareArtifactDir prepares the parent directory: an existing parent must BE
+// a directory, a missing one is created.
 func prepareArtifactDir(path string) error {
 	dir := filepath.Dir(path)
 	if fi, err := os.Stat(dir); err == nil {
@@ -206,9 +202,9 @@ func prepareArtifactDir(path string) error {
 }
 
 // downloadArtifact sends one image URL through the shared attempt loop
-// (transfer.DownloadArtifact). No exists-skip: upstream re-downloads (GD5
-// §3.3); the directory is prepared first because the attempt opens the
-// destination directly.
+// (transfer.DownloadArtifact). There is no exists-skip: the artifact is
+// re-downloaded every run. The directory is prepared first because the attempt
+// opens the destination directly.
 func (d *Downloader) downloadArtifact(ctx context.Context, url, path string, kind ArtifactKind, gamename string) SavedArtifact {
 	a := SavedArtifact{Kind: kind, Gamename: gamename, Path: path}
 	if path == "" {

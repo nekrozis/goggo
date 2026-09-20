@@ -53,7 +53,7 @@ func TestApplyPlanChangesCreatesTaskParents(t *testing.T) {
 
 // TestApplyPlanChangesMkdirFailureIsNonFatal locks that a directory that cannot
 // be created (a file sits at its path) is reported as a notice while the run
-// continues — the C++ source's per-item non-fatal treatment.
+// continues.
 func TestApplyPlanChangesMkdirFailureIsNonFatal(t *testing.T) {
 	dir := t.TempDir()
 	blocker := filepath.Join(dir, "blocker")

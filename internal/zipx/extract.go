@@ -9,15 +9,14 @@ import (
 	"time"
 )
 
-// ZIP compression methods supported by extraction, mirroring
-// boost::iostreams::zlib::no_compression / deflated (ziputil.cpp:499).
+// ZIP compression methods supported by extraction.
 const (
 	MethodStore    uint16 = 0
 	MethodDeflated uint16 = 8
 )
 
 // ErrUnsupportedMethod reports an entry whose compression method is neither
-// store nor deflate (ziputil.cpp return code 2).
+// store nor deflate.
 var ErrUnsupportedMethod = errors.New("zipx: unsupported compression method")
 
 // readEntry parses one entry header from r and validates its method. On
@@ -34,10 +33,10 @@ func readEntry(r io.Reader) (CDEntry, error) {
 	return cd, nil
 }
 
-// copyEntry writes the entry data at r's current position to w. Deflated
-// data is inflated as a raw RFC 1951 stream (no zlib header, no checksum,
-// matching window_bits=15/noheader in the C++ source); stored data is copied
-// verbatim to EOF. Neither path truncates to the declared compressed size.
+// copyEntry writes the entry data at r's current position to w. Deflated data
+// is inflated as a raw RFC 1951 stream (no zlib header, no checksum); stored
+// data is copied verbatim to EOF. Neither path truncates to the declared
+// compressed size.
 func copyEntry(r io.Reader, w io.Writer, method uint16) error {
 	if method == MethodDeflated {
 		zr := flate.NewReader(r)
@@ -47,23 +46,21 @@ func copyEntry(r io.Reader, w io.Writer, method uint16) error {
 		}
 		return nil
 	}
-	// MethodStore: no decompressor, so a short input is just an early EOF,
-	// not an error (ziputil.cpp copies to EOF for stored entries).
+	// MethodStore: no decompressor, so a short input is just an early EOF, not
+	// an error.
 	if _, err := io.Copy(w, r); err != nil {
 		return err
 	}
 	return nil
 }
 
-// ExtractStream consumes one entry from r and writes its data to w,
-// mirroring ZipUtil::extractStream (ziputil.cpp:557-602).
+// ExtractStream consumes one entry from r and writes its data to w.
 //
 // Contract: r must begin at a local-file header (ParseCDEntry also accepts a
 // central-directory record, in which case data is read from directly after
-// it, matching the C++ source). The header is consumed first; the entry data
-// is then copied to EOF for stored entries or until the raw deflate stream
-// ends. The declared compressed size is never used to truncate, and no CRC or
-// size validation is performed.
+// it). The header is consumed first; the entry data is then copied to EOF for
+// stored entries or until the raw deflate stream ends. The declared compressed
+// size is never used to truncate, and no CRC or size validation is performed.
 func ExtractStream(r io.Reader, w io.Writer) error {
 	cd, err := readEntry(r)
 	if err != nil {
@@ -72,11 +69,10 @@ func ExtractStream(r io.Reader, w io.Writer) error {
 	return copyEntry(r, w, cd.CompressionMethod)
 }
 
-// ExtractFile extracts the first entry of inPath into outPath, mirroring
-// ZipUtil::extractFile (ziputil.cpp:486-548). The input file is read from
-// offset 0 and must therefore contain the entry as its first record. On
-// success, when the entry timestamp is positive, the output file's
-// modification time is set to it (ziputil.cpp:536-545).
+// ExtractFile extracts the first entry of inPath into outPath. The input file
+// is read from offset 0 and must therefore contain the entry as its first
+// record. On success, when the entry timestamp is positive, the output file's
+// modification time is set to it.
 func ExtractFile(inPath, outPath string) error {
 	in, err := os.Open(inPath)
 	if err != nil {

@@ -123,14 +123,15 @@ func buildChunkedItemParts(t *testing.T, parts int, content string) (model.Galax
 	return item, bodies
 }
 
-// TestRunSkipsCompleteFile locks the transfer-level skip: a destination that
-// already satisfies the item produces no HTTP request at all, and the task
-// closes with the ": OK" success message (upstream 4497).
+// md5hex is the hex md5 of a byte slice.
 func md5hex(data []byte) string {
 	sum := md5.Sum(data)
 	return hex.EncodeToString(sum[:])
 }
 
+// TestRunSkipsCompleteFile locks the transfer-level skip: a destination that
+// already satisfies the item produces no HTTP request at all, and the task
+// closes with the ": OK" success message.
 func TestRunSkipsCompleteFile(t *testing.T) {
 	content := "already complete"
 	cdn := newCountingCDN(t)
@@ -169,7 +170,7 @@ func TestRunSkipsCompleteFile(t *testing.T) {
 	}
 }
 
-// TestRunResumesFromLastBoundary is the core RES1 evidence: chunks 0-1 are
+// TestRunResumesFromLastBoundary locks the resume evidence: chunks 0-1 are
 // already on disk, so only the last chunk is fetched and the assembled file is
 // exactly the manifest content.
 func TestRunResumesFromLastBoundary(t *testing.T) {
@@ -299,7 +300,7 @@ func TestRunReplacesInvalidBoundary(t *testing.T) {
 }
 
 // TestRunUncompressedMD5MismatchFailsWithoutAppend locks the chunk commit
-// prerequisite (review RES1 v2 §13): when the decompressed content does not
+// prerequisite: when the decompressed content does not
 // match the chunk's uncompressed md5, nothing is appended and the task fails
 // with a verification error — no retry can fix a manifest/content mismatch.
 func TestRunUncompressedMD5MismatchFailsWithoutAppend(t *testing.T) {
@@ -335,10 +336,10 @@ func TestRunUncompressedMD5MismatchFailsWithoutAppend(t *testing.T) {
 	}
 }
 
-// TestRunCreatesMissingEmptyFile locks the zero-size path end to end (review
-// RES1-R1 T2b): an item with no chunks and a missing destination still goes
-// through the transfer as a task, touches no CDN byte, and ends as an empty
-// file on disk — the plan must never have classified it as skipped.
+// TestRunCreatesMissingEmptyFile locks the zero-size path end to end: an item
+// with no chunks and a missing destination still goes through the transfer as a
+// task, touches no CDN byte, and ends as an empty file on disk — the plan must
+// never have classified it as skipped.
 func TestRunCreatesMissingEmptyFile(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "empty.bin")
 	cdn := newCountingCDN(t)
@@ -362,7 +363,7 @@ func TestRunCreatesMissingEmptyFile(t *testing.T) {
 	}
 }
 
-// TestRunResumeEmitsExplicitMarker locks UI1-R2 decision 1: the resume branch
+// TestRunResumeEmitsExplicitMarker locks the resume marker: the resume branch
 // announces itself with exactly one EventMessageInfo carrying the marker the
 // front end counts on — the resume is never a sequence the UI has to infer.
 func TestRunResumeEmitsExplicitMarker(t *testing.T) {

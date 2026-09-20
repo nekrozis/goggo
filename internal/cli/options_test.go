@@ -12,8 +12,8 @@ func testDefaults() config.Config {
 	return config.NewConfig("/cfg", "/cache")
 }
 
-// parseOpts is the migrated entry point of these tests: the old Parse is gone
-// (CLI1 S2), and every case below now speaks the command vocabulary.
+// parseOpts is the entry point of these tests: every case below speaks the
+// command vocabulary.
 func parseOpts(t *testing.T, args ...string) invocation {
 	t.Helper()
 	inv, err := parseArgs(args, testDefaults())
@@ -71,7 +71,7 @@ func TestParsePlatformAndLanguage(t *testing.T) {
 		t.Errorf("arch = %#x, want x86", inv.cfg.DownloadConfig.GalaxyArch)
 	}
 	// A language with no match leaves 0, which the Galaxy layer reads as
-	// English — the upstream behaviour (downloader.cpp:3904-3913).
+	// English.
 	if got := parseOpts(t, "install", "123", "--language", "nonsense").cfg.DownloadConfig.GalaxyLanguage; got != 0 {
 		t.Errorf("unmatched language = %#x, want 0 (English)", got)
 	}
@@ -171,11 +171,10 @@ func TestParseUnknownAndRemovedOptions(t *testing.T) {
 // boundary: the four ways of handing a secret to a command line are not part of
 // this CLI, and the refusal must not pretend otherwise.
 //
-// The upstream front end never had these options either — it had only
-// --login-email and --login-password (main.cpp:327-328) — so a migration hint
-// would tell a user that a capability was removed when it was never there. That
-// is why the hint table must stay clear of them, and why this test asserts the
-// absence of a hint rather than merely the failure.
+// These options were never part of this CLI, so a migration hint would tell a
+// user that a capability was removed when it was never there. That is why the
+// hint table must stay clear of them, and why this test asserts the absence of a
+// hint rather than merely the failure.
 //
 // The value must not come back either: the refusal names the option, never what
 // was offered as its value (D19: a credential must not reach stderr, a log or an
@@ -199,7 +198,7 @@ func TestCredentialOptionsAreNeverAdvertised(t *testing.T) {
 			t.Errorf("parseArgs(%v) error = %v, want an unknown option", args, message)
 		}
 		if strings.Contains(message, "hint:") {
-			t.Errorf("parseArgs(%v) error = %v, want no migration hint: these options never existed upstream", args, message)
+			t.Errorf("parseArgs(%v) error = %v, want no migration hint: these options are new", args, message)
 		}
 		if strings.Contains(message, secret) {
 			t.Errorf("parseArgs(%v) error = %v, want the supplied value withheld", args, message)
@@ -294,7 +293,7 @@ func TestParseShowCommands(t *testing.T) {
 		t.Errorf("show cdns = cmd %d", inv.cmd)
 	}
 	// "show builds" lists builds; a build in the argument is a different
-	// command, not a filter (the split that replaced upstream's dual meaning).
+	// command, not a filter.
 	if _, err := parseArgs([]string{"show", "builds", "123/2"}, testDefaults()); err == nil {
 		t.Error("show builds with a build must be refused")
 	}
@@ -308,7 +307,7 @@ func TestParseTargetErrors(t *testing.T) {
 			t.Errorf("install %q must be refused", arg)
 		}
 	}
-	// An empty build is "no build given", the way the upstream tokenizer reads it.
+	// An empty build is "no build given".
 	if inv := parseOpts(t, "install", "1/"); inv.target.Product != "1" || inv.target.Build != "" {
 		t.Errorf("install 1/ = %+v, want product 1 with no build", inv.target)
 	}
@@ -392,7 +391,7 @@ func TestParseThreadsAndProgressInterval(t *testing.T) {
 }
 
 // TestParseOrphansOptions locks the orphan command's options: the two filter
-// files are its own, and the include mask is not (upstream checks everything).
+// files are its own, and the include mask is not — the walk checks everything.
 func TestParseOrphansOptions(t *testing.T) {
 	inv := parseOpts(t, "orphans", "check", "123", "--ignorelist", "/tmp/ignore.txt", "--blacklist", "/tmp/black.txt")
 	if inv.cfg.IgnorelistFilePath != "/tmp/ignore.txt" || inv.cfg.BlacklistFilePath != "/tmp/black.txt" {
@@ -423,7 +422,7 @@ func TestNewConfigPaths(t *testing.T) {
 }
 
 // TestIdentityIsSeparateFromCompatibility locks the three-layer identity: the
-// program presents itself, and names the upstream release it tracks only as a
+// program presents itself, and names the release it tracks only as a
 // compatibility baseline.
 func TestIdentityIsSeparateFromCompatibility(t *testing.T) {
 	if config.Version == config.UpstreamCompatibilityVersion {
@@ -433,7 +432,7 @@ func TestIdentityIsSeparateFromCompatibility(t *testing.T) {
 		t.Errorf("VersionString = %q, want it to start with the program name", config.VersionString)
 	}
 	if strings.Contains(config.VersionString, config.UpstreamName) {
-		t.Errorf("VersionString = %q must not present the upstream project as our identity", config.VersionString)
+		t.Errorf("VersionString = %q must not present another project as our identity", config.VersionString)
 	}
 
 	ua := config.DefaultUserAgent()
@@ -441,6 +440,6 @@ func TestIdentityIsSeparateFromCompatibility(t *testing.T) {
 		t.Errorf("UserAgent = %q, want it to start with %q", ua, config.ProgramName+"/"+config.Version)
 	}
 	if strings.Contains(ua, config.UpstreamName) {
-		t.Errorf("UserAgent = %q must not carry the upstream product name", ua)
+		t.Errorf("UserAgent = %q must not carry another product's name", ua)
 	}
 }

@@ -7,10 +7,9 @@ import (
 	"github.com/nekrozis/goggo/internal/config"
 )
 
-// GD4 3.3: the six --subdir-* options, their upstream defaults and the
-// per-field whole-template whitelist. Each domain is its own language - the
-// install-dir table (GD3) must not leak into these, and these must not leak
-// into it.
+// The six --subdir-* options, their defaults and the per-field whole-template
+// whitelist. Each domain is its own language — the install-dir table must not
+// leak into these, and these must not leak into it.
 
 // subdirField reads the DirectoryConfig field one domain writes.
 func subdirField(conf config.DirectoryConfig, name string) string {
@@ -31,11 +30,10 @@ func subdirField(conf config.DirectoryConfig, name string) string {
 	return ""
 }
 
-// TestParseInstallerGateDefaults locks the DEFECT-GD4-1 fix: the conversion's
-// installer platform/language gate gets the upstream front-end defaults
-// ("w+l" and "en", main.cpp:280-281), parsed into both the mask and the
-// priority list the way Util::parseOptionString does — without them every
-// non-extras vector silently dropped from a download run.
+// TestParseInstallerGateDefaults locks the conversion's installer
+// platform/language defaults ("w+l" and "en"), parsed into both the mask and the
+// priority list — without them every non-extras vector silently drops from a
+// download run.
 func TestParseInstallerGateDefaults(t *testing.T) {
 	inv := mustParse(t, "download", "g")
 	if inv.cfg.DownloadConfig.InstallerPlatform != config.PlatformWindows|config.PlatformLinux {
@@ -45,7 +43,7 @@ func TestParseInstallerGateDefaults(t *testing.T) {
 		t.Errorf("installer language = %d, want en", inv.cfg.DownloadConfig.InstallerLanguage)
 	}
 	// "w+l" is ONE comma-group: the priority list carries one entry with both
-	// bits, exactly what Util::parseOptionString builds upstream.
+	// bits.
 	if want := config.PlatformWindows | config.PlatformLinux; len(inv.cfg.DownloadConfig.PlatformPriority) != 1 ||
 		inv.cfg.DownloadConfig.PlatformPriority[0] != want {
 		t.Errorf("platform priority = %v, want [windows+linux]", inv.cfg.DownloadConfig.PlatformPriority)
@@ -61,19 +59,17 @@ func TestParseInstallerGateDefaults(t *testing.T) {
 	}
 }
 
-// TestParseRemoteXMLDefault locks the other half of the GD4 front-end
-// defaults: remote XML is on, the way upstream's bRemoteXML = !bNoRemoteXML
-// (main.cpp:282,541) declares it — without it the installer/patch version
-// check silently never runs.
+// TestParseRemoteXMLDefault locks the other default: remote XML is on — without
+// it the installer/patch version check silently never runs.
 func TestParseRemoteXMLDefault(t *testing.T) {
 	inv := mustParse(t, "download", "g")
 	if !inv.cfg.DownloadConfig.RemoteXML {
-		t.Error("RemoteXML = false, want the upstream default true")
+		t.Error("RemoteXML = false, want the default true")
 	}
 }
 
-// TestSubdirDefaults locks the values applyParseDefaults writes: the upstream
-// boost default_values (main.cpp:293-298), read through the config table.
+// TestSubdirDefaults locks the values applyParseDefaults writes, read through
+// the config table.
 func TestSubdirDefaults(t *testing.T) {
 	inv := mustParse(t, "download", "some_game")
 	want := map[string]string{
@@ -101,7 +97,7 @@ func TestSubdirDefaults(t *testing.T) {
 // TestSubdirWhitelistIsPerField locks the independent domains: each option
 // accepts any literal and only its own whole templates; a template belonging
 // to another domain, an embedded placeholder or a half-spelled template is a
-// usage error (GD4 Gate 1 ruling 3).
+// usage error.
 func TestSubdirWhitelistIsPerField(t *testing.T) {
 	accepted := map[string][]string{
 		"installers":     {"", "setup", "%platform%", "%version%"},
@@ -138,8 +134,8 @@ func TestSubdirWhitelistIsPerField(t *testing.T) {
 	}
 }
 
-// TestSubdirOptionsAreDownloadOnly: the six options belong to the download
-// commands; install keeps its own directory vocabulary (GD4 Gate 1 ruling 3).
+// TestSubdirOptionsAreDownloadOnly locks the domain: the six options belong to
+// the download commands; install keeps its own directory vocabulary.
 func TestSubdirOptionsAreDownloadOnly(t *testing.T) {
 	for _, args := range [][]string{
 		{"install", "123", "--subdir-extras", "x"},
@@ -161,7 +157,7 @@ func TestSubdirOptionsAreDownloadOnly(t *testing.T) {
 	}
 }
 
-// TestDownloadDualStateResolution locks the frozen surface (GD4 ruling 9):
+// TestDownloadDualStateResolution locks the dual-state resolution:
 // "download <game>..." is the leaf, "download file <spec>..." the subcommand,
 // and the word "file" can never name a batch game.
 func TestDownloadDualStateResolution(t *testing.T) {
@@ -178,7 +174,7 @@ func TestDownloadDualStateResolution(t *testing.T) {
 		t.Errorf("download file = cmd %v args %v", inv.cmd, inv.args)
 	}
 	// The batch leaf keeps the no-argument refusal: no implicit account-wide
-	// download exists (GD4 ruling 2).
+	// download exists.
 	err := mustUsageError(t, "download")
 	if !strings.Contains(err.Error(), "needs a game") {
 		t.Errorf("bare download = %v, want the needs-a-game refusal", err)
@@ -192,7 +188,7 @@ func TestDownloadDualStateResolution(t *testing.T) {
 
 // TestOutputFileRules locks -o: only download file accepts it, it pairs with
 // exactly one spec at the parser layer, and the value is kept raw for the
-// dispatcher (which refuses directories) (GD4 Gate 1 ruling 5).
+// dispatcher (which refuses directories).
 func TestOutputFileRules(t *testing.T) {
 	inv := mustParse(t, "download", "file", "g/1", "-o", "out.zip")
 	if inv.outputFile != "out.zip" {
@@ -208,9 +204,9 @@ func TestOutputFileRules(t *testing.T) {
 	}
 }
 
-// TestDownloadTopicsNameTheirTemplates extends the GD3 rule (a whitelist the
-// user cannot read is a whitelist the user cannot use) to the six subdir
-// domains: each option's help must list exactly its own templates.
+// TestDownloadTopicsNameTheirTemplates applies the rule that a whitelist the
+// user cannot read is a whitelist the user cannot use to the six subdir domains:
+// each option's help must list exactly its own templates.
 func TestDownloadTopicsNameTheirTemplates(t *testing.T) {
 	_, topic, _ := run(t, "", "download", "-h")
 	if !strings.Contains(topic, "Usage: goggo download <game>...") {

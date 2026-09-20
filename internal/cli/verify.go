@@ -13,8 +13,8 @@ import (
 // fact, plus the destinations whose state could not be observed at all.
 //
 // The failure bucket is NOT a fifth status — there is no fact about a file that
-// could not be read, and the per-object errors go to stderr (review CLI1 §13③,
-// T18). It is counted so the summary's total stays honest.
+// could not be read, and the per-object errors go to stderr. It is counted so
+// the summary's total stays honest.
 type verifyCounts struct {
 	ok, nd, md5, fs, unreadable int
 }
@@ -44,16 +44,16 @@ func (c verifyCounts) parts() []string {
 
 // renderVerify writes one verification report and returns the run's outcome.
 //
-// The report follows the output architecture UI1-R2 established: the shared
-// context (the installation root) once in a header, the abnormal objects one
-// line each with their absolute path, and the routine state — the files that are
-// exactly right — as a count. A verification of a healthy tree is therefore one
-// line, and the arithmetic of that line is what makes "no per-file line"
-// unambiguous: every file is either counted or named.
+// The report follows the output architecture: the shared context (the
+// installation root) once in a header, the abnormal objects one line each with
+// their absolute path, and the routine state — the files that are exactly right
+// — as a count. A verification of a healthy tree is therefore one line, and the
+// arithmetic of that line is what makes "no per-file line" unambiguous: every
+// file is either counted or named.
 //
-// The exit code carries the answer, the way `auth status` reports its state
-// (review CLI1 §8, S5): everything OK → 0, anything else → the operation
-// failure code. A verification is meant to be usable from a script.
+// The exit code carries the answer, the way `auth status` reports its state:
+// everything OK → 0, anything else → the operation failure code. A verification
+// is meant to be usable from a script.
 func renderVerify(out, errOut io.Writer, res core.VerifyResult) outcome {
 	if res.InstallPath != "" {
 		fmt.Fprintf(out, "Verifying → %s\n", res.InstallPath)
@@ -89,7 +89,7 @@ func renderVerify(out, errOut io.Writer, res core.VerifyResult) outcome {
 
 	if counts.total() == 0 {
 		// Nothing to verify is a state worth stating, the way the install's
-		// zero-transfer path states its own (review UI1-R2).
+		// zero-transfer path states its own.
 		fmt.Fprintln(out, "Nothing to verify.")
 	} else {
 		fmt.Fprintf(out, "%d files: %s\n", counts.total(), strings.Join(counts.parts(), ", "))

@@ -2,9 +2,9 @@ package util
 
 import "testing"
 
-// TestManualURLsFromJSON locks the collection order (O1): arrays keep their
-// element order, object members are visited in sorted key order so the result
-// stays deterministic even though Go's map does not preserve document order.
+// TestManualURLsFromJSON locks the collection order: arrays keep their element
+// order, object members are visited in sorted key order so the result stays
+// deterministic even though Go's map does not preserve document order.
 func TestManualURLsFromJSON(t *testing.T) {
 	t.Run("array keeps order", func(t *testing.T) {
 		in := []any{
@@ -71,7 +71,7 @@ func TestManualURLsFromJSON(t *testing.T) {
 }
 
 // TestDLCNamesFromJSON locks the /downloads/ extraction and the first-wins
-// de-duplication of util.cpp:431-459.
+// de-duplication.
 func TestDLCNamesFromJSON(t *testing.T) {
 	cases := []struct {
 		name string

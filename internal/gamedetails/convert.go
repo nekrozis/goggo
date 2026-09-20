@@ -10,37 +10,35 @@ import (
 	"github.com/nekrozis/goggo/internal/util"
 )
 
-// This file is the JSON conversion of the GameDetails domain (GD1, the "S-GD2"
-// of the original GD ladder): a Galaxy product document becomes a GameDetails
-// tree. It reads only the fields the model needs.
+// This file is the JSON conversion of the GameDetails domain: a Galaxy product
+// document becomes a GameDetails tree. It reads only the fields the model needs.
 //
-// The network is not here. Upstream resolves each file entry's downlink inside
-// the conversion (galaxyapi.cpp:529-533 calls getResponseJson per file), which
-// would drag the API client, its token handling and a future cache into this
-// package. Instead the one capability the conversion needs is injected, so this
-// package keeps depending on config/util alone and stays testable offline.
+// The network is not here: resolving each file entry's downlink inside the
+// conversion would drag the API client, its token handling and its cache into
+// this package. Instead the one capability the conversion needs is injected, so
+// this package keeps depending on config/util alone and stays testable offline.
 
 // ResolvedFile is what the resolver reports about one file entry.
 //
 // URL is an intermediate value: it exists so the resolver can derive Path from
 // it. The persistent field is Path — GameFile keeps the *original* downlink and
-// never the resolved URL (review GD1 §4.2, ruling A1).
+// never the resolved URL.
 type ResolvedFile struct {
 	URL  string
 	Path string
 }
 
 // DownlinkResolver turns one file entry's downlink JSON url into the source the
-// file will be fetched from. The implementation belongs to the caller (GD2 owns
-// the API call and the cache); the conversion only calls it.
+// file will be fetched from. The caller owns the API call and the cache; the
+// conversion only calls it.
 //
-// An error skips that one file and nothing else — the upstream `continue` on a
-// downlink document that came back empty (galaxyapi.cpp:530-533).
+// An error skips that one file and nothing else, the same outcome as a downlink
+// document that came back empty.
 type DownlinkResolver func(ctx context.Context, gamename, downlinkURL string) (ResolvedFile, error)
 
-// logoNameInAPI and logoNameFinal are the upstream logo cleanup: the download
-// API advertises a "_glx_logo.jpg" variant whose full-size counterpart is the
-// plain ".jpg" name (galaxyapi.cpp:400-401).
+// logoNameInAPI and logoNameFinal are the logo cleanup: the download API
+// advertises a "_glx_logo.jpg" variant whose full-size counterpart is the plain
+// ".jpg" name.
 const (
 	logoNameInAPI = "_glx_logo.jpg"
 	logoNameFinal = ".jpg"
@@ -48,35 +46,32 @@ const (
 
 // httpsPrefix is prepended to the two image paths unconditionally: the API
 // answers with a scheme-relative path ("//images..."), so the concatenation is
-// what makes it a URL. An absolute value would gain a second prefix — upstream
-// does exactly that, and nothing in the API sends one.
+// what makes it a URL. An absolute value would gain a second prefix.
 const httpsPrefix = "https:"
 
 // ProductInfoToGameDetails converts one Galaxy product document into the domain
-// model (galaxyapi.cpp:391-500, productInfoJsonToGameDetails).
+// model.
 //
-// Type checking follows one rule (review GD1 §3): a field the conversion reads
-// is validated against the JSON type it must have — absent is the zero value
-// (upstream reads a missing member leniently), present-with-the-wrong-shape is
-// an error. Values are never coerced into something plausible. Fields the
-// conversion does not read are not validated at all.
+// Type checking follows one rule: a field the conversion reads is validated
+// against the JSON type it must have — absent is the zero value, present with
+// the wrong shape is an error. Values are never coerced into something
+// plausible. Fields the conversion does not read are not validated at all.
 //
-// owned is the set of owned product ids. An EMPTY set means no filtering, which
-// is what upstream tests before consulting the list (galaxyapi.cpp:445-450).
+// owned is the set of owned product ids; an EMPTY set means no filtering.
 func ProductInfoToGameDetails(ctx context.Context, product map[string]any, cfg config.DownloadConfig,
 	owned map[string]bool, resolve DownlinkResolver) (GameDetails, error) {
 	gd, err := convertProduct(ctx, product, cfg, owned, resolve)
 	if err != nil {
 		// Nothing half-built crosses the boundary: a caller that gets an error
 		// gets the zero value, never a partial tree it could mistake for a
-		// result (review GD1, transaction boundary).
+		// result.
 		return GameDetails{}, err
 	}
 	return gd, nil
 }
 
 // convertProduct is the recursive body: a DLC subtree is converted by this same
-// function, exactly as upstream recurses (galaxyapi.cpp:455-460).
+// function.
 func convertProduct(ctx context.Context, product map[string]any, cfg config.DownloadConfig,
 	owned map[string]bool, resolve DownlinkResolver) (GameDetails, error) {
 	var gd GameDetails
@@ -88,8 +83,8 @@ func convertProduct(ctx context.Context, product map[string]any, cfg config.Down
 	gd.Gamename = gamename
 
 	// The product id is one of the identifier fields and reads through
-	// idString (DEFECT-GD3-1: the live API sends it as a JSON number); title
-	// and changelog are free strings and keep the strict reader.
+	// idString; title and changelog are free strings and keep the strict
+	// reader.
 	productID, err := idString(product, "id")
 	if err != nil {
 		return GameDetails{}, wrap("gamedetails", err)
@@ -126,8 +121,7 @@ func convertProduct(ctx context.Context, product map[string]any, cfg config.Down
 
 	// The save-product-json artifact is rendered from the document the
 	// conversion already holds — for a DLC that is the inline expanded
-	// document, so GD5 adds no request of its own (ruling 5, the approved
-	// divergence from upstream's per-DLC getProductInfo).
+	// document — so no extra request is made for a DLC.
 	if cfg.SaveProductJSON {
 		rendered, err := util.StyledJSON(product)
 		if err != nil {
@@ -141,10 +135,9 @@ func convertProduct(ctx context.Context, product map[string]any, cfg config.Down
 		return GameDetails{}, wrap("gamedetails", err)
 	}
 
-	// Each vector is gated by its COMPOSITE mask and typed with the base bit,
-	// the way upstream does it (galaxyapi.cpp:404-425). The composite gate is
-	// deliberate: with the DLC bit set and the base bit clear the base vector is
-	// still converted, exactly as the C++ source behaves.
+	// Each vector is gated by its COMPOSITE mask and typed with the base bit.
+	// The composite gate is deliberate: with the DLC bit set and the base bit
+	// clear the base vector is still converted.
 	for _, v := range []struct {
 		gate uint32
 		spec uint32
@@ -196,7 +189,7 @@ func convertProduct(ctx context.Context, product map[string]any, cfg config.Down
 		sub.TitleBasegame = gd.Title
 		sub.GamenameBasegame = gd.Gamename
 		retypeDLC(&sub)
-		// A DLC with no files at all is dropped (galaxyapi.cpp:492-494).
+		// A DLC with no files at all is dropped.
 		if len(sub.Installers)+len(sub.Extras)+len(sub.Patches)+len(sub.LanguagePacks) == 0 {
 			continue
 		}
@@ -206,12 +199,11 @@ func convertProduct(ctx context.Context, product map[string]any, cfg config.Down
 }
 
 // gameFiles converts one downloads vector: the platform/language filter, the
-// empty-node skip and the per-file resolution (galaxyapi.cpp:502-593).
+// empty-node skip and the per-file resolution.
 func gameFiles(ctx context.Context, gamename, title, label string, nodes []any, typeValue uint32,
 	cfg config.DownloadConfig, resolve DownlinkResolver) ([]GameFile, error) {
 	var out []GameFile
-	// Extras carry no platform or language and are exempt from both filters
-	// (galaxyapi.cpp:516-537).
+	// Extras carry no platform or language and are exempt from both filters.
 	isExtra := typeValue&config.GFBaseExtra != 0
 
 	for i, node := range nodes {
@@ -253,8 +245,7 @@ func gameFiles(ctx context.Context, gamename, title, label string, nodes []any, 
 		if err != nil {
 			return nil, wrap(fmt.Sprintf("gamedetails: %s[%d]", label, i), err)
 		}
-		// An entry that advertises nothing is skipped; upstream added this for
-		// github.com/Sude-/lgogdownloader/issues/200.
+		// An entry that advertises nothing is skipped.
 		if count == 0 && totalSize == 0 {
 			continue
 		}
@@ -279,8 +270,8 @@ func gameFiles(ctx context.Context, gamename, title, label string, nodes []any, 
 			}
 			resolved, err := resolve(ctx, gamename, downlink)
 			if err != nil {
-				// Upstream skips the file when the downlink document came back
-				// empty; an unusable entry is that same situation here.
+				// An unusable downlink skips the file, the same outcome as an
+				// empty downlink document.
 				continue
 			}
 			if unusablePath(resolved.Path) {
@@ -305,7 +296,7 @@ func gameFiles(ctx context.Context, gamename, title, label string, nodes []any, 
 				if dup := indexByPath(out, gf.Path); dup >= 0 {
 					if !isExtra {
 						// The duplicate handler widens the installer's language
-						// set instead of adding a second row (galaxyapi.cpp:578-586).
+						// set instead of adding a second row.
 						out[dup].Language |= gf.Language
 					}
 					continue
@@ -317,7 +308,7 @@ func gameFiles(ctx context.Context, gamename, title, label string, nodes []any, 
 	return out, nil
 }
 
-// retypeDLC marks a converted subtree as DLC content (galaxyapi.cpp:465-488).
+// retypeDLC marks a converted subtree as DLC content.
 func retypeDLC(gd *GameDetails) {
 	for _, v := range []struct {
 		files []GameFile
@@ -336,9 +327,8 @@ func retypeDLC(gd *GameDetails) {
 	}
 }
 
-// unusablePath reports the paths upstream rejects with the "/securex?$" pattern
-// (galaxyapi.cpp:552-557): a path ending in "/secure" or "/securex" means the
-// downlink resolved to something that is not a file.
+// unusablePath reports whether a resolved path points at something that is not
+// a file: a path ending in "/secure" or "/securex".
 func unusablePath(path string) bool {
 	lower := strings.ToLower(path)
 	return strings.HasSuffix(lower, "/secure") || strings.HasSuffix(lower, "/securex")
@@ -359,14 +349,13 @@ func wrap(where string, err error) error {
 	return fmt.Errorf("%s: %w", where, err)
 }
 
-// The four readers below share one rule (review GD1 §3): a missing member (or a
-// JSON null) is the zero value; a present member of the wrong JSON type is an
-// error.
+// The four readers below share one rule: a missing member (or a JSON null) is
+// the zero value; a present member of the wrong JSON type is an error.
 //
 // The shape gate is a Go-side type assertion, not jsonval's conversion: jsonval
-// deliberately mirrors jsoncpp's coercing accessors (a number is readable as a
-// string, "true" comes out of a bool), and that leniency is exactly what must
-// not decide what a field is. Shape first, then jsonval for the value.
+// deliberately coerces (a number is readable as a string, "true" comes out of a
+// bool), and that leniency is exactly what must not decide what a field is.
+// Shape first, then jsonval for the value.
 
 // fieldString reads a string field.
 func fieldString(obj map[string]any, name string) (string, error) {
@@ -380,26 +369,22 @@ func fieldString(obj map[string]any, name string) (string, error) {
 	return jsonval.Str(raw)
 }
 
-// idString reads one of the API's identifier fields — the product id, a DLC
-// id, a file id — which the C++ conversion reads with jsoncpp's asString()
-// (galaxyapi.cpp:416, 460 and 563). That is a conversion, not a type test:
-// the live product documents send these ids as JSON numbers (DEFECT-GD3-1,
-// evidence dev/audit/evidence/GD3-probe-terraria.err), and the same file
-// vector even mixes the shapes — an installer's id is the string
-// "en1installer0" while a bonus-content file's id is the number 13403 —
-// so the identifier family is defined by what upstream does with it:
+// idString reads one of the API's identifier fields — the product id, a DLC id,
+// a file id. It is a conversion, not a type test: the live product documents
+// send these ids as JSON numbers, and the same vector even mixes the shapes — an
+// installer's id is the string "en1installer0" while a bonus-content file's id
+// is the number 13403. The accepted shapes are:
 //
-//	string  → as-is
-//	number  → stringified the way jsonval.Str stringifies it
-//	bool    → "true" / "false" (the port's locked precedent: id:true → "true")
+//	string → as-is
+//	number → stringified the way jsonval.Str stringifies it
+//	bool → "true" / "false"
 //	missing → ""
-//	null    → "" (asString on a null)
-//	object / array → error (jsoncpp would crash; this port reports)
+//	null → ""
+//	object / array → error
 //
-// The split is deliberate and narrow (review GD3-R1 §4): slug, title,
-// changelog, os, language, name, version and downlink stay free strings under
-// fieldString's strict gate. This reader does not reopen GD1's field-type
-// rule; it locates `id` as the one family upstream never gated.
+// The split is deliberate and narrow: slug, title, changelog, os, language,
+// name, version and downlink stay free strings under fieldString's strict gate;
+// `id` is the one family read through a conversion.
 func idString(obj map[string]any, name string) (string, error) {
 	raw, ok := obj[name]
 	if !ok {

@@ -28,9 +28,6 @@ const (
 // and Total are byte counts, with Current advancing while Total stays the
 // file's size. Path is the file the event belongs to and Text is the message
 // text of the message kinds, empty for progress.
-//
-// Fields are ordered to minimise padding: the strings (16B each) first, then
-// the 8B fields.
 type Event struct {
 	Path       string
 	Text       string
@@ -48,17 +45,16 @@ type Observer interface {
 	OnEvent(Event)
 }
 
-// ResumeMessagePrefix marks an EventMessageInfo as the explicit resume marker
-// (review UI1-R2, decision 1). Counting resumed tasks must ride on this
-// signal, never on an inferred event sequence: a task that shows no progress
-// events is not necessarily a resume (zero-size items and future skip-like
-// tasks share that shape), so an inference would embed a fragile behavioural
-// guess into the UI.
+// ResumeMessagePrefix marks an EventMessageInfo as the explicit resume marker.
+// Counting resumed tasks must ride on this signal, never on an inferred event
+// sequence: a task that shows no progress events is not necessarily a resume
+// (a zero-size item shares that shape), so an inference would embed a fragile
+// behavioural guess into the UI.
 const ResumeMessagePrefix = "Resuming from chunk "
 
 // ResumeMessage builds the marker text. The absolute path it carries is the
 // lifecycle record: diagnostics keep filesystem identity, the presentation
-// layer decides what reaches the screen (UI1-R2 section 3).
+// layer decides what reaches the screen.
 func ResumeMessage(startChunk int, path string) string {
 	return ResumeMessagePrefix + strconv.Itoa(startChunk) + ": " + path
 }
@@ -69,13 +65,12 @@ func IsResumeMessage(text string) bool {
 }
 
 // SkipMessagePrefix marks an EventMessageSuccess as transfer's authoritative
-// "nothing to transfer" (the dynamic-skip case RES1 added). The front end
-// aggregates skips on this explicit signal for the same reason it counts
-// resumes on theirs: no event-sequence inference (review UI1-R2, decision 1).
+// "nothing to transfer". The front end aggregates skips on this explicit signal
+// for the same reason it counts resumes on theirs: no event-sequence inference.
 const SkipMessagePrefix = "Skipped: "
 
-// SkipMessage builds the skip marker text; the ": OK" tail keeps the upstream
-// line shape so verbose output still reads like the record it is.
+// SkipMessage builds the skip marker text; the ": OK" tail keeps the message
+// reading like the download record it is.
 func SkipMessage(path string) string {
 	return SkipMessagePrefix + path + ": OK"
 }

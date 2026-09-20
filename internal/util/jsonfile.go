@@ -7,10 +7,8 @@ import (
 	"strconv"
 )
 
-// ReadJSONFile mirrors Util::readJsonFile (util.cpp:905-929). The C++ code
-// prints a parse/open failure and returns an empty object; Go instead
-// returns the error with the file path attached (intentional difference:
-// keep the feature, drop the swallowed-error handling).
+// ReadJSONFile reads and decodes a JSON document. Failures are returned with the
+// file path attached rather than swallowed.
 func ReadJSONFile(path string) (any, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -23,10 +21,10 @@ func ReadJSONFile(path string) (any, error) {
 	return v, nil
 }
 
-// JSONUintString mirrors Util::getJsonUIntValueAsString (util.cpp:620-641):
-// a JSON string value is returned verbatim; any other value is rendered as
-// its unsigned decimal text when representable; otherwise "" is returned.
-// Values arrive decoded (float64, json.Number, native ints).
+// JSONUintString renders a JSON value as an unsigned decimal string: a string
+// value is returned verbatim; any other value is rendered as its unsigned
+// decimal text when representable; otherwise "" is returned. Values arrive
+// decoded (float64, json.Number, native ints).
 func JSONUintString(v any) string {
 	if s, ok := v.(string); ok {
 		return s

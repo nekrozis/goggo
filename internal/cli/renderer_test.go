@@ -66,7 +66,7 @@ var _ progressSource = (*fakeProgress)(nil)
 
 // newTestRenderer wires a renderer over a fake sink with a swappable clock.
 // The interval is an hour, so the goroutine ticker never fires inside a test:
-// ticks happen when the test calls r.tick().
+// ticks happen when the test calls r.tick.
 func newTestRenderer(src progressSource, now *time.Time) (*renderer, *fakeSink) {
 	s := &fakeSink{}
 	r := newRenderer(s, progress.NewBar(false, false), time.Hour, src)
@@ -74,10 +74,9 @@ func newTestRenderer(src progressSource, now *time.Time) (*renderer, *fakeSink) 
 	return r, s
 }
 
-// TestViewModelReadsProgressOnly locks the single numeric authority (review
-// UI1 v3 §6.A): the view model's done/total come from Progress.Bytes/Total,
-// and a progress event's Current is never consumed — a lying event must not
-// move the display.
+// TestViewModelReadsProgressOnly locks the single numeric authority: the view
+// model's done/total come from Progress.Bytes/Total, and a progress event's
+// Current is never consumed — a lying event must not move the display.
 func TestViewModelReadsProgressOnly(t *testing.T) {
 	src := newFakeProgress()
 	src.set("/a.bin", 600, 1000)
@@ -101,9 +100,9 @@ func TestViewModelReadsProgressOnly(t *testing.T) {
 	_ = s
 }
 
-// TestViewModelClamps locks the display-layer defensive clamps (review UI1 v3
-// §5): a negative sample reads as zero, a sample past the total reads as the
-// total, and a pending side that would go negative clamps at zero.
+// TestViewModelClamps locks the display-layer defensive clamps: a negative
+// sample reads as zero, a sample past the total reads as the total, and a
+// pending side that would go negative clamps at zero.
 func TestViewModelClamps(t *testing.T) {
 	src := newFakeProgress()
 	src.set("/neg.bin", -5, 100)
@@ -130,9 +129,8 @@ func TestViewModelClamps(t *testing.T) {
 	}
 }
 
-// TestETAPriority locks the boundary order (review UI1 v3 §5, constraint 3):
-// remaining==0 wins over rate==0, so a finished run shows 0s rather than
-// losing the ETA to the zero-rate omission.
+// TestETAPriority locks the boundary order: remaining==0 wins over rate==0, so a
+// finished run shows 0s rather than losing the ETA to the zero-rate omission.
 func TestETAPriority(t *testing.T) {
 	src := newFakeProgress()
 	src.set("/a.bin", 1000, 1000)
@@ -160,10 +158,10 @@ func TestETAPriority(t *testing.T) {
 	}
 }
 
-// TestTaskFinishLeavesActiveModel locks the lifecycle split (review UI1 v3
-// §6.A): a finished task leaves the active model, the finished count grows,
-// the row numbering stays stable and the pending side keeps the finished
-// task's bytes because they were accumulated at TaskStart.
+// TestTaskFinishLeavesActiveModel locks the lifecycle split: a finished task
+// leaves the active model, the finished count grows, the row numbering stays
+// stable and the pending side keeps the finished task's bytes because they were
+// accumulated at TaskStart.
 func TestTaskFinishLeavesActiveModel(t *testing.T) {
 	src := newFakeProgress()
 	src.set("/a.bin", 1000, 1000)
@@ -196,9 +194,8 @@ func TestTaskFinishLeavesActiveModel(t *testing.T) {
 	}
 }
 
-// TestPerTaskRatesRemain locks the migrated S-ETA1 semantics: each task's rate
-// comes from its own window, and the aggregate is the sum of the running
-// tasks' rates.
+// TestPerTaskRatesRemain locks the per-task rates: each task's rate comes from
+// its own window, and the aggregate is the sum of the running tasks' rates.
 func TestPerTaskRatesRemain(t *testing.T) {
 	src := newFakeProgress()
 	src.set("/slow.bin", 100, 2000)
@@ -229,9 +226,9 @@ func TestPerTaskRatesRemain(t *testing.T) {
 	}
 }
 
-// TestTaskRateFallsBackToAverage locks the migrated S-ETA1 delta: with fewer
-// than two live samples the task reports its session average, and the average
-// survives a stalled window.
+// TestTaskRateFallsBackToAverage locks the fallback: with fewer than two live
+// samples the task reports its session average, and the average survives a
+// stalled window.
 func TestTaskRateFallsBackToAverage(t *testing.T) {
 	src := newFakeProgress()
 	src.set("/a.bin", 100, 300)
@@ -257,9 +254,9 @@ func TestTaskRateFallsBackToAverage(t *testing.T) {
 	}
 }
 
-// TestStopFinalizesOnce locks the Stop lifecycle (review UI1 v3 §6.E): the
-// first Stop emits the terminal state exactly once and ends the repaint loop;
-// further Stops are no-ops.
+// TestStopFinalizesOnce locks the Stop lifecycle: the first Stop emits the
+// terminal state exactly once and ends the repaint loop; further Stops are
+// no-ops.
 func TestStopFinalizesOnce(t *testing.T) {
 	src := newFakeProgress()
 	src.set("/a.bin", 0, 100)
@@ -282,17 +279,16 @@ func TestStopFinalizesOnce(t *testing.T) {
 	}
 }
 
-// TestFinalLines locks the terminal states (review UI1 v3 §6.E, UI1-R2 §5
-// scene ②): only the completed state carries the completion count — a
-// canceled run's active tasks were interrupted, not finished — and a
-// zero-transfer completed run says nothing (the plan's "Nothing to download."
-// already spoke for it).
+// TestFinalLines locks the terminal states: only the completed state carries the
+// completion count — a canceled run's active tasks were interrupted, not
+// finished — and a zero-transfer completed run says nothing (the plan's "Nothing
+// to download." already spoke for it).
 func TestFinalLines(t *testing.T) {
 	if got := finalLines(stopCompleted, runStats{completed: 3}, ""); len(got) != 1 || !strings.Contains(got[0], "3") {
 		t.Errorf("completed = %q, want the count", got)
 	}
-	// The resume aggregate line rides the terminal state (UI1-R2: markers
-	// arrive mid-run, so the count lands beside the completion line).
+	// The resume aggregate line rides the terminal state: markers arrive
+	// mid-run, so the count lands beside the completion line.
 	got := finalLines(stopCompleted, runStats{completed: 2, resumed: 2}, "")
 	if len(got) != 2 || !strings.Contains(got[0], "Resuming: 2") {
 		t.Errorf("completed+resumed = %q, want the resume line before the count", got)
@@ -309,10 +305,9 @@ func TestFinalLines(t *testing.T) {
 	}
 }
 
-// TestExitCodeAuthority locks the single exit-code authority (review UI1 v3
-// constraint 8, extended by CLI1 §8): every outcome maps to one number, and the
-// install lifecycle's reasons are one of the paths into it — 0/1/2/130 and
-// nothing else.
+// TestExitCodeAuthority locks the single exit-code authority: every outcome maps
+// to one number, and the install lifecycle's reasons are one of the paths into
+// it — 0/1/2/130 and nothing else.
 func TestExitCodeAuthority(t *testing.T) {
 	for _, tc := range []struct {
 		outcome outcome
@@ -372,8 +367,8 @@ type fmtWrapped struct{ err error }
 func (w fmtWrapped) Error() string { return "install: " + w.err.Error() }
 func (w fmtWrapped) Unwrap() error { return w.err }
 
-// TestLogSinkNeverEmitsProgress locks the non-TTY contract (review UI1 v3
-// §6.C): lifecycle and message events become lines, progress events never do.
+// TestLogSinkNeverEmitsProgress locks the non-TTY contract: lifecycle and
+// message events become lines, progress events never do.
 func TestLogSinkNeverEmitsProgress(t *testing.T) {
 	var out, errOut strings.Builder
 	s := &logSink{out: &out, errOut: &errOut, unit: 0, now: time.Now, lastSummary: time.Now()}
@@ -397,8 +392,8 @@ func TestLogSinkNeverEmitsProgress(t *testing.T) {
 	}
 }
 
-// TestLogSinkCadence locks the summary rhythm (review UI1 v3 §6.C): 10s since
-// the last summary OR 10 finishes, whichever comes first, both reset on emit.
+// TestLogSinkCadence locks the summary rhythm: 10s since the last summary OR 10
+// finishes, whichever comes first, both reset on emit.
 func TestLogSinkCadence(t *testing.T) {
 	var out, errOut strings.Builder
 	base := time.Unix(1_000_000, 0)
@@ -452,8 +447,8 @@ func TestLogSinkFinalizeStreams(t *testing.T) {
 	}
 }
 
-// TestRateWindowResetsOnADecrease locks the reviewed answer to a backwards
-// sample: the window resets and restarts from the new value (review S-ETA2).
+// TestRateWindowResetsOnADecrease locks the answer to a backwards sample: the
+// window resets and restarts from the new value.
 func TestRateWindowResetsOnADecrease(t *testing.T) {
 	var w rateWindow
 	w.cap = 100
@@ -512,10 +507,10 @@ func TestRateWindowTrimsByTime(t *testing.T) {
 	}
 }
 
-// TestStopBeforeStartThenStart is the UI1-R1 lifecycle regression: Stop with
-// no Start finalizes synchronously, a later Start must be a no-op — the
-// finalize flag bars a ticker that would never see a stop signal again — and
-// a second Stop stays silent. No goroutine residue, no output, no block.
+// TestStopBeforeStartThenStart locks the Stop-before-Start sequence: Stop with
+// no Start finalizes synchronously, a later Start must be a no-op — the finalize
+// flag bars a ticker that would never see a stop signal again — and a second
+// Stop stays silent. No goroutine residue, no output, no block.
 func TestStopBeforeStartThenStart(t *testing.T) {
 	src := newFakeProgress()
 	src.set("/a.bin", 0, 100)
@@ -540,10 +535,10 @@ func TestStopBeforeStartThenStart(t *testing.T) {
 	}
 }
 
-// TestDisplayPathFollowsInstallRoot locks the UI1-R2 seam: task rows are
-// relative to the plan's semantic install root once core hands it over, and
-// keep the absolute form before that (never wrong, only verbose). The
-// install root is the resolved %install_dir% — not a guessed prefix.
+// TestDisplayPathFollowsInstallRoot locks the install-root seam: task rows are
+// relative to the plan's semantic install root once core hands it over, and keep
+// the absolute form before that (never wrong, only verbose). The install root is
+// the resolved %install_dir% — not a guessed prefix.
 func TestDisplayPathFollowsInstallRoot(t *testing.T) {
 	src := newFakeProgress()
 	now := time.Unix(1_000_000, 0)
@@ -597,9 +592,9 @@ func TestMarkersAggregate(t *testing.T) {
 	}
 }
 
-// TestZeroTransferEmitsNothing locks scene ②: a run whose queue was empty has
-// no final line — the plan's "Already up to date / Nothing to download."
-// already spoke for it (review UI1-R2 §5).
+// TestZeroTransferEmitsNothing locks the zero-transfer case: a run whose queue
+// was empty has no final line — the plan's "Already up to date / Nothing to
+// download." already spoke for it.
 func TestZeroTransferEmitsNothing(t *testing.T) {
 	src := newFakeProgress()
 	src.setQueue(0, 0)
@@ -621,9 +616,8 @@ func TestZeroTransferEmitsNothing(t *testing.T) {
 	}
 }
 
-// TestFinalLinesSubject locks the GD4 closing-line rule: the frame names the
-// command it closed. An empty subject keeps the install wording, which is what
-// every pre-GD4 evidence log shows.
+// TestFinalLinesSubject locks the closing-line rule: the frame names the command
+// it closed. An empty subject keeps the install wording.
 func TestFinalLinesSubject(t *testing.T) {
 	got := finalLines(stopFailed, runStats{}, "Download")
 	if len(got) != 1 || got[0] != "Download failed." {

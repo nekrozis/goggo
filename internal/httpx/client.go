@@ -18,10 +18,6 @@ import (
 // is a RetryPolicy carried by the config and applied by GetBytesWithRetry
 // (and available generically through DoWithRetry); policies are not baked
 // into Do/Get.
-//
-// Fields are ordered to minimise padding: RetryPolicy (24B), strings and
-// interfaces (16B each), the pointer, time.Duration and int64 (8B each), then
-// the trailing bools (1B).
 type Config struct {
 	// RetryPolicy is the default retry behaviour for GetBytesWithRetry.
 	// A zero MaxAttempts yields a single attempt (no retry). Business layers
@@ -32,16 +28,15 @@ type Config struct {
 	// UserAgent is sent on every request when set.
 	UserAgent string
 
-	// CACertPath mirrors CURLOPT_CAINFO: an optional PEM bundle appended to
-	// the system roots. Empty keeps the system roots.
+	// CACertPath is an optional PEM bundle appended to the system roots.
+	// Empty keeps the system roots.
 	CACertPath string
 
-	// CookieFile enables cookie-file persistence (the C++ COOKIEFILE /
-	// COOKIELIST FLUSH pair) when non-empty: New installs a cookieStore as
-	// the transport's jar and LoadCookies/SaveCookies read and write this
-	// Netscape cookies.txt path. New performs no file I/O itself — loading is
-	// an explicit initialisation step so the caller can order it before
-	// session checks.
+	// CookieFile enables cookie-file persistence when non-empty: New installs
+	// a cookieStore as the transport's jar and LoadCookies/SaveCookies read
+	// and write this Netscape cookies.txt path. New performs no file I/O
+	// itself — loading is an explicit initialisation step so the caller can
+	// order it before session checks.
 	//
 	// A non-empty CookieFile together with a caller-provided HTTPClient is a
 	// configuration error reported by LoadCookies/SaveCookies
@@ -69,14 +64,13 @@ type Config struct {
 	// with CookieFile (see above).
 	HTTPClient *http.Client
 
-	// Timeout bounds the TCP connect (mirrors CURLOPT_CONNECTTIMEOUT); the
-	// zero value leaves the default dial timeout.
+	// Timeout bounds the TCP connect; the zero value leaves the default dial
+	// timeout.
 	Timeout time.Duration
 
-	// LowSpeedLimit mirrors CURLOPT_LOW_SPEED_LIMIT: the rate in bytes per
-	// second below which a transfer may be aborted with ErrLowSpeed;
-	// LowSpeedTime mirrors CURLOPT_LOW_SPEED_TIME: how long the average rate
-	// may stay below the limit before that happens (util.cpp:717-718).
+	// LowSpeedLimit is the rate in bytes per second below which a transfer
+	// may be aborted with ErrLowSpeed; LowSpeedTime is how long the average
+	// rate may stay below the limit before that happens.
 	//
 	// Zero values select the transport defaults (DefaultLowSpeedLimit /
 	// DefaultLowSpeedTime) — the same "zero means default" rule the retry
@@ -85,11 +79,10 @@ type Config struct {
 	LowSpeedLimit int64
 	LowSpeedTime  time.Duration
 
-	// InsecureSkipVerify mirrors CURLOPT_SSL_VERIFYPEER=0 (i.e. the C++
-	// bVerifyPeer=false case). It exists for behaviour compatibility with
-	// lgogdownloader, not as a recommended mode; the zero value (verify) is
-	// the secure default. The CLI layer (S12) maps a disabled verify setting
-	// to true here.
+	// InsecureSkipVerify disables TLS certificate verification. It exists for
+	// behaviour compatibility with the downloader's "do not verify" setting,
+	// not as a recommended mode; the zero value (verify) is the secure
+	// default. The CLI layer maps a disabled verify setting to true here.
 	InsecureSkipVerify bool
 
 	// DisableLowSpeedGuard turns the low-speed watchdog off entirely, for
@@ -105,9 +98,6 @@ type Config struct {
 // When Config.CookieFile is set the jar is a *cookieStore, which additionally
 // maintains a reconstructable persistence state; store is nil otherwise (and
 // also when the caller supplied its own HTTPClient).
-//
-// Fields are ordered to minimise padding: RetryPolicy (24B), the strings
-// (16B each), then the 8B fields, then the bools.
 type Client struct {
 	policy        RetryPolicy
 	ua            string
@@ -131,8 +121,8 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	// The low-speed guard: the transport owns the defaults so an unconfigured
-	// caller still gets upstream behaviour, and the explicit switch is the only
-	// way to turn it off.
+	// caller still gets a guard, and the explicit switch is the only way to
+	// turn it off.
 	guard := !cfg.DisableLowSpeedGuard
 	limit, window := cfg.LowSpeedLimit, cfg.LowSpeedTime
 	if limit <= 0 {
@@ -145,7 +135,7 @@ func New(cfg Config) (*Client, error) {
 	hc := cfg.HTTPClient
 	var store *cookieStore
 	if hc == nil {
-		tlsConfig := &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify} //nolint:gosec // mirrors CURLOPT_SSL_VERIFYPEER
+		tlsConfig := &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify} //nolint:gosec // opt-in, see InsecureSkipVerify
 		if cfg.CACertPath != "" {
 			pool, err := x509.SystemCertPool()
 			if err != nil || pool == nil {
@@ -175,7 +165,7 @@ func New(cfg Config) (*Client, error) {
 			exit = cfg.Transport
 		}
 
-		// http.Client follows redirects by default (CURLOPT_FOLLOWLOCATION).
+		// http.Client follows redirects by default.
 		hc = &http.Client{Transport: exit}
 		if cfg.CookieFile != "" {
 			store = newCookieStore()
@@ -202,9 +192,9 @@ func New(cfg Config) (*Client, error) {
 }
 
 // guardBody installs the low-speed watchdog on a response. Every response that
-// leaves this package goes through it (Do and DoNoRedirect), so all callers —
-// webapi, auth and the future download path — inherit the upstream guard
-// without implementing anything themselves.
+// leaves this package goes through it (Do and DoNoRedirect), so every caller —
+// webapi, auth, galaxy and the download path — inherits the guard without
+// implementing anything themselves.
 func (c *Client) guardBody(resp *http.Response) {
 	if !c.lowSpeedGuard || resp == nil || resp.Body == nil {
 		return
@@ -231,9 +221,7 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 
 // DoNoRedirect performs a single request (no retry) and returns the response
 // WITHOUT following redirects: a 3xx response is returned as-is so the caller
-// can inspect the Location header and drive the redirect chain itself (the
-// C++ source sets CURLOPT_FOLLOWLOCATION=0 for exactly this reason during
-// login).
+// can inspect the Location header and drive the redirect chain itself.
 //
 // This is a per-call behaviour, not a client-wide mode switch: other requests
 // through the same Client keep the default redirect-following behaviour. The

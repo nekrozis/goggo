@@ -16,7 +16,7 @@ import (
 // Finding them is not a failure, however many there are: a save file, a mod and a
 // settings file all live under an installation root and none of them is explained
 // by the manifest. The exit code therefore reports whether the CHECK worked, the
-// way `check` does in a shell script (review S6, ruling 3) — unlike `verify`,
+// way `check` does in a shell script — unlike `verify`,
 // whose mismatch means the installation does not match what it should be.
 func (c *console) runOrphansCheck(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer) outcome {
 	res, err := d.CheckOrphans(ctx, core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build))
@@ -28,25 +28,18 @@ func (c *console) runOrphansCheck(ctx context.Context, d *core.Downloader, inv i
 	return outcomeOK
 }
 
-// runOrphansRemove shows the same list and then removes exactly it, once the user
-// has authorized that list.
-//
-// The authorization is the front end's business — the terminal, `--yes` and the
-// answer are all front-end facts — and core's is deleting the paths it was handed
-// (review S6, ruling 5). The list is printed before the question, so what the
-// user approves is what they just read (D10).
-//
-// The interrupt context is set up here because a destructive batch has something
-// to preserve: a cancelled removal stops and still reports what it deleted
-// (review D33, D20). A second Ctrl+C gets the default treatment, as it does
-// during an install.
 // runOrphansRemove walks the installation, shows the list, obtains the
 // authorization for exactly that list and removes it.
 //
+// The authorization is the front end's business — the terminal, `--yes` and the
+// answer are all front-end facts — while core's is deleting the paths it was
+// handed. The list is printed before the question, so what the user approves is
+// what they just read (D10).
+//
 // The interrupt context is set up here because a destructive batch has something
 // to preserve: a cancelled removal stops and still reports what it deleted
-// (review D33, D20). A second Ctrl+C gets the default treatment, as it does
-// during an install.
+// (D33, D20). A second Ctrl+C gets the default treatment, as it does during an
+// install.
 func (c *console) runOrphansRemove(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer) outcome {
 	ctx, stopSignal := signal.NotifyContext(ctx, os.Interrupt)
 	defer stopSignal()
@@ -60,13 +53,12 @@ func (c *console) runOrphansRemove(ctx context.Context, d *core.Downloader, inv 
 	return c.removeOrphans(ctx, d, res, inv.yes, stdout, stderr)
 }
 
-// removeOrphans authorizes and applies one removal (review S6, ruling 5).
+// removeOrphans authorizes and applies one removal.
 //
 // The list has already been shown, so what the user approves is what they just
 // read (D10), and the authorization has exactly two sources: the explicit --yes
 // flag, which says "I authorized this — do not ask" (D16), or the answer the
-// terminal gives. A run without authorization deletes nothing and reports that
-// (review S6, ruling 4).
+// terminal gives. A run without authorization deletes nothing and reports that.
 func (c *console) removeOrphans(ctx context.Context, d *core.Downloader, res core.OrphansResult, yes bool, stdout, stderr io.Writer) outcome {
 	if len(res.Files) == 0 {
 		// Nothing to authorize and nothing to delete; the count line above
@@ -86,8 +78,7 @@ func (c *console) removeOrphans(ctx context.Context, d *core.Downloader, res cor
 			failed++
 			// The CLI names the reason as well as the object: a failed deletion
 			// is the one thing here a user may have to act on with the
-			// filesystem (the install tail reports the object alone, as the C++
-			// source does).
+			// filesystem (the install tail reports the object alone).
 			fmt.Fprintf(stderr, "Failed to delete %s: %v\n", attempt.Path, attempt.Err)
 			continue
 		}
@@ -113,7 +104,7 @@ func (c *console) removeOrphans(ctx context.Context, d *core.Downloader, res cor
 // An explicit --yes IS the authorization: the flag exists so a script — or a
 // person who has just read the list above — can say "do not ask", and asking
 // anyway would make it meaningless on a terminal, which is precisely where a
-// destructive command is normally run (D16, review S6-R1). Without it the
+// destructive command is normally run (D16). Without it the
 // terminal is asked, and anything short of a clear yes is a no.
 func (c *console) authorized(yes bool, count int) bool {
 	if yes {
@@ -133,7 +124,6 @@ func renderOrphans(w io.Writer, res core.OrphansResult) {
 		fmt.Fprintf(w, "  %s\n", res.Relative(path))
 	}
 	if len(res.Files) == 0 {
-		// Upstream's wording for the empty answer (downloader.cpp:1819).
 		fmt.Fprintln(w, "No orphaned files")
 		return
 	}

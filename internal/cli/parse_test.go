@@ -37,7 +37,7 @@ func mustUsageError(t *testing.T, args ...string) error {
 	return err
 }
 
-// TestCommandTreeResolution locks the tree itself (review S1 checkpoint 1): every
+// TestCommandTreeResolution locks the tree itself: every
 // supported path resolves to its own command, and the namespaces refuse to run
 // on their own.
 func TestCommandTreeResolution(t *testing.T) {
@@ -80,7 +80,7 @@ func TestCommandTreeResolution(t *testing.T) {
 
 // TestRemovedCommandsAreUnknown locks D14: the commands this build does not
 // have are absent from the tree, and the ones whose capability moved somewhere
-// else are diagnosed with a hint (review S1 checkpoint 6).
+// else are diagnosed with a hint.
 func TestRemovedCommandsAreUnknown(t *testing.T) {
 	for _, name := range []string{"repair", "xml", "cache", "cloud", "config"} {
 		err := mustUsageError(t, name)
@@ -100,7 +100,7 @@ func TestRemovedCommandsAreUnknown(t *testing.T) {
 	}
 }
 
-// TestMetaShortcuts locks D18 (review S1 checkpoint 5): -h/--help and
+// TestMetaShortcuts locks D18: -h/--help and
 // --version/version resolve as meta, carry the path they were asked about, and
 // leave the business payload empty.
 func TestMetaShortcuts(t *testing.T) {
@@ -136,7 +136,7 @@ func TestMetaShortcuts(t *testing.T) {
 }
 
 // TestTypedPayload locks that the parser hands over semantics and nothing else
-// (review S1 checkpoint 2): the target is split, the destructive flag is its own
+// : the target is split, the destructive flag is its own
 // field, and the command decides the rest.
 func TestTypedPayload(t *testing.T) {
 	inv := mustParse(t, "install", "1207658787/1234")
@@ -161,7 +161,7 @@ func TestTypedPayload(t *testing.T) {
 	}
 }
 
-// TestOptionAcceptanceIsPerCommand locks D15 (review S1 checkpoint 3): "shared"
+// TestOptionAcceptanceIsPerCommand locks D15: "shared"
 // means shared semantics, not unconditional acceptance.
 func TestOptionAcceptanceIsPerCommand(t *testing.T) {
 	// Accepted where it means something.
@@ -174,14 +174,14 @@ func TestOptionAcceptanceIsPerCommand(t *testing.T) {
 	if !strings.Contains(err.Error(), "--threads") || !strings.Contains(err.Error(), "list") {
 		t.Errorf("error = %v, want it to name the option and the command", err)
 	}
-	// The orphan walk never narrows by include/exclude (upstream checks
-	// everything), so the option is refused rather than accepted and ignored.
+	// The orphan walk never narrows by include/exclude — it checks everything —
+	// so the option is refused rather than accepted and ignored.
 	mustUsageError(t, "orphans", "check", "123", "--include", "installers")
 	mustUsageError(t, "orphans", "check", "123", "--tag", "x")
 	// --yes belongs to the destructive command only (D16).
 	mustUsageError(t, "install", "123", "--yes")
 	mustUsageError(t, "orphans", "check", "123", "--yes")
-	// verify honours the include mask and the blacklist (upstream --status).
+	// verify honours the include mask and the blacklist.
 	if inv := mustParse(t, "verify", "123", "--include", "installers"); inv.cfg.DownloadConfig.Include == 0 {
 		t.Error("verify --include produced an empty mask")
 	}
@@ -192,9 +192,9 @@ func TestOptionAcceptanceIsPerCommand(t *testing.T) {
 	}
 }
 
-// TestValueParsersReuseTheExistingSemantics locks checkpoint 4: the new parser
-// must produce exactly what the shared option helpers produce, not a second
-// interpretation of the same syntax.
+// TestValueParsersReuseTheExistingSemantics locks that the parser produces
+// exactly what the shared option helpers produce, not a second interpretation of
+// the same syntax.
 func TestValueParsersReuseTheExistingSemantics(t *testing.T) {
 	inv := mustParse(t, "list", "games", "--installer-platform", "windows,linux+mac")
 	wantPriority, wantMask := util.ParseOptionString("windows,linux+mac", config.Platforms)
@@ -217,7 +217,7 @@ func TestValueParsersReuseTheExistingSemantics(t *testing.T) {
 
 	// --platform selects the Galaxy platform (single value), while the listing
 	// uses --installer-platform (priority syntax): two different options, two
-	// different meanings (the v5 collision, closed as B).
+	// different meanings.
 	inv = mustParse(t, "install", "123", "--platform", "windows")
 	if inv.cfg.DownloadConfig.GalaxyPlatform != config.PlatformWindows {
 		t.Errorf("galaxy platform = %#x, want windows", inv.cfg.DownloadConfig.GalaxyPlatform)
@@ -225,13 +225,12 @@ func TestValueParsersReuseTheExistingSemantics(t *testing.T) {
 	mustUsageError(t, "install", "123", "--platform", "bogus")
 	mustUsageError(t, "list", "games", "--installer-platform", "bogus")
 
-	// --arch keeps the upstream reading: an unmatched value, and "all", mean
-	// 64-bit.
+	// --arch: an unmatched value, and "all", mean 64-bit.
 	if inv := mustParse(t, "install", "123", "--arch", "bogus"); inv.cfg.DownloadConfig.GalaxyArch != config.ArchX64 {
-		t.Error("--arch bogus must fall back to x64, as upstream does")
+		t.Error("--arch bogus must fall back to x64")
 	}
 
-	// --progress-interval is clamped, not replaced by the default (FIX-2).
+	// --progress-interval is clamped, not replaced by the default.
 	if inv := mustParse(t, "install", "123", "--progress-interval", "99999"); inv.cfg.ProgressInterval != progressIntervalMax {
 		t.Errorf("progress interval = %d, want the clamp to %d", inv.cfg.ProgressInterval, progressIntervalMax)
 	}
@@ -249,7 +248,7 @@ func TestValueParsersReuseTheExistingSemantics(t *testing.T) {
 
 	// --install-dir takes a concrete directory name or one of the templates the
 	// installer resolves. Anything else carrying a "%" is a half-exposed
-	// template language and stays refused (review GD3 §3.3, ruling B).
+	// template language and stays refused.
 	if inv := mustParse(t, "install", "123", "--install-dir", "HoMM 3 Complete"); inv.cfg.Directories.GalaxyInstallSubdir != "HoMM 3 Complete" {
 		t.Error("--install-dir did not store the given directory name")
 	}
@@ -283,9 +282,9 @@ func TestValueParsersReuseTheExistingSemantics(t *testing.T) {
 	}
 }
 
-// TestUnknownAndMalformedAreUsageErrors locks checkpoint 7: everything the
-// parser refuses comes back as one error shape, so the caller has a single
-// mapping onto the usage exit code.
+// TestUnknownAndMalformedAreUsageErrors locks the single failure shape:
+// everything the parser refuses comes back as one error shape, so the caller has
+// a single mapping onto the usage exit code.
 func TestUnknownAndMalformedAreUsageErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"bogus"},
@@ -312,7 +311,7 @@ func TestUnknownAndMalformedAreUsageErrors(t *testing.T) {
 	}
 }
 
-// TestBareInvocationAndDefaults locks the two boundaries S1 owns: a line with no
+// TestBareInvocationAndDefaults locks the two boundaries: a line with no
 // command parses to nothing to run (the caller decides what to print), and the
 // parser installs its own defaults — including the measured worker count (D9).
 func TestBareInvocationAndDefaults(t *testing.T) {
@@ -342,7 +341,7 @@ func TestBareInvocationAndDefaults(t *testing.T) {
 }
 
 // TestThreadsPrecedence locks the three-way precedence the default introduces
-// (review S7): the parser's measured default, an explicit count that wins over
+// : the parser's measured default, an explicit count that wins over
 // it, and an explicit 0 that keeps its own meaning. 0 must NOT become a second
 // spelling of the default — it is the request for the runtime's single-worker
 // fallback, which lives in transfer/schedule and is not the CLI's to redefine.
@@ -358,11 +357,11 @@ func TestThreadsPrecedence(t *testing.T) {
 	}
 }
 
-// TestOptionPrefixStrictness locks the option-name grammar (review S1-R1): a
+// TestOptionPrefixStrictness locks the option-name grammar: a
 // long option is "--name", a short one is "-x" for a declared single-letter
-// alias, and nothing else is an option. Stripping every leading dash — the first
-// cut's behaviour — accepted "---help", "-version" and "-threads 8", which is a
-// wider grammar than the CLI has.
+// alias, and nothing else is an option. Stripping every leading dash would
+// accept "---help", "-version" and "-threads 8", which is a wider grammar than
+// the CLI has.
 func TestOptionPrefixStrictness(t *testing.T) {
 	// The legal shapes still work.
 	if inv := mustParse(t, "-h"); inv.meta != metaHelp {
@@ -394,10 +393,9 @@ func TestOptionPrefixStrictness(t *testing.T) {
 	}
 }
 
-// TestOptionTableIsComplete locks a structural property the first cut of the
-// table got wrong: an option that parses but has no setter is an option that
-// silently does nothing (--no-color and --no-unicode were exactly that). Every
-// entry must either carry a setter or be one the parser handles itself.
+// TestOptionTableIsComplete locks a structural property: an option that parses
+// but has no setter is an option that silently does nothing. Every entry must
+// either carry a setter or be one the parser handles itself.
 func TestOptionTableIsComplete(t *testing.T) {
 	handledByTheParser := map[optionID]bool{
 		optHelp:    true, // meta, answered after the tree is known
@@ -413,12 +411,10 @@ func TestOptionTableIsComplete(t *testing.T) {
 	}
 }
 
-// TestMigrationHintsAreUsable locks a property the first cut of the hint table
-// got wrong twice over: a hint is only useful if the user can paste it. Every
-// hint must therefore name a command the tree actually has — and, when it names
-// an option, one that command actually accepts (review S2: "goggo list
-// --installer-platform" named a command path that does not exist, because the
-// installer filters belong to "list games").
+// TestMigrationHintsAreUsable locks the property that makes a hint useful: the
+// user must be able to paste it. Every hint therefore names a command the tree
+// actually has — and, when it names an option, one that command actually
+// accepts.
 func TestMigrationHintsAreUsable(t *testing.T) {
 	for flag, hint := range removedOptions {
 		if hint == "" {
@@ -475,10 +471,10 @@ func TestMigrationHintsAreUsable(t *testing.T) {
 	}
 }
 
-// TestHelpTopicResolution locks the ONE topic rule both spellings share (review
-// S3): -h/--help and the help command resolve the same path the same way, and
-// an unknown or over-specified topic is a usage failure rather than a silent
-// root help.
+// TestHelpTopicResolution locks the ONE topic rule both spellings share:
+// -h/--help and the help command resolve the same path the same way, and an
+// unknown or over-specified topic is a usage failure rather than a silent root
+// help.
 func TestHelpTopicResolution(t *testing.T) {
 	ok := []struct {
 		args []string

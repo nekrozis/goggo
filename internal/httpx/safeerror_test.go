@@ -21,7 +21,7 @@ const (
 // identification looks up the type in the whole wrapping chain (errors.As), and
 // a *StatusError wins over an enclosing *url.Error at any depth. An
 // outermost-only type switch would be weaker, not stricter — for a fmt wrapper
-// around a status it would fall through to err.Error() and print the URL again.
+// around a status it would fall through to err.Error and print the URL again.
 func TestSafeErrorStatusWinsOverOuterURLWrapper(t *testing.T) {
 	status := &StatusError{Method: "GET", URL: testTokenURL + testRefreshQuery, Code: 403}
 	nested := fmt.Errorf("auth: refresh token: %w",

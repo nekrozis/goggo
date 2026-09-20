@@ -18,7 +18,7 @@ import (
 // This file is the dispatch coverage guard. `auth login` completed its login,
 // stored the credentials and then reported "auth login has no handler" — the
 // post-session switch had no case for it and every command id that reaches the
-// switch had to be listed there by hand (CLI1 S2 gap, found 2026-09-20).
+// switch had to be listed there by hand.
 //
 // The guard is behavioural, not a hand-kept list: it drives EVERY leaf of the
 // command tree through the real dispatcher against a local server and fails if

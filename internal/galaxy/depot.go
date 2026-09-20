@@ -14,38 +14,35 @@ import (
 )
 
 // smallFilesContainerName is the path the synthetic small-files container entry
-// gets (galaxyapi.cpp:265). It stays private: the consumer recognises the entry
-// through GalaxyDepotItem.IsSmallFilesContainer and only appends a suffix to the
-// path (downloader.cpp:3983-3985), so nothing outside needs the literal.
+// gets. It stays private: the consumer recognises the entry through
+// GalaxyDepotItem.IsSmallFilesContainer, so nothing outside needs the literal.
 const smallFilesContainerName = "galaxy_smallfilescontainer"
 
 // maxUint64Exclusive is 2^64 — the first value past uint64. It is a float64
 // constant because the values compared against it come from encoding/json.
 const maxUint64Exclusive = float64(1 << 64)
 
-// DepotOptions carries the download configuration the C++ source reads from the
-// global config while it expands a manifest: the dependency switch, the
-// lowercase-path rule and the platform that rule applies to
-// (galaxyapi.cpp:306,315-319).
+// DepotOptions carries the download configuration needed while expanding a
+// manifest: the dependency switch, the lowercase-path rule and the platform that
+// rule applies to.
 //
 // It is a parameter rather than a Client field so that this package keeps
-// knowing nothing about the download configuration (review ruling D6).
+// knowing nothing about the download configuration (D6).
 type DepotOptions struct {
 	IsDependency   bool
 	LowercasePaths bool
 	Platform       uint32
 }
 
-// DepotItems expands a manifest into depot entries (galaxyapi.cpp:253-352).
+// DepotItems expands a manifest into depot entries.
 //
-// The order is upstream's: the small-files container first when the manifest
-// carries one, then the entries of depot.items in document order. An entry whose
-// "chunks" is not an array is skipped — that is an explicit filter in the C++
-// source (galaxyapi.cpp:300), not an error, and a file can legitimately have no
-// chunks.
+// The order is the small-files container first when the manifest carries one,
+// then the entries of depot.items in document order. An entry whose "chunks" is
+// not an array is skipped — an explicit filter, not an error, and a file can
+// legitimately have no chunks.
 //
 // An empty hash reaches ManifestV2 unchanged and produces the request that step
-// already defines (review ruling D12).
+// already defines (D12).
 func (c *Client) DepotItems(ctx context.Context, hash string, opts DepotOptions) ([]model.GalaxyDepotItem, error) {
 	manifest, err := c.ManifestV2(ctx, hash, opts.IsDependency)
 	if err != nil {
@@ -86,17 +83,15 @@ func (c *Client) DepotItems(ctx context.Context, hash string, opts DepotOptions)
 }
 
 // FilteredDepotItems expands the depot entry of a manifest into items, keeping it
-// only when the language and the architecture select it (galaxyapi.cpp:626-674).
+// only when the language and the architecture select it.
 //
 // languageRegex comes from the language table (config.Languages[].Regexp, whose
 // default entry is "en|eng|english|en[_-]US") and arch from the architecture
 // table (config.GalaxyArchs[].Code, e.g. "64"); both are chosen by the caller.
 //
-// The language test is upstream's: an entry matches when the depot lists "*" or a
-// language the regex finds inside an anchored, case-insensitive match. An empty
-// or missing "languages" list therefore selects nothing — that is the C++
-// initialisation (`bool bSelectedLanguage = false`, galaxyapi.cpp:630) and is
-// kept as written (review ruling D7).
+// The language test is: an entry matches when the depot lists "*" or a language
+// the regex finds inside an anchored, case-insensitive match. An empty or
+// missing "languages" list therefore selects nothing (D7).
 //
 // The architecture test is: "osBitness" missing or null means the entry is not
 // architecture-specific and is selected; otherwise the list must contain "*" or
@@ -104,8 +99,7 @@ func (c *Client) DepotItems(ctx context.Context, hash string, opts DepotOptions)
 func (c *Client) FilteredDepotItems(ctx context.Context, depotJSON map[string]any, languageRegex, arch string, opts DepotOptions) ([]model.GalaxyDepotItem, error) {
 	languageRE, err := regexp.Compile("(?i)^(" + languageRegex + ")$")
 	if err != nil {
-		// Compiled before anything is fetched, so a bad pattern costs no request
-		// (the S11b rule for invalid filters).
+		// Compiled before anything is fetched, so a bad pattern costs no request.
 		return nil, fmt.Errorf("galaxy: depot language regexp %q: %w", languageRegex, err)
 	}
 
@@ -170,11 +164,11 @@ func (c *Client) FilteredDepotItems(ctx context.Context, depotJSON map[string]an
 }
 
 // smallFilesContainer decodes the synthetic entry built from
-// depot.smallFilesContainer (galaxyapi.cpp:258-296), or returns nil when the
+// depot.smallFilesContainer , or returns nil when the
 // manifest carries no usable container.
 //
-// Its path is the container constant and is NOT normalised: upstream assigns it
-// after the lowercase and separator handling, which applies to depot.items only.
+// Its path is the container constant and is NOT normalised: the lowercase and
+// separator handling applies to depot.items only.
 func smallFilesContainer(depot map[string]any, opts DepotOptions) (*model.GalaxyDepotItem, error) {
 	raw, ok := depot["smallFilesContainer"]
 	if !ok || raw == nil {
@@ -201,7 +195,7 @@ func smallFilesContainer(depot map[string]any, opts DepotOptions) (*model.Galaxy
 }
 
 // depotItem decodes one entry of depot.items. A nil item means "skipped": the
-// entry has no chunks array (galaxyapi.cpp:300).
+// entry has no chunks array.
 func depotItem(raw any, opts DepotOptions) (*model.GalaxyDepotItem, error) {
 	obj, err := jsonval.Object(raw)
 	if err != nil {
@@ -219,7 +213,7 @@ func depotItem(raw any, opts DepotOptions) (*model.GalaxyDepotItem, error) {
 	if err != nil {
 		return nil, fmt.Errorf("path: %w", err)
 	}
-	// Upstream order: lowercase first, then the separator rewrite.
+	// Order matters: lowercase first, then the separator rewrite.
 	if opts.LowercasePaths && opts.Platform == config.PlatformWindows {
 		path = strings.ToLower(path)
 	}
@@ -232,8 +226,7 @@ func depotItem(raw any, opts DepotOptions) (*model.GalaxyDepotItem, error) {
 	item := newDepotItem(chunks, path, md5, opts)
 
 	// "sfcRef" present and non-null marks a file stored inside the small-files
-	// container. A null member is treated as absent: it carries no range, and
-	// upstream's zeroed placeholder for it means nothing on our side.
+	// container. A null member is treated as absent: it carries no range.
 	if raw, ok := obj["sfcRef"]; ok && raw != nil {
 		sfc, err := jsonval.Object(raw)
 		if err != nil {
@@ -250,8 +243,7 @@ func depotItem(raw any, opts DepotOptions) (*model.GalaxyDepotItem, error) {
 	return item, nil
 }
 
-// newDepotItem assembles an entry and totals its chunks, mirroring the
-// accumulation loop of galaxyapi.cpp:269-285 and 322-338.
+// newDepotItem assembles an entry and totals its chunks.
 func newDepotItem(chunks []model.GalaxyDepotItemChunk, path, md5 string, opts DepotOptions) *model.GalaxyDepotItem {
 	item := &model.GalaxyDepotItem{
 		Chunks:       chunks,
@@ -268,11 +260,10 @@ func newDepotItem(chunks []model.GalaxyDepotItemChunk, path, md5 string, opts De
 
 // depotChunks decodes an entry's "chunks" array and assigns the running byte
 // ranges. The offset of a chunk is where the previous ones ended, so it is
-// recorded before the sizes are added (galaxyapi.cpp:279-283).
+// recorded before the sizes are added.
 //
 // The second return value is false when "chunks" is missing, null or not an
-// array; both callers treat that as "skip this entry", which is the explicit
-// filter of galaxyapi.cpp:260 and 300.
+// array; both callers treat that as "skip this entry".
 func depotChunks(obj map[string]any) (chunks []model.GalaxyDepotItemChunk, isArray bool, err error) {
 	raw, ok := obj["chunks"].([]any)
 	if !ok {
@@ -309,9 +300,9 @@ func depotChunks(obj map[string]any) (chunks []model.GalaxyDepotItemChunk, isArr
 	return chunks, true, nil
 }
 
-// itemMD5 mirrors the three-way fallback of galaxyapi.cpp:287-292 and 340-345:
-// the entry's own "md5" when the member is present, else the uncompressed md5 of
-// the single chunk when there is exactly one, else "".
+// itemMD5 is the three-way fallback for an entry's hash: its own "md5" when the
+// member is present, else the md5 of the single chunk when there is exactly one,
+// else "".
 func itemMD5(obj map[string]any, chunks []model.GalaxyDepotItemChunk) (string, error) {
 	if _, ok := obj["md5"]; ok {
 		return jsonval.Str(obj["md5"])
@@ -325,7 +316,7 @@ func itemMD5(obj map[string]any, chunks []model.GalaxyDepotItemChunk) (string, e
 // objectField reads a member that has to be a JSON object: absent or null is
 // (nil, nil) — "not present" — while any other type is an error, because a
 // document that carries the section in the wrong shape is broken rather than
-// empty (review ruling D9).
+// empty (D9).
 func objectField(obj map[string]any, key string) (map[string]any, error) {
 	v, ok := obj[key]
 	if !ok || v == nil {
@@ -356,12 +347,11 @@ func arrayField(obj map[string]any, key string) ([]any, error) {
 // The values arrive as whatever encoding/json produced, so a JSON number reaches
 // this helper as a float64: it accepts non-negative whole values and checks the
 // uint64 range, and it cannot recover integer precision that the float64
-// representation already lost above 2^53 — a documented boundary
-// (dev/audit/S15b.md), not something this helper can repair.
+// representation already lost above 2^53.
 //
-// It is deliberately stricter than jsoncpp's asLargestUInt (review rulings D10
-// and D11): a string or a boolean is a protocol error for a byte count, not a
-// value to coerce. An absent or null member reads as 0, as it does upstream.
+// It is deliberately strict (D10, D11): a string or a boolean is a protocol
+// error for a byte count, not a value to coerce. An absent or null member reads
+// as 0.
 func uint64Value(v any) (uint64, error) {
 	switch t := v.(type) {
 	case nil:

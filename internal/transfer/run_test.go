@@ -269,7 +269,7 @@ func TestRunTaskFailureDoesNotStopOthers(t *testing.T) {
 	deps := RunDeps{HTTP: mustHTTP(t), URL: provider, Observer: obs}
 
 	if err := Run(context.Background(), []model.FileTask{failing, healthy}, Options{Workers: 2, Retries: 1}, deps); err != nil {
-		t.Fatalf("Run = %v, want nil: task failures are events (review D65a)", err)
+		t.Fatalf("Run = %v, want nil: task failures are events (D65a)", err)
 	}
 	assertFileContent(t, healthy.Destination, "good")
 
@@ -284,8 +284,8 @@ func TestRunTaskFailureDoesNotStopOthers(t *testing.T) {
 	}
 }
 
-// TestRun416IsNotRetried locks the one HTTP status the C++ source never
-// retries: a 416 costs exactly one request.
+// TestRun416IsNotRetried locks the one HTTP status that is never retried: a 416
+// costs exactly one request.
 func TestRun416IsNotRetried(t *testing.T) {
 	var mu sync.Mutex
 	var requests int
@@ -434,7 +434,7 @@ func TestRunWorkersClamped(t *testing.T) {
 		sum := md5.Sum(buf.Bytes())
 		md5hex := hex.EncodeToString(sum[:])
 		bodies["/c/"+md5hex] = buf.Bytes()
-		// The destination is computed once per task: a second t.TempDir() call
+		// The destination is computed once per task: a second t.TempDir call
 		// here would desync the assertion map from the actual destinations.
 		dest := filepath.Join(t.TempDir(), fmt.Sprintf("f%d.bin", i))
 		contents[dest] = content

@@ -27,7 +27,7 @@ func renderVerifyResult(t *testing.T, res core.VerifyResult) (outcome, string, s
 }
 
 // TestRenderVerifyHealthyTree locks the aggregate half of the output
-// architecture (review UI1-R2, §5): a verification of a tree that is exactly
+// architecture: a verification of a tree that is exactly
 // right is one summary line, and the routine state is a count rather than N
 // per-file lines.
 func TestRenderVerifyHealthyTree(t *testing.T) {
@@ -53,9 +53,8 @@ func TestRenderVerifyHealthyTree(t *testing.T) {
 
 // TestRenderVerifyReportsEveryAbnormalFile locks the other half: only the files
 // that need attention get a line, each with its code and its ABSOLUTE path — a
-// mismatch is a diagnostic a user has to act on with the filesystem (review
-// UI1-R2 §5) — and the summary counts every fact, so no file is silently
-// unaccounted for.
+// mismatch is a diagnostic a user has to act on with the filesystem — and the
+// summary counts every fact, so no file is silently unaccounted for.
 func TestRenderVerifyReportsEveryAbnormalFile(t *testing.T) {
 	unreadable := verifyFact(verifyRoot, "e.bin", reconcile.StatusUnset)
 	unreadable.Err = errors.New("/games/W3 GOTY/e.bin: access is denied")
@@ -84,7 +83,7 @@ func TestRenderVerifyReportsEveryAbnormalFile(t *testing.T) {
 		t.Errorf("stdout =\n%q\nwant\n%q", out, wantOut)
 	}
 	// The unreadable file is an error, so it goes to the error stream — and it
-	// is still counted, which is what keeps the total honest (review S5).
+	// is still counted, which is what keeps the total honest.
 	if want := "/games/W3 GOTY/e.bin: access is denied\n"; errOut != want {
 		t.Errorf("stderr = %q, want %q", errOut, want)
 	}
@@ -94,8 +93,8 @@ func TestRenderVerifyReportsEveryAbnormalFile(t *testing.T) {
 }
 
 // TestRenderVerifyNothingToVerify locks the empty case: a plan that expects no
-// files says so instead of printing a bare zero (review UI1-R2's zero-transfer
-// idiom), and the missing root keeps the header away.
+// files says so instead of printing a bare zero, and the missing root keeps the
+// header away.
 func TestRenderVerifyNothingToVerify(t *testing.T) {
 	got, out, errOut := renderVerifyResult(t, core.VerifyResult{})
 
@@ -138,7 +137,7 @@ func TestRenderVerifyUnclassifiedFactIsNotHealthy(t *testing.T) {
 // TestRenderVerifySample locks the exact shape a real run prints, so a change to
 // the report is a deliberate one. The header and the rows are built from the
 // same root here: a sample whose paths disagree with its header would prove
-// nothing about the report a user actually sees (review S5-R1, finding A).
+// nothing about the report a user actually sees.
 func TestRenderVerifySample(t *testing.T) {
 	const root = "/games/hoMM3"
 	res := core.VerifyResult{
@@ -161,7 +160,7 @@ func TestRenderVerifySample(t *testing.T) {
 
 // TestVerifyHelpDocumentsTheCodes locks the topic a user reads before trusting
 // the report: the four codes are defined there and the read-only promise is
-// stated (review S5, §12).
+// stated.
 func TestVerifyHelpDocumentsTheCodes(t *testing.T) {
 	code, out, _ := run(t, "", "verify", "-h")
 	if code != 0 {

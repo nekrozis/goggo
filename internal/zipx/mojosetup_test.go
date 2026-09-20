@@ -13,8 +13,7 @@ func mojoLine1(n int) string {
 
 // TestMojoSetupScriptSizeMatch locks the core contract: the offset line
 // declares N and MojoSetupScriptSize returns the total length of the first N
-// lines of data (each line plus the appended newline, matching the C++
-// getline + line+"\n" assembly).
+// lines of data, each line plus a trailing newline.
 func TestMojoSetupScriptSizeMatch(t *testing.T) {
 	line1 := mojoLine1(2)
 	line2 := "second script line"
@@ -33,8 +32,8 @@ func TestMojoSetupScriptSizeNoMatch(t *testing.T) {
 	}
 }
 
-// TestMojoSetupScriptSizeCaseInsensitive: boost compiled the pattern with
-// icase; the RE2 port keeps that via the inline (?i) flag.
+// TestMojoSetupScriptSizeCaseInsensitive: the offset pattern is matched
+// case-insensitively.
 func TestMojoSetupScriptSizeCaseInsensitive(t *testing.T) {
 	line1 := "OFFSET=`head -n 1 \"$0\""
 	line2 := "only line"
@@ -45,9 +44,9 @@ func TestMojoSetupScriptSizeCaseInsensitive(t *testing.T) {
 	}
 }
 
-// TestMojoSetupScriptSizeCountPastEOF mirrors the C++ behaviour when N
-// exceeds the available lines: getline keeps failing at EOF and every extra
-// iteration appends only the "\n" terminator.
+// TestMojoSetupScriptSizeCountPastEOF locks the behaviour when N exceeds the
+// available lines: every extra counted line contributes only the "\n"
+// terminator.
 func TestMojoSetupScriptSizeCountPastEOF(t *testing.T) {
 	line1 := mojoLine1(5)
 	line2 := "abc"
@@ -67,9 +66,8 @@ func TestMojoSetupScriptSizeCountZero(t *testing.T) {
 	}
 }
 
-// TestMojoSetupScriptSizeOverflow: std::stoi would throw out_of_range for a
-// count beyond int32 (aborting in C++); the Go port maps that to 0, matching
-// the S06 OptionValue overflow convention.
+// TestMojoSetupScriptSizeOverflow: a count beyond int32 maps to 0, the same
+// overflow convention the option-value parser uses.
 func TestMojoSetupScriptSizeOverflow(t *testing.T) {
 	data := "offset=`head -n 99999999999999999999 \"$0\"\nwhatever"
 	if got := MojoSetupScriptSize([]byte(data)); got != 0 {
@@ -111,8 +109,8 @@ func TestMojoSetupInstallerSizeNoMatch(t *testing.T) {
 	}
 }
 
-// TestMojoSetupInstallerSizeFirstMatchWins mirrors regex_search leftmost
-// semantics for the filesizes marker as well.
+// TestMojoSetupInstallerSizeFirstMatchWins locks the leftmost-match rule for the
+// filesizes marker as well.
 func TestMojoSetupInstallerSizeFirstMatchWins(t *testing.T) {
 	data := "filesizes=\"111\" trailing filesizes=\"222\""
 	size, ok := MojoSetupInstallerSize([]byte(data))
@@ -121,8 +119,7 @@ func TestMojoSetupInstallerSizeFirstMatchWins(t *testing.T) {
 	}
 }
 
-// TestMojoSetupInstallerSizeOverflow: values beyond int64 abort in C++
-// (std::stoll out_of_range); the port reports ok=false.
+// TestMojoSetupInstallerSizeOverflow: a value beyond int64 reports ok=false.
 func TestMojoSetupInstallerSizeOverflow(t *testing.T) {
 	data := "filesizes=\"99999999999999999999\""
 	size, ok := MojoSetupInstallerSize([]byte(data))

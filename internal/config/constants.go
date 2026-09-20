@@ -1,7 +1,5 @@
 package config
 
-// Ported from include/globalconstants.h:15-31 (namespace GlobalConstants).
-
 const (
 	// GameDetailsCacheVersion is bumped whenever the cached game-details XML
 	// format changes, invalidating previously cached files.
@@ -15,13 +13,15 @@ const (
 // ProtocolPrefix is the URI scheme used for gogdownloader:// deep links.
 const ProtocolPrefix = "gogdownloader://"
 
-// Unit formats accepted by the --unit-format option.
+// UnitFormatIEC and UnitFormatSI are the unit formats accepted by the
+// --unit-format option.
 const (
 	UnitFormatIEC uint32 = 1
 	UnitFormatSI  uint32 = 2
 )
 
-// Unit divisors for IEC (binary) and SI (decimal) formatting.
+// UnitDivisorKIEC and the following constants are the unit divisors for IEC
+// (binary) and SI (decimal) formatting.
 const (
 	UnitDivisorKIEC = 1024
 	UnitDivisorMIEC = 1048576
@@ -29,7 +29,8 @@ const (
 	UnitDivisorMSI  = 1000000
 )
 
-// Unit suffixes matching the divisor groups above.
+// UnitStringKIEC and the following constants are the unit suffixes matching the
+// divisor groups above.
 const (
 	UnitStringKIEC = "KiB"
 	UnitStringMIEC = "MiB"
@@ -37,16 +38,13 @@ const (
 	UnitStringMSI  = "MB"
 )
 
-// Identity and version. This port keeps three concepts apart:
+// ProgramName is this implementation's identity: the binary name, the CLI name
+// and the product token of the User-Agent.
 //
-//   - ProgramName is the identity of this implementation (binary, CLI name and
-//     the product token of the User-Agent).
-//   - Version is this implementation's own version; it advances independently
-//     of the upstream release the port follows.
-//   - UpstreamCompatibilityVersion is the LGOGDownloader release whose
-//     behaviour is being ported (CMakeLists.txt:74 PROJECT_VERSION). It is a
-//     compatibility baseline, not this program's identity, so the CLI never
-//     presents it as our version.
+// Version is this implementation's own version; it advances independently of the
+// compatibility baseline below. UpstreamCompatibilityVersion is the LGOGDownloader
+// release whose behaviour this program follows — a compatibility baseline, not
+// this program's identity, so the CLI never presents it as our version.
 const (
 	ProgramName                  = "goggo"
 	Version                      = "0.1.0"

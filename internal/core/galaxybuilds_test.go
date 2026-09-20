@@ -118,8 +118,8 @@ func (f *fixtureServer) seen(want string) int {
 }
 
 // galaxyTestConfig is the configuration the commands are driven with: the
-// defaults plus the two Galaxy values, which the CLI normally supplies (S17
-// keeps those defaults in internal/cli).
+// defaults plus the two Galaxy values, which the CLI normally supplies (the
+// defaults live in internal/cli).
 func galaxyTestConfig(t *testing.T, sortOrder string) config.Config {
 	t.Helper()
 	dir := t.TempDir()
@@ -131,7 +131,7 @@ func galaxyTestConfig(t *testing.T, sortOrder string) config.Config {
 
 func TestShowBuildsListsBuildsWhenNoneSelected(t *testing.T) {
 	// The default order ("score") sorts the list before it is printed, and the
-	// branch build is pushed to the end (downloader.cpp:6860-6885).
+	// branch build is pushed to the end.
 	cases := []struct {
 		name      string
 		sortOrder string
@@ -233,8 +233,9 @@ func TestShowBuildsFetchesManifest(t *testing.T) {
 	}
 }
 
-// TestShowBuildsUnsupportedGeneration covers the C++ switch default: only
-// generation 1 and 2 are fetched, anything else prints the message and stops.
+// TestShowBuildsUnsupportedGeneration covers the generation switch's default:
+// only generation 1 and 2 are fetched, anything else prints the message and
+// stops.
 func TestShowBuildsUnsupportedGeneration(t *testing.T) {
 	srv := newFixtureServer(t)
 	srv.setBuilds(`{"items":[` +
@@ -257,9 +258,8 @@ func TestShowBuildsUnsupportedGeneration(t *testing.T) {
 	}
 }
 
-// TestShowBuildsIndexOutOfRange covers an index past the end of the list: the
-// C++ source reads a null entry, whose generation is 0, so the same message
-// comes out.
+// TestShowBuildsIndexOutOfRange covers an index past the end of the list: an
+// absent entry reads as generation 0, so the same message comes out.
 func TestShowBuildsIndexOutOfRange(t *testing.T) {
 	srv := newFixtureServer(t)
 	d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "none"), newFakeConsole())
@@ -275,7 +275,7 @@ func TestShowBuildsIndexOutOfRange(t *testing.T) {
 
 // TestShowBuildsLinuxWithoutBuilds covers the fallback branch: the two messages
 // are printed and the run then reports that the installer fallback is not
-// ported, instead of exiting as though it had run (review ruling D13).
+// implemented, instead of exiting as though it had run (D13).
 func TestShowBuildsLinuxWithoutBuilds(t *testing.T) {
 	srv := newFixtureServer(t)
 	srv.setBuilds(`{}`)
@@ -297,8 +297,8 @@ func TestShowBuildsLinuxWithoutBuilds(t *testing.T) {
 }
 
 func TestSortProductBuildsLeavesUnknownOrdersAlone(t *testing.T) {
-	// The C++ source only writes the list back inside its two named branches,
-	// so an unrecognised order is not a reordering.
+	// Only the two named orders reorder the list, so an unrecognised order is
+	// not a reordering.
 	for _, order := range []string{"", "none", "whatever"} {
 		srv := newFixtureServer(t)
 		d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, order), newFakeConsole())
@@ -350,7 +350,7 @@ func TestBuildIndexFor(t *testing.T) {
 		{"-1", -1},
 		{"nonsense", -1},
 		{"", -1},
-		{"2x", -1}, // std::stoi would read 2; this port requires a whole integer
+		{"2x", -1}, // a partial integer is not an index
 	}
 	for _, c := range cases {
 		got, err := buildIndexFor(items, c.buildID)
@@ -420,7 +420,7 @@ func TestListCDNsLinuxWithoutBuilds(t *testing.T) {
 		t.Fatalf("ListCDNs: %v", err)
 	}
 	// One line here, unlike show-builds, which continues into the installer
-	// fallback (downloader.cpp:4363 vs 4859-4861).
+	// fallback.
 	if res.Notice.Text != msgNoLinuxSupport {
 		t.Errorf("notice = %q, want %q", res.Notice.Text, msgNoLinuxSupport)
 	}
@@ -503,8 +503,7 @@ func TestSelectProductIDInteractive(t *testing.T) {
 }
 
 // TestSelectProductIDUnanswerable covers the two ways a selection can fail to
-// happen: no console to ask (the C++ isatty check) and an index the console
-// should never return.
+// happen: no console to ask, and an index the console should never return.
 func TestSelectProductIDUnanswerable(t *testing.T) {
 	cases := []struct {
 		name string

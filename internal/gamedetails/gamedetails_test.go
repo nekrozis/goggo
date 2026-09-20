@@ -145,7 +145,7 @@ func TestMakeFilepathDLC(t *testing.T) {
 // only entry at the best score, so only it survives.
 //
 // Renamed from TestFilterWithPrioritiesKeepsTies, which claimed a tie case it
-// never built (S-GD1 review Δ-GD1-T1); the tie itself is covered by
+// never built; the tie itself is covered by
 // TestFilterWithPrioritiesKeepsEveryTie below.
 func TestFilterWithPrioritiesKeepsTheBestScore(t *testing.T) {
 	frLinux := GameFile{Language: config.LangFR, Platform: config.PlatformLinux, Type: config.GFBaseInstaller}
@@ -168,10 +168,9 @@ func TestFilterWithPrioritiesKeepsTheBestScore(t *testing.T) {
 	}
 }
 
-// TestFilterWithPrioritiesKeepsEveryTie is the tie case the name above used to
-// claim (S-GD1 review Δ-GD1-T1): two entries sharing the best score must both
-// survive while a worse one goes. The upstream comparison is "score <=
-// bestScore", so every entry at the best score is kept, not just the first.
+// TestFilterWithPrioritiesKeepsEveryTie locks the tie case: two entries sharing
+// the best score must both survive while a worse one goes, so every entry at the
+// best score is kept, not just the first.
 func TestFilterWithPrioritiesKeepsEveryTie(t *testing.T) {
 	frWindows := GameFile{Language: config.LangFR, Platform: config.PlatformWindows, Type: config.GFBaseInstaller}
 	enLinux := GameFile{Language: config.LangEN, Platform: config.PlatformLinux, Type: config.GFBaseInstaller}
@@ -198,8 +197,8 @@ func TestFilterWithPrioritiesKeepsEveryTie(t *testing.T) {
 	}
 }
 
-// TestFilterWithPrioritiesExtrasUntouched locks the upstream boundary: the
-// extras vector never participates in the priority filter.
+// TestFilterWithPrioritiesExtrasUntouched locks the boundary: the extras vector
+// never participates in the priority filter.
 func TestFilterWithPrioritiesExtrasUntouched(t *testing.T) {
 	extra := GameFile{Language: config.LangEN, Platform: config.PlatformWindows, Type: config.GFBaseExtra}
 	gd := GameDetails{Extras: []GameFile{extra, extra}}
@@ -236,7 +235,7 @@ func TestFilterWithType(t *testing.T) {
 
 // TestFilterWithTypeInPlace locks the exported in-place filter: it removes the
 // excluded entries from the four vectors of the product AND from those of every
-// DLC, leaving the rest of the tree alone (gamedetails.cpp:268-281). It is not
+// DLC, leaving the rest of the tree alone. It is not
 // the collecting filter above — the tree changes.
 func TestFilterWithTypeInPlace(t *testing.T) {
 	installer := GameFile{Type: config.GFBaseInstaller}
@@ -288,7 +287,7 @@ func TestFilterWithTypeInPlace(t *testing.T) {
 		t.Errorf("the subtree's own fields must survive: %+v", gd.DLCs[0])
 	}
 
-	// An empty mask is the extreme case: upstream erases everything.
+	// An empty mask is the extreme case: it erases everything.
 	gd.FilterWithType(0)
 	if len(gd.Installers)+len(gd.Extras)+len(gd.Patches)+len(gd.LanguagePacks) != 0 ||
 		len(gd.DLCs[0].Installers)+len(gd.DLCs[0].Extras)+len(gd.DLCs[0].Patches)+len(gd.DLCs[0].LanguagePacks) != 0 {
@@ -342,7 +341,7 @@ func TestMakeFilepathsCachesAndDLCNames(t *testing.T) {
 	}
 }
 
-// --- GD4 §3.1: the recursive file vector is the single source of truth ---
+// --- the recursive file vector is the single source of truth ---
 
 // dlcFile is a DLC-shaped file with the fields the conversion fills.
 func dlcFile(base, dlc, path string, typ uint32) GameFile {
@@ -358,10 +357,8 @@ func dlcFile(base, dlc, path string, typ uint32) GameFile {
 }
 
 // TestGetGameFileVectorRecursiveDLC locks the traversal contract: base vectors
-// in goggo order (installers, extras, patches, language packs — the upstream
-// order swaps extras and patches; GD4 ruling keeps the current order, plan
-// §9), then each DLC recursively, DLCs in declaration order, depth-first,
-// stable, no sorting.
+// in this order (installers, extras, patches, language packs), then each DLC
+// recursively, DLCs in declaration order, depth-first, stable, no sorting.
 func TestGetGameFileVectorRecursiveDLC(t *testing.T) {
 	nested := GameDetails{
 		Installers: []GameFile{dlcFile("dlc_one", "dlc_one_one", "n.exe", config.GFDLCInstaller)},
@@ -395,7 +392,7 @@ func TestGetGameFileVectorRecursiveDLC(t *testing.T) {
 	}
 
 	// The filtered view must be exactly the mask-filtered complete vector —
-	// same files, same relative order (gamedetails.cpp:258-268).
+	// same files, same relative order.
 	filtered := gd.GetGameFileVectorFiltered(config.GFInstaller)
 	if len(filtered) != 3 {
 		t.Fatalf("filtered installers = %d, want the base plus two DLC installers", len(filtered))
@@ -415,7 +412,7 @@ func TestGetGameFileVectorRecursiveDLC(t *testing.T) {
 
 // TestMakeFilepathsRecursiveDestinations locks that every file the recursive
 // vector can reach also gets a destination, and that the base and first-level
-// DLC paths match the pre-GD4 rendering exactly.
+// DLC paths keep their established rendering.
 func TestMakeFilepathsRecursiveDestinations(t *testing.T) {
 	conf := testDirConf()
 	nested := GameDetails{
@@ -442,7 +439,7 @@ func TestMakeFilepathsRecursiveDestinations(t *testing.T) {
 	gd.MakeFilepaths(conf)
 
 	if got, want := gd.Installers[0].GetFilepath(), "/install/base/windows/i1.exe"; got != want {
-		t.Errorf("base installer = %q, want %q (unchanged by GD4)", got, want)
+		t.Errorf("base installer = %q, want %q (unchanged)", got, want)
 	}
 	// A first-level DLC extra: dlc subdir + extras subdir under the base
 	// game's directory (the %gamename% placeholder renders the basegame).

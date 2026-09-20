@@ -1,8 +1,8 @@
 package gamedetails
 
-// GameFile mirrors one downloadable file entry (gamefile.h). The fields keep
-// their upstream API names on purpose: the JSON mapping stays auditable, and
-// the WebsiteTask / download-task conversions happen at the consumer layer.
+// GameFile is one downloadable file entry. The fields keep the API's names so
+// the JSON mapping stays auditable; the WebsiteTask and download-task
+// conversions happen at the consumer layer.
 type GameFile struct {
 	Updated               int
 	Gamename              string
@@ -24,12 +24,11 @@ type GameFile struct {
 	filepath string
 }
 
-// SetFilepath stores the derived local path (gamefile.cpp: setFilepath).
+// SetFilepath stores the derived local path.
 func (gf *GameFile) SetFilepath(path string) { gf.filepath = path }
 
-// GetAsJson ports gameFile::getAsJson (gamefile.cpp): the fixed field table
-// of the details-json output contract. version appears only when non-empty
-// (the C++ conditional member); every other key is always present.
+// GetAsJson returns the fixed field table of the details-json output contract.
+// version appears only when non-empty; every other key is always present.
 func (gf GameFile) GetAsJson() map[string]any {
 	out := map[string]any{
 		"updated":                  gf.Updated,
@@ -53,5 +52,5 @@ func (gf GameFile) GetAsJson() map[string]any {
 	return out
 }
 
-// GetFilepath returns the derived local path (gamefile.cpp: getFilepath).
+// GetFilepath returns the derived local path.
 func (gf *GameFile) GetFilepath() string { return gf.filepath }

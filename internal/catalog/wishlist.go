@@ -18,11 +18,8 @@ type WishlistFetcher interface {
 	WishlistPage(ctx context.Context, page int) (webapi.ProductPage, error)
 }
 
-// WishlistOptions mirrors the two configuration values Website::getWishlistItems
-// reads (website.cpp:733): the listing has no tag, newness or hidden-product
-// knobs.
-//
-// Fields are ordered to minimise padding: the uint32 first, then the bool.
+// WishlistOptions carries the two configuration values a wishlist listing
+// reads: the listing has no tag, newness or hidden-product knobs.
 type WishlistOptions struct {
 	// InstallerPlatform is the platform mask a product must support when
 	// PlatformDetection is on.
@@ -33,7 +30,7 @@ type WishlistOptions struct {
 	PlatformDetection bool
 }
 
-// Wishlist runs the wishlist listing (website.cpp:696-797).
+// Wishlist runs the wishlist listing.
 //
 // Pagination ends when the response reports `page >= totalPages`; unlike the
 // product listing there is no hidden-products pass, no sorting and no DLC
@@ -65,7 +62,7 @@ func Wishlist(ctx context.Context, wx WishlistFetcher, opts WishlistOptions) ([]
 }
 
 // mapWishlistItem maps one raw product. skip reports that the platform filter
-// excluded the entry (website.cpp:732-734).
+// excluded the entry.
 func mapWishlistItem(p map[string]any, opts WishlistOptions) (model.WishlistItem, bool, error) {
 	var item model.WishlistItem
 
@@ -93,7 +90,7 @@ func mapWishlistItem(p map[string]any, opts WishlistOptions) (model.WishlistItem
 	if err != nil {
 		return item, false, fmt.Errorf("catalog: isDiscounted: %w", err)
 	}
-	// Tag order follows the push order of website.cpp:737-742.
+	// The tags appear in this fixed order.
 	if comingSoon {
 		item.Tags = append(item.Tags, "Coming soon")
 	}
@@ -108,8 +105,8 @@ func mapWishlistItem(p map[string]any, opts WishlistOptions) (model.WishlistItem
 		return item, false, err
 	}
 
-	// A price member that is absent or not an object reads as null in jsoncpp,
-	// so every field below degrades to its empty form instead of failing.
+	// A price member that is absent or not an object leaves every field below
+	// at its empty form instead of failing.
 	price := asObject(p["price"])
 	if item.Currency, err = stringField(price, "symbol", "currency"); err != nil {
 		return item, false, err
@@ -144,7 +141,7 @@ func mapWishlistItem(p map[string]any, opts WishlistOptions) (model.WishlistItem
 }
 
 // wishlistPlatformBits derives the worksOn mask without the "no platform means
-// all platforms" fallback the product listing applies (website.cpp:725-730).
+// all platforms" fallback the product listing applies.
 func wishlistPlatformBits(worksOn any) (uint32, error) {
 	obj, ok := worksOn.(map[string]any)
 	if !ok {
@@ -153,9 +150,9 @@ func wishlistPlatformBits(worksOn any) (uint32, error) {
 	return platformBits(obj)
 }
 
-// wishlistReleaseDate mirrors website.cpp:744-769: the date is read only for a
-// coming-soon product, an empty value is skipped, an integer-shaped value is
-// taken as-is and anything else goes through std::stoi on its string form.
+// wishlistReleaseDate reads the release date of a coming-soon product: an empty
+// value is skipped, an integer-shaped value is taken as-is, and anything else is
+// parsed from its string form.
 func wishlistReleaseDate(p map[string]any, comingSoon bool) (int64, error) {
 	if !comingSoon {
 		return 0, nil
@@ -169,8 +166,7 @@ func wishlistReleaseDate(p map[string]any, comingSoon bool) (int64, error) {
 		if n, err := jsonval.Int(v); err == nil {
 			return n, nil
 		}
-		// A non-integral number takes the string path, exactly as isInt()
-		// being false does in jsoncpp.
+		// A non-integral number takes the string path.
 	}
 	s, err := jsonval.Str(v)
 	if err != nil {
@@ -179,9 +175,9 @@ func wishlistReleaseDate(p map[string]any, comingSoon bool) (int64, error) {
 	return int64(atoiPrefix(s)), nil
 }
 
-// isEmptyJSON mirrors jsoncpp's Value::empty(): true for null, an empty array
-// and an empty object. An empty string, 0 and false are NOT empty, so they
-// still reach the parsing path (which yields 0 for them).
+// isEmptyJSON reports whether v is null, an empty array or an empty object. An
+// empty string, 0 and false are not empty, so they still reach the parsing path
+// (which yields 0 for them).
 func isEmptyJSON(v any) bool {
 	switch t := v.(type) {
 	case nil:
@@ -195,14 +191,11 @@ func isEmptyJSON(v any) bool {
 	}
 }
 
-// wishlistURL mirrors website.cpp:777-784: a URL already starting with "http"
-// is kept as-is, one starting with "/" gets the host prefix, and anything else
-// is appended to host+"/".
+// wishlistURL resolves a product URL: one already starting with "http" is kept
+// as-is, one starting with "/" gets the host prefix, and anything else is
+// appended to host+"/".
 //
-// An empty URL reaches the last branch. The C++ source calls std::string::front()
-// there, which is undefined behaviour on an empty string; the observed result on
-// libstdc++ is '\0', which is not '/', so the else branch runs. This records that
-// observed outcome — it does not claim the standard defines it.
+// An empty URL reaches the last branch.
 func wishlistURL(v any) (string, error) {
 	raw, err := jsonval.Str(v)
 	if err != nil {
@@ -219,8 +212,7 @@ func wishlistURL(v any) (string, error) {
 }
 
 // asObject returns v as a map, or nil when it is absent or not an object.
-// Indexing a nil map yields the zero value, which is how the port represents
-// jsoncpp returning null for a member of a non-object value.
+// Indexing a nil map yields the zero value.
 func asObject(v any) map[string]any {
 	if obj, ok := v.(map[string]any); ok {
 		return obj
@@ -246,7 +238,7 @@ func boolField(obj map[string]any, key string) (bool, error) {
 	return b, nil
 }
 
-// amountField renders a price member with the `isDouble()` rule.
+// amountField renders a price member with the `isDouble` rule.
 func amountField(obj map[string]any, key string) (string, error) {
 	s, err := amountString(obj[key])
 	if err != nil {
@@ -255,7 +247,7 @@ func amountField(obj map[string]any, key string) (string, error) {
 	return s, nil
 }
 
-// percentField renders the discount percentage with the `isInt()` rule.
+// percentField renders the discount percentage with the `isInt` rule.
 func percentField(obj map[string]any, key string) (string, error) {
 	s, err := intShapedString(obj[key])
 	if err != nil {
@@ -264,18 +256,16 @@ func percentField(obj map[string]any, key string) (string, error) {
 	return s + "%", nil
 }
 
-// amountString mirrors `isDouble() ? std::to_string(asDouble()) : asString()`
-// (website.cpp:772-775). jsoncpp's isDouble() is true for integer values as
-// well, and jsonval.IsNumber is the exact Go predicate for that set, so an
-// integer amount becomes "0.000000" rather than "0".
+// amountString renders a price amount: a number becomes its fixed-point form,
+// anything else is stringified. Integer values are numbers too, so an integer
+// amount becomes "0.000000" rather than "0".
 func amountString(v any) (string, error) {
 	if jsonval.IsNumber(v) {
 		f, err := jsonval.Num(v)
 		if err != nil {
 			return "", err
 		}
-		// std::to_string(double) prints a fixed six decimals, never an
-		// exponent; FormatFloat with 'f' and precision 6 matches it.
+		// Six fixed decimals, never an exponent.
 		return strconv.FormatFloat(f, 'f', 6, 64), nil
 	}
 	return jsonval.Str(v)

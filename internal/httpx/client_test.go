@@ -287,7 +287,7 @@ func TestGetInsecureSkipVerify(t *testing.T) {
 	defer srv.Close()
 
 	cfg := testConfig()
-	cfg.InsecureSkipVerify = true // mirrors CURLOPT_SSL_VERIFYPEER off
+	cfg.InsecureSkipVerify = true // certificate verification off
 	c, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -368,10 +368,10 @@ func (t *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return http.DefaultTransport.RoundTrip(clone)
 }
 
-// TestTransportOverrideKeepsTheCookieJar locks review ruling D28-3: replacing
-// the network exit must leave the client, its jar and the cookie file exactly
-// what this package builds. A caller-provided HTTPClient cannot do that — it
-// decides the jar, which is why it is refused together with a CookieFile.
+// TestTransportOverrideKeepsTheCookieJar locks D28-3: replacing the network exit
+// must leave the client, its jar and the cookie file exactly what this package
+// builds. A caller-provided HTTPClient cannot do that — it decides the jar, which
+// is why it is refused together with a CookieFile.
 func TestTransportOverrideKeepsTheCookieJar(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

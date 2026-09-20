@@ -165,7 +165,7 @@ func TestInstallEndToEnd(t *testing.T) {
 
 	// The assembled files carry the decompressed content of the chunks the
 	// plan selected — the DLC's bytes over the base game's for data.bin — and
-	// the small-files container unpacks its member and is gone (review D73).
+	// the small-files container unpacks its member and is gone (D73).
 	assertFileContent(t, installPath+"/game/data.bin", dlc.content)
 	assertFileContent(t, installPath+"/game/dep/depfile.bin", dep.content)
 	// The fixture's sfcRef advertises 100 bytes but the container holds fewer:
@@ -183,8 +183,8 @@ func TestInstallEndToEnd(t *testing.T) {
 		"Extracting small files container " + installPath + "/galaxy_smallfilescontainer_" + planProductID,
 		"Deleting small files container " + installPath + "/galaxy_smallfilescontainer_" + planProductID,
 		"Checking for orphaned files",
-		// The install metadata file is an orphan as written: upstream has no
-		// special case for it either. Deletion is off, so it survives.
+		// The install metadata file is an orphan as written; there is no
+		// special case for it. Deletion is off, so it survives.
 		"\t1 orphaned files",
 	} {
 		if !bytes.Contains([]byte(out), []byte(want)) {
@@ -199,7 +199,7 @@ func TestInstallEndToEnd(t *testing.T) {
 // transfer run, which publishes into it while a chunk is still arriving and
 // clears the slot once the task is done. The fixture holds the second half of
 // the only chunk until the test has looked, so the partial reading is a
-// controlled moment rather than a race (review S-ETA2).
+// controlled moment rather than a race.
 func TestInstallPublishesProgressThroughTheRun(t *testing.T) {
 	f := newPlanFixture(t)
 	payload := planChunkPayload(t, "progress through the install run")
@@ -309,7 +309,7 @@ func TestInstallRequestCarriesContext(t *testing.T) {
 }
 
 // TestRevalidateSkipped locks the install-level gate over the plan's skipped
-// set (review RES1 v2 §2, RES1-R1): a destination the plan observed as
+// set: a destination the plan observed as
 // complete is only a planning-time observation. The helper must pass while
 // the file still matches, fail with the destination and the rerun guidance
 // once the file changed after that observation, and surface an observation
@@ -334,7 +334,8 @@ func TestRevalidateSkipped(t *testing.T) {
 		t.Fatalf("revalidateSkipped = %v, want nil while the file still matches", err)
 	}
 
-	// The race RES1-R1 closes: the file changes after the plan observed it.
+	// The race the revalidation closes: the file changes after the plan
+	// observed it.
 	if err := os.WriteFile(path, []byte("externally modified"), 0o644); err != nil {
 		t.Fatal(err)
 	}

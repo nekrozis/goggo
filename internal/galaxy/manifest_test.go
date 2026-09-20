@@ -23,9 +23,8 @@ func requestRecordingServer(t *testing.T, body string) (*httptest.Server, *strin
 	return srv, &got
 }
 
-// TestManifestV1UsesGivenURLVerbatim locks galaxyapi.cpp:204-207: the URL comes
-// from the builds document (items[].link) and is fetched unchanged, ".json"
-// suffix included. It is the only generation-1 overload that upstream calls.
+// TestManifestV1UsesGivenURLVerbatim: the URL comes from the builds document
+// (items[].link) and is fetched unchanged, ".json" suffix included.
 func TestManifestV1UsesGivenURLVerbatim(t *testing.T) {
 	const body = `{"depot":{"items":[]}}`
 	srv, got := requestRecordingServer(t, body)
@@ -44,7 +43,7 @@ func TestManifestV1UsesGivenURLVerbatim(t *testing.T) {
 	}
 }
 
-// TestManifestV2URL locks the URL construction of galaxyapi.cpp:209-221,
+// TestManifestV2URL locks the URL construction of
 // including the two things that differ from generation 1: no ".json" suffix and
 // no query string.
 func TestManifestV2URL(t *testing.T) {
@@ -98,9 +97,8 @@ func TestManifestV2URL(t *testing.T) {
 	}
 }
 
-// TestHashToGalaxyPath locks the path layout of galaxyapi.cpp:244-251 and the
-// boundary Go has to define for it: the C++ version slices unconditionally, so a
-// hash shorter than four characters is undefined there. It comes back unchanged
+// TestHashToGalaxyPath locks the path layout and the short-hash boundary: a hash
+// shorter than four characters cannot be split, so it comes back unchanged
 // instead of panicking, and no error channel is added for it.
 func TestHashToGalaxyPath(t *testing.T) {
 	const sha1 = "abcdef0123456789abcdef0123456789abcdef01"
@@ -127,7 +125,7 @@ func TestHashToGalaxyPath(t *testing.T) {
 }
 
 // TestManifestBearerSanity: manifests go out on the same authenticated
-// primitive as builds. The three-state bearer rule itself is covered by S13;
+// primitive as builds. The three-state bearer rule itself is covered elsewhere;
 // this only checks the manifest path is not accidentally unauthenticated.
 func TestManifestBearerSanity(t *testing.T) {
 	var auth string
@@ -146,8 +144,8 @@ func TestManifestBearerSanity(t *testing.T) {
 	}
 }
 
-// TestManifestNonObjectIsErrNotJSON: the shape contract is the one S13
-// established — a manifest that is not a JSON object is ErrNotJSON.
+// TestManifestNonObjectIsErrNotJSON: a manifest that is not a JSON object is
+// ErrNotJSON.
 func TestManifestNonObjectIsErrNotJSON(t *testing.T) {
 	srv, _ := requestRecordingServer(t, `[{"depot":{}}]`)
 

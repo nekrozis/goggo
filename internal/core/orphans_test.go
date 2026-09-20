@@ -15,9 +15,9 @@ import (
 // orphansFixture lays out an install root: three files the installation owns
 // (they are the plan's expected set), and one true orphan.
 //
-// The ledger is PlanResult.Expected, the same set a verification reads (review
-// S6), so the fixture states the installed paths directly instead of assembling
-// them from tasks, containers and skipped destinations.
+// The ledger is PlanResult.Expected, the same set a verification reads, so the
+// fixture states the installed paths directly instead of assembling them from
+// tasks, containers and skipped destinations.
 type orphansFixture struct {
 	root string
 	res  PlanResult
@@ -141,8 +141,8 @@ func TestCheckOrphanedFilesIgnorelistReadError(t *testing.T) {
 	}
 }
 
-// TestCheckOrphanedFilesExpectedLedger locks where the ledger comes from (review
-// S5/S6): the walk keys on the plan's expected set and on nothing else. A file
+// TestCheckOrphanedFilesExpectedLedger locks where the ledger comes from: the
+// walk keys on the plan's expected set and on nothing else. A file
 // the installation owns but which appears in no task, no container and no
 // skipped list is neither reported nor deleted — the ledger this step replaced
 // would have rebuilt the set from exactly those three sources and deleted it.
@@ -173,8 +173,8 @@ func TestCheckOrphanedFilesExpectedLedger(t *testing.T) {
 
 // TestCheckOrphansReportsTheUnaccountedFiles walks a real installation built from
 // a real plan: the files the manifest expects are silent, and everything else is
-// an orphan — a leftover, the install metadata file (no special case: upstream has
-// none), a small-files container that outlived its extraction (the one deliberate
+// an orphan — a leftover, the install metadata file (no special case), a
+// small-files container that outlived its extraction (the one deliberate
 // change of this step) — while a directory is never one.
 func TestCheckOrphansReportsTheUnaccountedFiles(t *testing.T) {
 	f := newVerifyFixture(t)
@@ -217,7 +217,7 @@ func TestCheckOrphansReportsTheUnaccountedFiles(t *testing.T) {
 
 // TestCheckOrphansCarriesTheWalkDiagnostics locks the filter files' notices: they
 // come back as data with the error flag set, so the front end decides the stream
-// — core prints nothing on this path (review S6).
+// — core prints nothing on this path.
 func TestCheckOrphansCarriesTheWalkDiagnostics(t *testing.T) {
 	f := newOrphansFixture(t)
 	cfg := planTestConfig(t)
@@ -245,7 +245,7 @@ func TestCheckOrphansCarriesTheWalkDiagnostics(t *testing.T) {
 }
 
 // TestCheckOrphansIsReadOnly locks the read-only promise of `orphans check`
-// (review CLI1 §4, T11): the walk changes neither the content nor the
+// : the walk changes neither the content nor the
 // modification time of anything it finds, orphans included.
 func TestCheckOrphansIsReadOnly(t *testing.T) {
 	f := newVerifyFixture(t)
@@ -272,7 +272,7 @@ func TestCheckOrphansIsReadOnly(t *testing.T) {
 	}
 }
 
-// TestRemoveOrphansDeletesExactlyTheList locks the removal contract (review S6):
+// TestRemoveOrphansDeletesExactlyTheList locks the removal contract:
 // core deletes the paths it was handed, in order, and nothing else — a file that
 // exists but is not on the list survives, and one unremovable path does not stop
 // the batch.
@@ -287,7 +287,7 @@ func TestRemoveOrphansDeletesExactlyTheList(t *testing.T) {
 		}
 	}
 	// A NUL byte makes one path impossible to remove on every platform, so the
-	// failure is the code's and not the environment's (review S6).
+	// failure is the code's and not the environment's.
 	unremovable := "x\x00y"
 
 	d := newOfflineDownloader(t, noopServer(t), planTestConfig(t), newFakeConsole())
@@ -314,8 +314,7 @@ func TestRemoveOrphansDeletesExactlyTheList(t *testing.T) {
 	assertFileContent(t, unlisted, "x")
 
 	// A cancelled run removes nothing: the caller interrupted before the first
-	// deletion, and a destructive batch must not start on its way out (review
-	// S6, D33).
+	// deletion, and a destructive batch must not start on its way out (D33).
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	attempts, err = d.RemoveOrphans(ctx, OrphansResult{InstallPath: dir, Files: []string{unlisted}})
@@ -328,7 +327,8 @@ func TestRemoveOrphansDeletesExactlyTheList(t *testing.T) {
 	assertFileContent(t, unlisted, "x")
 }
 
-// destructive delete names its objects. The header aggregates the scale, each
+// TestCheckOrphanedFilesDeleteListsObjects locks that a destructive delete names
+// its objects. The header aggregates the scale, each
 // removed file gets one indented line relative to the install root, and a
 // zero-orphan run prints no header at all (the count line above already said
 // so). A failed delete stays its own stderr diagnostic.

@@ -19,7 +19,7 @@ func md5hex(data []byte) string {
 
 // TestClassifyExistingFileStates walks the four facts over a real file: the
 // size is compared before the content, a path in another shape is "not
-// downloaded", and a zero-size item needs no special case (review S5).
+// downloaded", and a zero-size item needs no special case.
 func TestClassifyExistingFileStates(t *testing.T) {
 	content := []byte("the expected bytes")
 	item := model.GalaxyDepotItem{Path: "game/file.bin", TotalSize: uint64(len(content)), MD5: md5hex(content)}
@@ -74,7 +74,7 @@ func TestClassifyExistingFileStates(t *testing.T) {
 	}
 
 	// A path that exists in another shape is not the expected regular file;
-	// upstream's is_regular_file test folds it into ND (review S5).
+	// it folds into ND.
 	remove(t)
 	if err := os.Mkdir(path, 0o755); err != nil {
 		t.Fatal(err)
@@ -132,8 +132,8 @@ func TestClassifyExistingFileObservationFailure(t *testing.T) {
 	}
 }
 
-// TestFileStatusCodes locks the four codes a report prints (the upstream
-// vocabulary) and the fact that an unset status does not print as OK.
+// TestFileStatusCodes locks the four codes the status report prints and the
+// fact that an unset status does not print as OK.
 func TestFileStatusCodes(t *testing.T) {
 	want := map[FileStatus]string{
 		StatusOK:    "OK",
@@ -149,9 +149,9 @@ func TestFileStatusCodes(t *testing.T) {
 	}
 }
 
-// TestIsCompleteZeroSizeItem locks the three-state zero-size rule (review
-// RES1 v3 §4): missing ⇒ false, empty ⇒ true, non-empty ⇒ false. A plan must
-// never mark an absent empty file as skipped.
+// TestIsCompleteZeroSizeItem locks the three-state zero-size rule: missing ⇒
+// false, empty ⇒ true, non-empty ⇒ false. A plan must never mark an absent empty
+// file as skipped.
 func TestIsCompleteZeroSizeItem(t *testing.T) {
 	item := model.GalaxyDepotItem{Path: "game/empty.bin", TotalSize: 0, MD5: "d41d8cd98f00b204e9800998ecf8427e"}
 	dir := t.TempDir()

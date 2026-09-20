@@ -8,8 +8,6 @@ package model
 // out to. A transfer run never re-derives paths: it reads Item.Path for the
 // relative name and writes to Destination.
 //
-// Field order: Item (the larger struct) first, then the string.
-//
 // Item is copied by value, which shallow-copies its Chunks slice: the plan and
 // this task share one backing array. That is fine for a plan that is built once
 // and then treated as read-only.

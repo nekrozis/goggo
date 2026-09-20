@@ -56,11 +56,11 @@ func TestNewRejectsNilArguments(t *testing.T) {
 	}
 }
 
-// TestAuthorizationThreeStates locks the bearer rule of galaxyapi.cpp:98-105:
-// an EXPIRED store contributes no header at all, and neither does an unexpired
-// but EMPTY token — the request then goes out unauthenticated instead of
-// carrying a malformed header. The three states are built through the public
-// token store, so no test seam is involved.
+// TestAuthorizationThreeStates locks the bearer rule: an EXPIRED store
+// contributes no header at all, and neither does an unexpired but EMPTY token —
+// the request then goes out unauthenticated instead of carrying a malformed
+// header. The three states are built through the public token store, so no test
+// seam is involved.
 func TestAuthorizationThreeStates(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -197,7 +197,7 @@ func zlibBody(t *testing.T, plain string) string {
 	return buf.String()
 }
 
-// TestZlibFallback locks the compressed-body path of galaxyapi.cpp:146-180 and,
+// TestZlibFallback locks the compressed-body path of
 // just as importantly, what it does NOT do: inflation is attempted only after a
 // failed decode AND only for a body starting with a zlib stream header, so
 // ordinary malformed JSON keeps its single ErrNotJSON.

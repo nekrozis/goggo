@@ -15,14 +15,14 @@ import (
 	"github.com/nekrozis/goggo/internal/model"
 )
 
-// GD4 assembly tests: the batch chain, the single-file chain, the aggregate
-// exit verdicts and the two checksum policies. Everything runs against the
+// Assembly tests: the batch chain, the single-file chain, the aggregate exit
+// verdicts and the two checksum policies. Everything runs against the
 // acquisition fixture with the transport as the only double.
 
 // websiteConfigIn builds the config one website run consumes: the acquisition
-// defaults plus the directory layout the CLI would have applied (the six
-// subdir fields at their upstream defaults - core reads them, it does not
-// invent them).
+// defaults plus the directory layout the CLI would have applied (the six subdir
+// fields at their configured defaults - core reads them, it does not invent
+// them).
 func websiteConfigIn(t *testing.T) (config.Config, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -100,8 +100,7 @@ func TestDownloadWebsiteBatchAssemblesAndRuns(t *testing.T) {
 // TestDownloadWebsiteAggregateKeepsRunningAndReports locks the aggregate exit
 // contract on the batch chain: a failing task in the MIDDLE of the queue does
 // not stop the tasks after it, the successful downloads are kept, and the
-// verdict is a failure the CLI maps to exit 1 (GD4 rulings 5 and 8; the
-// mutation targets "batch task failure hides" and "first failure aborts").
+// verdict is a failure the CLI maps to exit 1.
 func TestDownloadWebsiteAggregateKeepsRunningAndReports(t *testing.T) {
 	// sound.mp3 (the queue's middle entry) is never served: its task 404s.
 	f := oneProductFixture(t, "base.exe", "dlc.exe")
@@ -194,14 +193,14 @@ func TestDownloadWebsiteFilesChain(t *testing.T) {
 
 	// Base file, an unknown id in the MIDDLE, then a DLC file (three parts)
 	// and a protocol-prefixed spec: the failure must not stop the specs that
-	// follow it, and the good downloads must stay on disk (rulings 5 and 8 —
-	// the ordering is what kills a "break on first failure" mutation).
+	// follow it, and the good downloads must stay on disk — the ordering is
+	// what kills a "break on first failure" mutation.
 	res := d.DownloadWebsiteFiles(context.Background(), []string{
 		"base_game/base.exe",
 		"base_game/no_such_id",
 		"base_game/base_game_dlc/dlc.exe",
-		// The extras entry carries the numeric wire id (DEFECT-GD3-1
-		// shape): the lookup matches the converted string form.
+		// The extras entry carries the numeric wire id: the lookup matches the
+		// converted string form.
 		"gogdownloader://base_game/13403",
 	}, "")
 	if !res.Failed() {
@@ -214,7 +213,7 @@ func TestDownloadWebsiteFilesChain(t *testing.T) {
 		t.Errorf("spec 0 = %v, want success", res.Outcomes[0].Err)
 	}
 	if res.Outcomes[1].Err == nil || !strings.Contains(res.Outcomes[1].Err.Error(), "Failed to find file info") {
-		t.Errorf("unknown id outcome = %v, want the upstream-shaped refusal", res.Outcomes[1].Err)
+		t.Errorf("unknown id outcome = %v, want the refusal", res.Outcomes[1].Err)
 	}
 	for i := 2; i < 4; i++ {
 		if res.Outcomes[i].Err != nil {
@@ -254,7 +253,7 @@ func TestDownloadWebsiteFileOutputOverrideAndNumericID(t *testing.T) {
 	}
 }
 
-// TestChecksumDualPolicy is the reverse pair of GD4 test 16: the SAME extras
+// TestChecksumDualPolicy is the reverse of the batch policy: the SAME extras
 // downlink document, carrying a checksum url, is read on the single-file
 // policy and ignored on the batch policy.
 func TestChecksumDualPolicy(t *testing.T) {
@@ -312,7 +311,7 @@ func TestChecksumDualPolicy(t *testing.T) {
 }
 
 // TestChecksumAlwaysToleratesFetchFailure locks the single-file chain's
-// warning-not-failure semantics (downloader.cpp:2517-2522): an unreachable
+// warning-not-failure semantics: an unreachable
 // checksum document downloads the file anyway, with no document.
 func TestChecksumAlwaysToleratesFetchFailure(t *testing.T) {
 	f := newProviderFixture(t)
@@ -331,7 +330,7 @@ func TestChecksumAlwaysToleratesFetchFailure(t *testing.T) {
 }
 
 // TestWebsiteTaskMapping locks the field-for-field conversion and the two
-// behaviour flags (GD4 ruling 3): Checksummed is installer-or-patch, Extra is
+// behaviour flags: Checksummed is installer-or-patch, Extra is
 // extras, whatever the API documents carry.
 func TestWebsiteTaskMapping(t *testing.T) {
 	task := websiteTaskFor(gamedetails.GameFile{
@@ -360,11 +359,10 @@ func TestWebsiteTaskMapping(t *testing.T) {
 	}
 }
 
-// TestDownloadWebsiteRefreshFailureIsNotSwallowed locks ruling 5's other half
-// at the acquisition boundary: a dead credential path fails the command with
-// its reason (GD3's complete-or-nothing), it is never reported as "0 tasks,
-// success". The per-task refresh verdict on the transfer side is the provider
-// test's subject.
+// TestDownloadWebsiteRefreshFailureIsNotSwallowed locks the other half of the
+// refresh contract at the acquisition boundary: a dead credential path fails
+// the command with its reason, it is never reported as "0 tasks, success". The
+// per-task refresh verdict on the transfer side is the provider test's subject.
 func TestDownloadWebsiteRefreshFailureIsNotSwallowed(t *testing.T) {
 	f := oneProductFixture(t, "base.exe", "sound.mp3", "dlc.exe")
 	cfg, _ := websiteConfigIn(t)
@@ -381,9 +379,8 @@ func TestDownloadWebsiteRefreshFailureIsNotSwallowed(t *testing.T) {
 }
 
 // TestDownloadWebsiteCancellationTravels locks the separation of cancellation
-// from task failure (GD4 ruling: context cancellation cancels the invocation):
-// a cancelled run returns the context error, which the CLI maps to 130 — it is
-// never an aggregate of per-task failures.
+// from task failure: a cancelled run returns the context error, which the CLI
+// maps to 130 — it is never an aggregate of per-task failures.
 func TestDownloadWebsiteCancellationTravels(t *testing.T) {
 	f := oneProductFixture(t, "base.exe", "sound.mp3", "dlc.exe")
 	cfg, _ := websiteConfigIn(t)
@@ -397,10 +394,9 @@ func TestDownloadWebsiteCancellationTravels(t *testing.T) {
 	}
 }
 
-// TestProviderRefreshFailureIsAnError locks the transfer-side verdict path
-// ruling 5 needs: a refresh failure is the task's operational error (fail() →
-// TaskResult), reported with its reason — the batch chain keeps failing on it
-// exactly as it did before GD4.
+// TestProviderRefreshFailureIsAnError locks the transfer-side verdict path: a
+// refresh failure is the task's operational error (fail → TaskResult), reported
+// with its reason — the batch chain keeps failing on it.
 func TestProviderRefreshFailureIsAnError(t *testing.T) {
 	f := newProviderFixture(t)
 	f.set("/downlink", `{"downlink":"https://cdn.example.com/f.bin"}`)

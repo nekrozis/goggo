@@ -15,21 +15,18 @@ import (
 	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
-// DefaultContentSystemHost serves build data and, later, the secure links
-// (galaxyapi.cpp:192,231).
+// DefaultContentSystemHost serves builds, secure links and dependency
+// repository documents.
 const DefaultContentSystemHost = "https://content-system.gog.com"
 
-// DefaultCDNHost serves the manifests themselves (galaxyapi.cpp:199,216,218).
+// DefaultCDNHost serves the manifests themselves.
 const DefaultCDNHost = "https://cdn.gog.com"
 
-// DefaultAPIHost serves the product documents (galaxyapi.cpp:356,375). It is a
-// different host from the content system, and the two are not interchangeable
-// in the C++ source either.
+// DefaultAPIHost serves the product documents. It is a different host from the
+// content system, and the two are not interchangeable.
 const DefaultAPIHost = "https://api.gog.com"
 
 // endpoints groups the per-host URL prefixes of one Client.
-//
-// Fields are ordered to minimise padding: the three strings (16B each).
 type endpoints struct {
 	contentSystem string
 	cdn           string
@@ -41,9 +38,6 @@ func defaultEndpoints() endpoints {
 }
 
 // Client drives the Galaxy content API over an httpx transport.
-//
-// Fields are ordered to minimise padding: the endpoint block (two strings,
-// 32B) first, then the pointers (8B each).
 type Client struct {
 	ep     endpoints
 	galaxy *config.GalaxyConfig
@@ -76,15 +70,15 @@ func New(hx *httpx.Client, galaxy *config.GalaxyConfig) (*Client, error) {
 // the SHAPE of a response only: HTTP failures surface as *httpx.StatusError and
 // field-level problems are wrapped with context by the caller.
 //
-// It is this package's own sentinel rather than a shared one, mirroring the C++
-// source, where galaxyAPI and Website each carry their own getResponseJson
-// (galaxyapi.cpp:135-188 and website.cpp:60-81 are separate implementations).
+// It is this package's own sentinel rather than a shared one, because the
+// website API in internal/webapi draws the same distinction for its own
+// responses.
 var ErrNotJSON = errors.New("galaxy: response was not JSON")
 
 // bearer returns the token to attach, or "" when no Authorization header must
 // be sent. An expired store never contributes a token, and neither does an
-// empty one (galaxyapi.cpp:98-105): the request then goes out unauthenticated
-// and the server's answer decides the outcome.
+// empty one: the request then goes out unauthenticated and the server's answer
+// decides the outcome.
 func (c *Client) bearer() string {
 	if c.galaxy.IsExpired() {
 		return ""
@@ -92,13 +86,11 @@ func (c *Client) bearer() string {
 	return c.galaxy.GetAccessToken()
 }
 
-// getResponse fetches target and returns the body (galaxyapi.cpp:94-133).
+// getResponse fetches target and returns the body.
 //
 // Acceptance of encodings is left to the transport, which asks for gzip and
-// decompresses it transparently. The C++ source sets CURLOPT_ACCEPT_ENCODING to
-// "" for the same reason — curl negotiates and decompresses. Setting the header
-// here would DISABLE Go's transparent decompression, so it is deliberately not
-// touched.
+// decompresses it transparently. Setting Accept-Encoding here would DISABLE
+// Go's transparent decompression, so it is deliberately not touched.
 func (c *Client) getResponse(ctx context.Context, target string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
@@ -114,22 +106,20 @@ func (c *Client) getResponse(ctx context.Context, target string) (string, error)
 	return string(body), nil
 }
 
-// getResponseJSON fetches target and decodes the body as a JSON object
-// (galaxyapi.cpp:135-188), including the zlib retry described on
-// decodeJSONObject.
 // ResponseJSON fetches a Galaxy API document as JSON over an authenticated
-// GET. The website path resolves its downlink documents through it
-// (downloader.cpp:3094).
+// GET. The website path resolves its downlink documents through it.
 func (c *Client) ResponseJSON(ctx context.Context, target string) (map[string]any, error) {
 	return c.getResponseJSON(ctx, target)
 }
 
 // Response fetches a Galaxy API document as text — the checksum XML behind a
-// website file's downlink (downloader.cpp:3122).
+// website file's downlink.
 func (c *Client) Response(ctx context.Context, target string) (string, error) {
 	return c.getResponse(ctx, target)
 }
 
+// getResponseJSON fetches target and decodes the body as a JSON object,
+// including the zlib retry described on decodeJSONObject.
 func (c *Client) getResponseJSON(ctx context.Context, target string) (map[string]any, error) {
 	body, err := c.getResponse(ctx, target)
 	if err != nil {
@@ -144,14 +134,13 @@ func (c *Client) getResponseJSON(ctx context.Context, target string) (map[string
 // The shape contract is single-entry and explicit: an empty, malformed or
 // non-object body is ErrNotJSON. A JSON array is therefore a failure, not a
 // success with the wrong type, so the steps that consume these documents
-// (S14/S15/S17) work against a known object boundary.
+// work against a known object boundary.
 //
-// The zlib retry mirrors galaxyapi.cpp:146-180, and only that path: it is
-// attempted strictly AFTER the first decode failed, and only when the first two
-// bytes are a zlib stream header. Ordinary malformed JSON is never inflated, so
-// its error stays a single ErrNotJSON. Inflation failures are not reported
-// separately — the body was not a usable JSON object either way, and the first
-// error describes what the caller asked for.
+// The zlib retry is attempted strictly AFTER the first decode failed, and only
+// when the first two bytes are a zlib stream header. Ordinary malformed JSON is
+// never inflated, so its error stays a single ErrNotJSON. Inflation failures are
+// not reported separately — the body was not a usable JSON object either way,
+// and the first error describes what the caller asked for.
 //
 // The object assertion is what makes this the object-shaped entry point;
 // decodeDocument below is the same pipeline without it.
@@ -172,15 +161,9 @@ func decodeJSONObject(body string) (map[string]any, error) {
 //
 // It exists because the Galaxy product documents carry a top-level ARRAY in two
 // places: the response of dlcs.expanded_all_products_url and that of
-// products?ids=… (galaxyapi.cpp:369,395). Upstream reads every one of those
-// through the same Json::Value, which holds an array just as happily as an
-// object; the object-only convenience function is this port's own split, so the
-// value-typed half has to be reachable again.
-//
-// The shape contract above still holds where it always did: callers that need
-// an object assert one on the result (decodeJSONObject does exactly that), and
-// the array failure keeps the same message it always had. Only the location of
-// the assertion moved.
+// products?ids=…. Callers that need an object assert one on the result
+// (decodeJSONObject does exactly that); the assertion lives there rather than
+// here, so the value-typed half stays reachable.
 func decodeDocument(body string) (any, error) {
 	v, err := decodeAny(body)
 	if err == nil {
@@ -210,13 +193,10 @@ func decodeAny(body string) (any, error) {
 // inflateZlibBody inflates body when it starts with a zlib stream header, and
 // reports whether it did.
 //
-// The header check is what limits the fallback to the compressed case. The
-// C++ source reads the first two bytes as a little-endian uint16 and compares
-// against 0x0178, 0x5e78, 0x9c78 and 0xda78 (galaxyapi.cpp:151-152), which
-// byte-wise is 0x78 followed by 0x01, 0x5e, 0x9c or 0xda: a zlib stream with a
-// 32 KiB window and the usual compression levels. The check is written here as
-// two byte tests rather than through a shared uint16 reader, because nothing
-// else needs one.
+// The header check is what limits the fallback to the compressed case: 0x78
+// followed by 0x01, 0x5e, 0x9c or 0xda is a zlib stream with a 32 KiB window
+// and the usual compression levels. It is written as two byte tests rather than
+// through a shared uint16 reader, because nothing else needs one.
 //
 // compress/zlib handles the zlib wrapper itself, so no header is parsed out.
 func inflateZlibBody(body string) ([]byte, bool) {

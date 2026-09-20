@@ -1,12 +1,10 @@
 package model
 
-// WebsiteTask is one website (non-chunked) file download. It mirrors the parts
-// of gameFile the website worker consumes (downloader.cpp:2972-3450); the
-// command wiring will build it from gameFile once the gamedetails face lands
-// (registered in the S18c gap table), resolving the game file's type into the
-// two behaviour flags below at that point.
+// WebsiteTask is one website (non-chunked) file download. It carries the parts
+// of a game file the website worker needs; the two behaviour flags below are
+// resolved from the game file's type by whoever builds the task.
 type WebsiteTask struct {
-	Destination string // absolute local path (gameFile::getFilepath's product)
+	Destination string // absolute local path
 	DownlinkURL string // the galaxy API's downlink JSON url
 	Gamename    string
 	Size        string // the API-reported size string (unparsable forms count as 0)

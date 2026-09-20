@@ -7,14 +7,11 @@ import (
 	"strings"
 )
 
-// Filters holds the compiled name filters of one listing run (website.cpp:143-166).
-//
-// Fields are ordered to minimise padding: the slice (24B) first, then the
-// pointer (8B).
+// Filters holds the compiled name filters of one listing run.
 type Filters struct {
-	// Games is the game name filter list. C++ builds it from --game-regex when
-	// that is set, otherwise from the lines of --game-list-file (the two are
-	// mutually exclusive, matching the if/else-if in the original).
+	// Games is the game name filter list, built from --game-regex when that is
+	// set, otherwise from the lines of --game-list-file. The two are mutually
+	// exclusive.
 	Games []*regexp.Regexp
 
 	// IgnoreDLCCount matches game names whose DLC information is fetched even
@@ -23,12 +20,10 @@ type Filters struct {
 }
 
 // LoadFilterList reads a game filter list file: one regular expression per
-// non-empty line (website.cpp:149-166).
+// non-empty line.
 //
-// Differences from the C++ reader (intentional): a trailing CR is stripped so
-// files written on Windows work, and an unreadable file is an error instead of
-// a printed message followed by a run without filters (library layers never
-// print or silently degrade).
+// A trailing CR is stripped so files written on Windows work, and an unreadable
+// file is an error: this layer never prints or silently degrades.
 func LoadFilterList(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -44,10 +39,8 @@ func LoadFilterList(path string) ([]string, error) {
 }
 
 // CompileFilters validates and compiles the filter configuration. All three
-// sources are compiled BEFORE any request is made (review lock, D), so an
-// invalid pattern cannot surface after several pages have already been
-// fetched. The C++ source constructs boost::regex lazily and would terminate
-// the process on a malformed pattern.
+// sources are compiled before any request is made, so an invalid pattern cannot
+// surface after several pages have already been fetched.
 func CompileFilters(gameRegex, filterListPath, ignoreDLCCountRegex string) (Filters, error) {
 	var f Filters
 	switch {
@@ -81,11 +74,11 @@ func CompileFilters(gameRegex, filterListPath, ignoreDLCCountRegex string) (Filt
 }
 
 // MatchesAny reports whether name matches any of the expressions. It is a
-// substring match, mirroring boost::regex_search (not regex_match).
+// substring match, not a whole-string match.
 //
-// Note (review lock, D4): the patterns are evaluated by RE2, which does not
-// support backreferences or lookaround; those spellings are a compile error
-// rather than a silently different match.
+// The patterns are evaluated by RE2, which does not support backreferences or
+// lookaround; those spellings are a compile error rather than a silently
+// different match (D4).
 func MatchesAny(res []*regexp.Regexp, name string) bool {
 	for _, re := range res {
 		if re.MatchString(name) {

@@ -12,8 +12,9 @@ import (
 	"github.com/nekrozis/goggo/internal/httpx"
 )
 
-// The resolver is what GD1's seam needs, so the assertion that matters most is
-// the compile-time one; keeping it here documents where the contract lives.
+// The resolver is what the conversion's seam needs, so the assertion that
+// matters most is the compile-time one; keeping it here documents where the
+// contract lives.
 var _ gamedetails.DownlinkResolver = (*gamedetailsResolver)(nil).Resolve
 
 func newGamedetailsResolver(t *testing.T, f *providerFixture, refreshes *atomic.Int32) *gamedetailsResolver {
@@ -70,8 +71,8 @@ func TestGamedetailsResolverResolve(t *testing.T) {
 
 // TestGamedetailsResolverRejectsMalformedDownlinks locks the three failures
 // apart, and that none of them hands back a partial result: a resolver error
-// makes GD1 skip the file, so what it returns alongside must be unusable rather
-// than half-true.
+// makes the conversion skip the file, so what it returns alongside must be
+// unusable rather than half-true.
 func TestGamedetailsResolverRejectsMalformedDownlinks(t *testing.T) {
 	for _, tc := range []struct {
 		name string

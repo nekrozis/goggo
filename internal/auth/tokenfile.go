@@ -10,21 +10,18 @@ import (
 	"github.com/nekrozis/goggo/internal/util"
 )
 
-// tokenFileMode mirrors Util::setFilePermissions(owner_read|owner_write)
-// (downloader.cpp:3807,171). 0600 is Unix semantics; on Windows no claim of
-// equivalent ACL behaviour is made (review lock, D4).
+// tokenFileMode is the permission mode for token files. 0600 is Unix semantics;
+// on Windows no equivalent ACL behaviour is claimed (D4).
 const tokenFileMode = 0o600
 
-// SaveTokenFile persists g's token store to path as compact JSON. The output
-// is JSON-semantically equivalent to the C++ ofs << Json::Value write
-// (downloader.cpp:3792-3807), not byte-identical (StyledWriter vs
-// json.Marshal). An empty store writes nothing and returns nil, mirroring
-// saveGalaxyJSON's guard on empty JSON.
+// SaveTokenFile persists g's token store to path as compact JSON, with the
+// stored fields written back unchanged. An empty store writes nothing and returns
+// nil.
 //
-// The write is atomic (S10a review lock): content goes to a temp file in the
-// same directory that is created with mode 0600 from the start, synced, and
-// renamed over path — a crash never leaves a truncated token file, and the
-// secret never exists with looser permissions before an explicit chmod.
+// The write is atomic: content goes to a temp file in the same directory,
+// created with mode 0600 from the start, synced, and renamed over path. A crash
+// never leaves a truncated token file, and the secret never exists with looser
+// permissions.
 func SaveTokenFile(g *config.GalaxyConfig, path string) error {
 	store := g.GetJSON()
 	if len(store) == 0 {
@@ -75,13 +72,11 @@ func writeAtomic(path string, data []byte) error {
 	return nil
 }
 
-// LoadTokenFile reads the token store at path into g, mirroring the loader
-// in Downloader::Downloader (downloader.cpp:140-150). When the file lacks
-// expires_at, it is derived from the FILE MODIFICATION TIME plus expires_in
-// (review lock: never the current time), preserving the original lifetime of
-// a token file written earlier. C++ semantics kept: a missing expires_in
-// contributes 0, so expires_at lands on the file mtime and the token reads
-// as already expired.
+// LoadTokenFile reads the token store at path into g. When the file lacks
+// expires_at, it is derived from the file modification time plus expires_in,
+// preserving the original lifetime of a token file written earlier. A missing
+// expires_in contributes 0, so expires_at lands on the file mtime and the token
+// reads as already expired.
 func LoadTokenFile(g *config.GalaxyConfig, path string) error {
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -102,9 +97,9 @@ func LoadTokenFile(g *config.GalaxyConfig, path string) error {
 	return nil
 }
 
-// jsonInt64 mirrors the numeric reader used inside config for token values.
-// It tolerates the types encoding/json produces for numbers (float64,
-// json.Number) plus native integers; anything else yields 0.
+// jsonInt64 reads a token numeric value. It tolerates the types encoding/json
+// produces for numbers (float64, json.Number) plus native integers; anything
+// else yields 0.
 func jsonInt64(v any) int64 {
 	switch n := v.(type) {
 	case nil:

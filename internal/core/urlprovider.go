@@ -13,12 +13,11 @@ import (
 // chunkURLProvider resolves the URL of one chunk through the Galaxy CDN
 // machinery: hashToGalaxyPath -> secure/dependency link -> CDN template ->
 // placeholder substitution, refreshing the Galaxy token before a chunk when it
-// has expired (downloader.cpp:4642-4667).
+// has expired.
 //
 // Workers call URL concurrently, so the per-product template cache and the
 // token refresh are mutex-guarded. Dependency chunks re-resolve on every call
-// and never touch the cache, exactly as upstream's per-worker copy does
-// (downloader.cpp:4632-4640).
+// and never touch the cache.
 type chunkURLProvider struct {
 	galaxy   *galaxy.Client
 	priority []string
@@ -43,7 +42,7 @@ func (p *chunkURLProvider) URL(ctx context.Context, task model.FileTask, chunk m
 
 	// Dependencies re-resolve the link for every chunk and substitute an empty
 	// path; regular files reuse the product's templates and carry the chunk
-	// path (downloader.cpp:4632-4667).
+	// path.
 	if task.Item.IsDependency {
 		doc, err := p.galaxy.DependencyLink(ctx, galaxyPath)
 		if err != nil {
@@ -81,7 +80,7 @@ func (p *chunkURLProvider) refreshIfExpired(ctx context.Context) error {
 }
 
 // templatesFor caches the CDN url templates per product: regular files reuse
-// them until the product changes (downloader.cpp:4633-4640).
+// them until the product changes.
 func (p *chunkURLProvider) templatesFor(ctx context.Context, productID string) ([]string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

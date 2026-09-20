@@ -10,8 +10,7 @@ import (
 // visibleWidth counts the terminal cells a line occupies: ANSI escape
 // sequences are zero-width, East Asian wide runes occupy two cells, everything
 // else one. Width and content are measured in the same layer, so the layout's
-// no-wrap invariant holds for colored and CJK output alike (review UI1 v3
-// §6.B).
+// no-wrap invariant holds for colored and CJK output alike.
 func visibleWidth(s string) int {
 	width := 0
 	inEscape := false
@@ -95,14 +94,13 @@ func truncateVisible(s string, maxCells int) string {
 // two summary rows first, then the transient message row, then one row per
 // active task and — when the tasks do not fit — an overflow notice.
 //
-// The hard invariant (review UI1 v3 §6.B): every returned line satisfies
+// The hard invariant: every returned line satisfies
 // visibleWidth <= width-1, and the row count never exceeds height-1 (the one
 // safety row keeps the last newline from scrolling, which would shift the
 // coordinator's row arithmetic). ALL rows — summary, message, tasks and the
 // overflow notice alike — draw from one budget, so the invariant holds at any
 // terminal height; a terminal too small even for the summary simply shows the
-// highest-priority rows that fit (review UI1-R1: the fixed rows used to be
-// appended unconditionally and could overflow at height 1–3).
+// highest-priority rows that fit.
 func layoutFrame(vm viewModel, width, height int, bar func(cells int, fraction float64) string, unit uint32) []string {
 	maxCells := width - 1
 	maxRows := height - 1
@@ -116,9 +114,8 @@ func layoutFrame(vm viewModel, width, height int, bar func(cells int, fraction f
 	var lines []string
 	head := fmt.Sprintf("Downloading · %d active · %d queued", vm.active, vm.queued)
 	if vm.resumed > 0 {
-		// The answer to "why only these tasks?" (review UI1-R2 §5 scene ③):
-		// the resume count rides the summary row rather than becoming a
-		// third dynamic fixed row.
+		// The answer to "why only these tasks?": the resume count rides the
+		// summary row rather than becoming a third dynamic fixed row.
 		head += fmt.Sprintf(" · %d resuming", vm.resumed)
 	}
 	lines = add(lines, head)
@@ -137,7 +134,7 @@ func layoutFrame(vm viewModel, width, height int, bar func(cells int, fraction f
 	// notice's count must be computed from the tasks that will ACTUALLY be
 	// shown, not from the pre-reservation budget: the reservation itself
 	// shrinks what fits, and a notice that miscounts its own hidden rows is
-	// worse than none (review UI1-R1).
+	// worse than none.
 	available := maxRows - len(lines)
 	if available < 0 {
 		available = 0
@@ -162,17 +159,16 @@ func layoutFrame(vm viewModel, width, height int, bar func(cells int, fraction f
 	return lines
 }
 
-// compactPath narrows an install-relative path to maxCells terminal cells
-// (review UI1-R2 §2, amended): the ladder keeps the identity the user needs
-// before it chases width. The deepest directory keeps its FULL name first —
-// a basename alone is not an identity (Data/Heroes3.exe and Patch/Heroes3.exe
-// would collide). As much context as fits is kept, from the richest form
-// down:
+// compactPath narrows an install-relative path to maxCells terminal cells: the
+// ladder keeps the identity the user needs before it chases width. The deepest
+// directory keeps its FULL name first — a basename alone is not an identity
+// (Data/Heroes3.exe and Patch/Heroes3.exe would collide). As much context as
+// fits is kept, from the richest form down:
 //
-//	Data/Campaign/Shadow of Death/foo.h3m          full relative path (fits ⇒ untouched)
-//	…/Campaign/Shadow of Death/foo.h3m            three components, full names
-//	…/Shadow of Death/foo.h3m                     deepest dir + name
-//	foo.h3m                                       last escape only; then truncated
+//	Data/Campaign/Shadow of Death/foo.h3m full relative path (fits ⇒ untouched)
+//	…/Campaign/Shadow of Death/foo.h3m three components, full names
+//	…/Shadow of Death/foo.h3m deepest dir + name
+//	foo.h3m last escape only; then truncated
 //
 // Compaction exists only because of width — a wide row never loses directory
 // semantics for looks, and a basename is never a normal-width result.
@@ -203,7 +199,7 @@ func compactPath(path string, maxCells int) string {
 	return truncateVisible(base, maxCells)
 }
 
-// taskLine renders one task row, degrading by priority (D31 + UI1-R2 §2):
+// taskLine renders one task row, degrading by priority (D31):
 // the bar goes first, then the path compacts (hierarchy-preserving), then
 // the byte counts, then the rate. The percentage and the row number survive
 // everything short of a truncation. t.path is the display path — already

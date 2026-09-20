@@ -19,10 +19,9 @@ const (
 	unixIFLNK = uint16(0o120000)
 )
 
-// fileModeFromUnixMode maps the nine POSIX permission bits to fs.FileMode
-// (ziputil.cpp:604-629). It expresses exactly what the original program uses
-// and is NOT a lossless representation of POSIX st_mode: uid/gid and special
-// bits have no fs.FileMode equivalent and are dropped.
+// fileModeFromUnixMode maps the nine POSIX permission bits to fs.FileMode. It
+// is not a lossless representation of POSIX st_mode: uid/gid and special bits
+// have no fs.FileMode equivalent and are dropped.
 func fileModeFromUnixMode(mode uint16) fs.FileMode {
 	var fm fs.FileMode
 	if mode&unixIRUSR != 0 {
@@ -55,8 +54,7 @@ func fileModeFromUnixMode(mode uint16) fs.FileMode {
 	return fm
 }
 
-// isSymlink reports whether the Unix mode bits identify a symlink
-// (ziputil.cpp:631-635).
+// isSymlink reports whether the Unix mode bits identify a symlink.
 func isSymlink(mode uint16) bool {
 	return mode&unixIFMT == unixIFLNK
 }

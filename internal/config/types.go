@@ -1,13 +1,7 @@
 package config
 
-// Configuration structs ported from include/config.h.
-//
-// Field order follows the memory-minimisation rule (largest allocations
-// first, smallest last, applied inside each logical group and between
-// groups; no anonymous structs used for grouping). Reference sizes on
-// amd64: slice = 24B, string = 16B, int/uint64 = 8B, uint32 = 4B, bool = 1B.
-
-// DirectoryConfig mirrors struct DirectoryConfig (config.h:18-30).
+// DirectoryConfig holds the configured directories and the per-file-class
+// subdirectory name templates.
 type DirectoryConfig struct {
 	Directory           string
 	WinePrefix          string
@@ -21,7 +15,7 @@ type DirectoryConfig struct {
 	SubDirectories      bool
 }
 
-// DownloadConfig mirrors struct DownloadConfig (config.h:32-61). Installer
+// DownloadConfig holds the download-selection options. The installer
 // platform/language fields and the priority lists use the bit flags and
 // Option tables from options.go.
 type DownloadConfig struct {
@@ -54,16 +48,14 @@ type DownloadConfig struct {
 	GalaxyLowercasePath  bool
 }
 
-// GameSpecificConfig mirrors struct gameSpecificConfig (config.h:63-67).
-// The larger embedded group (DirectoryConfig) precedes the smaller one
-// (DownloadConfig) to minimise padding.
+// GameSpecificConfig groups the per-game directory and download settings.
 type GameSpecificConfig struct {
 	Directory DirectoryConfig
 	Download  DownloadConfig
 }
 
-// CurlConfig mirrors struct CurlConfig (config.h:215-227). Timeouts are in
-// seconds; DownloadRate is in bytes per second.
+// CurlConfig holds the transport options. Timeouts are in seconds;
+// DownloadRate is in bytes per second.
 type CurlConfig struct {
 	CACertPath          string
 	CookiePath          string
@@ -77,13 +69,8 @@ type CurlConfig struct {
 	Verbose             bool
 }
 
-// Config mirrors struct Config (config.h:229-328).
-//
-// Deferred by design (see doc.go):
-//   - blacklist/ignorelist (config.h:308-309): Blacklist semantics live in
-//     include/blacklist.h and are ported with the filter work.
-//   - transformationsJSON (config.h:327): parsing lands with the
-//     transformations feature.
+// Config is the complete configuration value passed down through the
+// application layers.
 type Config struct {
 	Directories    DirectoryConfig
 	DownloadConfig DownloadConfig

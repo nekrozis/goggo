@@ -1,16 +1,12 @@
-// Package catalog assembles the account game list from the website listings:
-// it drives the paginated product fetches, maps each product to a
+// Package catalog assembles the account game list from the website listings: it
+// drives the paginated product fetches, maps each product to a
 // model.GameItem, applies the name/platform/new filters and optionally
 // enriches entries with their DLC names.
 //
-// It ports Website::getGames (website.cpp:92-303). The HTTP primitives stay in
-// internal/webapi; this package holds the business filtering, so that the
-// transport layer never learns about --game-regex, --new or --include.
-//
-// Not ported here (gap, S23): the per-game configuration file override of
-// bIgnoreDLCCount (Util::getGameSpecificConfig). The C++ source skips that
-// lookup entirely during a cache update, so the --update-cache path is
-// unaffected until S23.
+// The HTTP primitives stay in internal/webapi; this package holds the business
+// filtering, so the transport layer never learns about --game-regex, --new or
+// --include. The per-game configuration file override of the DLC-count rule is
+// not implemented here.
 package catalog
 
 import (
@@ -34,11 +30,7 @@ type ProductFetcher interface {
 	OwnedGameIDs(ctx context.Context) ([]string, error)
 }
 
-// ListOptions mirrors the configuration values Website::getGames reads from
-// the global config (website.cpp:98-166,217-292).
-//
-// Fields are ordered to minimise padding: the slice (24B), the strings (16B
-// each), the uint32 pair (4B each), then the bools.
+// ListOptions carries the configuration values one listing run reads.
 type ListOptions struct {
 	// Tags is forwarded to the products query, already split on commas.
 	Tags []string
@@ -72,18 +64,15 @@ type ListOptions struct {
 	// PlatformDetection skips products that do not support InstallerPlatform.
 	PlatformDetection bool
 
-	// UpdateCache disables per-game configuration files (S23).
+	// UpdateCache disables per-game configuration files.
 	UpdateCache bool
 }
 
 // ListResult is the outcome of a listing run.
 //
-// OwnedIDs carries the owned product ids the C++ getGames() fetched into the
-// process-wide Globals::vOwnedGamesIds. Returning them keeps the same fetch
-// moment without reintroducing global state (review lock, D2); the caller
-// (S13) decides what to do with them.
-//
-// Fields are ordered to minimise padding: the slices (24B each).
+// OwnedIDs carries the owned product ids fetched by the same run. Returning
+// them keeps the fetch moment without reintroducing global state (D2); the
+// caller decides what to do with them.
 type ListResult struct {
 	Games    []model.GameItem
 	OwnedIDs []string
@@ -94,8 +83,7 @@ type ListResult struct {
 //
 // Errors are propagated rather than swallowed: in particular a failing
 // OwnedGameIDs call fails the whole listing instead of pretending the account
-// owns nothing (review lock, E1 — a deliberate departure from the C++
-// getResponseJson behaviour of returning an empty value on error).
+// owns nothing.
 func List(ctx context.Context, wx ProductFetcher, opts ListOptions) (ListResult, error) {
 	filters, err := CompileFilters(opts.GameRegex, opts.FilterListPath, opts.IgnoreDLCCountRE)
 	if err != nil {
@@ -116,8 +104,7 @@ func List(ctx context.Context, wx ProductFetcher, opts ListOptions) (ListResult,
 		if err != nil {
 			return ListResult{}, err
 		}
-		// Filter order mirrors the original: newness, then platform, then the
-		// name regex list (website.cpp:217-242).
+		// Filter order: newness, then platform, then the name regex list.
 		if opts.NewOnly && !item.IsNew {
 			continue
 		}
@@ -136,20 +123,18 @@ func List(ctx context.Context, wx ProductFetcher, opts ListOptions) (ListResult,
 	}
 
 	if opts.IncludeHidden {
-		// std::sort by name (website.cpp:299); equal names stay unspecified in
-		// both implementations.
+		// Sorted by name; the order of equal names is unspecified.
 		sort.Slice(games, func(i, j int) bool { return games[i].Name < games[j].Name })
 	}
 	return ListResult{Games: games, OwnedIDs: owned}, nil
 }
 
 // fetchProducts walks the product pages, including the hidden-products pass
-// when requested (website.cpp:111-140).
+// when requested.
 //
-// The C++ loop ends on `page == totalPages || totalPages == 0`; that test is
-// evaluated on the decoded page, and a page that is missing those fields is an
-// error in webapi (S11a, D3), so a malformed response can no longer end the
-// walk silently.
+// The walk ends on `page == totalPages || totalPages == 0`, evaluated on the
+// decoded page; a page missing those fields is an error in webapi (D3), so a
+// malformed response cannot end the walk silently.
 func fetchProducts(ctx context.Context, wx ProductFetcher, opts ListOptions) ([]map[string]any, error) {
 	var products []map[string]any
 	hidden := 0
@@ -167,7 +152,7 @@ func fetchProducts(ctx context.Context, wx ProductFetcher, opts ListOptions) ([]
 		parsed := pg.Page == pg.TotalPages || pg.TotalPages == 0
 		if opts.IncludeHidden && parsed && hidden == 0 {
 			// Make the next iteration handle hidden products; page is reset to
-			// 0 because the increment below moves it to 1 (website.cpp:126-132).
+			// 0 because the increment below moves it to 1.
 			parsed = false
 			hidden = 1
 			page = 0
@@ -182,16 +167,10 @@ func fetchProducts(ctx context.Context, wx ProductFetcher, opts ListOptions) ([]
 }
 
 // enrichDLC fills in the game details and DLC names when the product warrants
-// it (website.cpp:244-292).
-//
-// The C++ source additionally re-checks the game regex here; that check is
-// always satisfied when it is reached (filters is non-empty and already
-// matched, and it is built from the same --game-regex), so it is omitted
-// instead of kept as dead code.
+// it.
 //
 // A failing details request is skipped: the game stays listed without DLC
-// information, mirroring the C++ behaviour of treating an empty response as
-// "no details". No counter is kept yet — no consumer needs one.
+// information. No failure counter is kept, because no consumer needs one.
 func enrichDLC(ctx context.Context, wx ProductFetcher, product map[string]any, filters Filters, item *model.GameItem) error {
 	dlcCount, err := jsonval.Int(product["dlcCount"])
 	if err != nil {
@@ -206,7 +185,7 @@ func enrichDLC(ctx context.Context, wx ProductFetcher, product map[string]any, f
 	}
 	details, err := wx.GameDetailsJSON(ctx, item.ID)
 	if err != nil {
-		return nil // soft skip (review lock, C)
+		return nil // soft skip
 	}
 	names, err := util.DLCNamesFromJSON(details["dlcs"])
 	if err != nil {
@@ -217,8 +196,7 @@ func enrichDLC(ctx context.Context, wx ProductFetcher, product map[string]any, f
 	return nil
 }
 
-// mapProduct turns one raw product into a GameItem plus its platform mask
-// (website.cpp:174-214).
+// mapProduct turns one raw product into a GameItem plus its platform mask.
 func mapProduct(p map[string]any) (model.GameItem, uint32, error) {
 	name, err := jsonval.Str(p["slug"])
 	if err != nil {
@@ -243,46 +221,38 @@ func mapProduct(p map[string]any) (model.GameItem, uint32, error) {
 	return model.GameItem{Name: name, ID: id, Updates: updates, IsNew: isNew}, platform, nil
 }
 
-// productID mirrors `product["id"].isInt() ? to_string(asInt()) : asString()`
-// (website.cpp:176): integer-shaped ids become decimal text, everything else is
-// stringified. A missing id reads as "" (jsoncpp's asString on null) rather
-// than "0".
+// productID renders the product id: integer-shaped ids become decimal text,
+// everything else is stringified. A missing id reads as "" rather than "0".
 func productID(v any) (string, error) {
 	return intShapedString(v)
 }
 
-// intShapedString renders a value with the `isInt() ? to_string(asInt()) :
-// asString()` rule the C++ source uses for product ids (website.cpp:176) and for
-// the wishlist discount percentage (website.cpp:773).
+// intShapedString renders a value with the `isInt ? to_string(asInt): asString`
+// rule used for product ids and for the wishlist discount percentage.
 //
 // Only integer-shaped values enter the integer branch: a boolean, a string or
-// null must stringify instead, because jsoncpp's isInt() is false for them. Do
-// not widen this gate — jsonval.Int alone would coerce true to "1".
+// null must stringify instead. Do not widen this gate — jsonval.Int alone would
+// coerce true to "1".
 //
-// Boundary note: jsoncpp's isInt() additionally requires the value to fit in
-// int32, while jsonval.Int accepts the whole int64 range. Only a value beyond
-// 2^31 (or a real whose text form uses an exponent) can differ, which neither a
-// product id nor a percentage reaches.
+// The integer branch accepts the whole int64 range, so only a value beyond 2^31
+// (or a real whose text form uses an exponent) could differ from the reference
+// behaviour; neither a product id nor a percentage reaches that.
 func intShapedString(v any) (string, error) {
 	switch v.(type) {
 	case int, int64, uint64, float64:
 		if n, err := jsonval.Int(v); err == nil {
 			return strconv.FormatInt(n, 10), nil
 		}
-		// A non-integral number is not isInt() in jsoncpp either; it falls
-		// through to the string form below.
+		// A non-integral number falls through to the string form below.
 	}
 	return jsonval.Str(v)
 }
 
-// productUpdates mirrors website.cpp:179-202: an absent or null member leaves
-// the count at 0, otherwise the value goes through std::stoi semantics on its
-// string form (leading whitespace skipped, leading digits taken, no digits
-// means 0).
+// productUpdates reads the update count: an absent or null member leaves it at
+// 0, otherwise the value is parsed from its string form with atoiPrefix
+// semantics.
 //
-// Hardening: std::stoi throws out_of_range for an over-long number and the C++
-// source only catches invalid_argument, so a huge value would terminate the
-// process; here it yields 0.
+// An over-long number yields 0 instead of failing the listing.
 func productUpdates(v any) (int, error) {
 	switch v.(type) {
 	case nil:
@@ -299,9 +269,9 @@ func productUpdates(v any) (int, error) {
 	return atoiPrefix(s), nil
 }
 
-// atoiPrefix parses the integer prefix of s, with the same acceptance as
-// std::stoi: optional leading whitespace, an optional sign, then digits.
-// Anything else (including an empty string) yields 0.
+// atoiPrefix parses the integer prefix of s: optional leading whitespace, an
+// optional sign, then digits. Anything else (including an empty string) yields
+// 0.
 func atoiPrefix(s string) int {
 	i := 0
 	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r' || s[i] == '\v' || s[i] == '\f') {
@@ -320,19 +290,17 @@ func atoiPrefix(s string) int {
 	}
 	n, err := strconv.Atoi(s[start:i])
 	if err != nil {
-		return 0 // out of range: see the hardening note above
+		return 0 // out of range: treated as 0
 	}
 	return n
 }
 
-// productPlatform derives the platform mask from worksOn
-// (website.cpp:204-214). When the product reports no platform at all the mask
-// becomes "all platforms", matching Util::getOptionValue("all", PLATFORMS).
+// productPlatform derives the platform mask from worksOn. When the product
+// reports no platform at all, the mask becomes all platforms.
 func productPlatform(worksOn any) (uint32, error) {
 	obj, ok := worksOn.(map[string]any)
 	if !ok {
-		// A missing (or non-object) worksOn reports nothing, exactly like
-		// indexing a null Json::Value.
+		// A missing (or non-object) worksOn reports no platform.
 		return util.OptionValue("all", config.Platforms, false), nil
 	}
 	platform, err := platformBits(obj)
@@ -346,7 +314,7 @@ func productPlatform(worksOn any) (uint32, error) {
 }
 
 // platformBits maps a worksOn object to its platform mask. The wishlist
-// listing uses it without the all-platforms fallback (website.cpp:725-730).
+// listing uses it without the all-platforms fallback.
 func platformBits(worksOn map[string]any) (uint32, error) {
 	var platform uint32
 	for _, entry := range []struct {

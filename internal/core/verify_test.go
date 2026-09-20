@@ -58,8 +58,7 @@ func verifyMemberItem() string {
 // path carries a NUL byte, which every platform rejects. It is a member and not
 // an ordinary file on purpose — the plan never observes the members (they arrive
 // by extraction), so the failure reaches the verification's own classification
-// instead of failing the plan first. That is what makes it a usable injection
-// (review S5).
+// instead of failing the plan first. That is what makes it a usable injection.
 func verifyBadMemberItem() string {
 	return `{"path":"game/bad\u0000.bin","md5":"` + verifyMD5([]byte("x")) + `",` +
 		`"sfcRef":{"offset":0,"size":1},"chunks":[` + verifyChunk([]byte("x")) + `]}`
@@ -147,7 +146,7 @@ func (f *verifyFixture) facts(t *testing.T, res VerifyResult) map[string]reconci
 // real installation directory: absent, exactly right, same size with different
 // content, and a size that differs. The order of the facts is the plan's own
 // (path order), and the small-files container is never among them — it does not
-// survive an install (review S5).
+// survive an install.
 func TestVerifyClassifiesTheInstallation(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -222,7 +221,7 @@ func TestVerifyClassifiesTheInstallation(t *testing.T) {
 				t.Errorf("facts = %v, want %v", got, c.want)
 			}
 
-			// Path order, fixed by the plan (review S5), and no container: a
+			// Path order, fixed by the plan, and no container: a
 			// healthy installation has no container file left.
 			var paths []string
 			for _, fact := range res.Facts {
@@ -238,7 +237,7 @@ func TestVerifyClassifiesTheInstallation(t *testing.T) {
 			}
 
 			// The install-shaped summary belongs to an install: a verification
-			// neither prints it nor claims to be installing (review S5).
+			// neither prints it nor claims to be installing.
 			text := planMessageTexts(PlanResult{Messages: res.Notices})
 			for _, forbidden := range []string{"Installing →", "Total size installed", "Files: ", "Nothing to download"} {
 				if strings.Contains(text, forbidden) {
@@ -264,7 +263,7 @@ func sameStatuses(got, want map[string]reconcile.FileStatus) bool {
 // TestVerifyKeepsThePlanDiagnostics locks what the mode does NOT drop: the plan's
 // own lines — the verbose item listing above all — reach a verification, so its
 // report is as auditable as an install's. Only the install-shaped summary and the
-// work a verification has no use for are left out (review S5).
+// work a verification has no use for are left out.
 func TestVerifyKeepsThePlanDiagnostics(t *testing.T) {
 	f := newVerifyFixture(t)
 	f.cfg.MsgLevel = msgLevelVerbose
@@ -285,7 +284,7 @@ func TestVerifyKeepsThePlanDiagnostics(t *testing.T) {
 // is built on: whether a member arrives inside a small-files container or on its
 // own (which is what an existing member on disk decides), the finished
 // installation has the same files — so a verification and an install cannot
-// disagree about which paths the installation owns (review S5).
+// disagree about which paths the installation owns.
 func TestVerifyFileSetIgnoresTheContainerRoute(t *testing.T) {
 	f := newVerifyFixture(t)
 	d := f.downloader(t)
@@ -331,7 +330,7 @@ func TestVerifyFileSetIgnoresTheContainerRoute(t *testing.T) {
 // TestVerifyDoesNotFetchTheOldBuild locks what the verify mode is for: an
 // install compares against the previously installed build (a second manifest
 // fetch, plus the depot expansion behind it) to know what to delete; a
-// verification reports facts and must not pay for that (review S5).
+// verification reports facts and must not pay for that.
 func TestVerifyDoesNotFetchTheOldBuild(t *testing.T) {
 	f := newPlanFixture(t)
 	f.setDefaultBodies()
@@ -370,7 +369,7 @@ func TestVerifyDoesNotFetchTheOldBuild(t *testing.T) {
 	}
 }
 
-// TestVerifyWritesNothing locks the read-only promise (review CLI1 §7, T11/T17):
+// TestVerifyWritesNothing locks the read-only promise:
 // a verification of a tree with a mismatch in it leaves every file — content and
 // modification time — exactly as it found it. Nothing is repaired, replaced or
 // removed.
@@ -446,7 +445,7 @@ func treeState(t *testing.T, root string) map[string]treeFile {
 }
 
 // TestVerifyResolvesTheSameRootAsInstall locks the shared installation-locator
-// contract (review CLI1 §13⑤, T20): for one request, a verification reads the
+// contract: for one request, a verification reads the
 // same directory an install writes, custom install subdirectory included.
 func TestVerifyResolvesTheSameRootAsInstall(t *testing.T) {
 	for _, subdir := range []string{"%install_dir%", "My Game"} {
@@ -472,7 +471,7 @@ func TestVerifyResolvesTheSameRootAsInstall(t *testing.T) {
 }
 
 // TestVerifyHonoursTheMaskAndTheBlacklist locks the two filters a verification
-// shares with an install (review CLI1 §13④, T19): the include mask decides
+// shares with an install: the include mask decides
 // whether the DLC's files are part of the installation at all, and a blacklisted
 // path is not one of its files. Both are applied while the plan is built, so a
 // verification cannot see a different set than an install would.
@@ -518,7 +517,7 @@ func TestVerifyHonoursTheMaskAndTheBlacklist(t *testing.T) {
 // TestVerifyReportsUnobservableFiles locks the failure path end to end: a
 // destination the filesystem refuses is reported as a fact carrying the error,
 // keeps its place in the report, and the walk continues — one unreadable file
-// must not hide the state of the rest (review CLI1 §13③, T18).
+// must not hide the state of the rest.
 //
 // The injection is a member whose path carries a NUL byte, which every platform
 // rejects: the project's way of making a stat fail without asserting anything

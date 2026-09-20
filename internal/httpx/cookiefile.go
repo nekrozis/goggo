@@ -41,9 +41,6 @@ type SaveCookiesResult struct {
 
 // cookieEntry is one persisted cookie: its canonical key plus the state to
 // write. It is the stable form a snapshot hands to file I/O.
-//
-// Fields are ordered to minimise padding: the key (3 strings + bool) first,
-// then the state (time.Time + string + 2 bools).
 type cookieEntry struct {
 	key   cookieKey
 	state cookieState
@@ -87,7 +84,7 @@ func (c *Client) LoadCookies() error {
 // SaveCookies writes the persistence state to the configured CookieFile.
 //
 // The state comes from the cookieStore snapshot only — never from
-// Jar.Cookies(), which is a match-filtered view and would silently lose
+// Jar.Cookies, which is a match-filtered view and would silently lose
 // cookies. The mutex is held just long enough to copy the snapshot, so file
 // I/O cannot block concurrent SetCookies events.
 func (c *Client) SaveCookies() (SaveCookiesResult, error) {
@@ -162,7 +159,7 @@ func reconstructCookie(pc cookiefile.PersistentCookie, u *url.URL) *http.Cookie 
 // conventional leading dot on domain cookies, and entries that have expired
 // since they were recorded are dropped. Session cookies (zero expiry) are
 // KEPT and written as expiry 0 — "session" describes a cookie's lifetime, it
-// is not a reason to omit the row (curl writes session cookies the same way).
+// is not a reason to omit the row.
 func fileCookies(snap []cookieEntry, now time.Time) []cookiefile.PersistentCookie {
 	out := make([]cookiefile.PersistentCookie, 0, len(snap))
 	for _, e := range snap {

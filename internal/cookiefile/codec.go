@@ -7,11 +7,11 @@ import (
 	"time"
 )
 
-// headerLine is the conventional first line of a curl-style cookies.txt file.
+// headerLine is the conventional first line of a cookies.txt file.
 const headerLine = "# Netscape HTTP Cookie File"
 
-// httpOnlyPrefix marks HttpOnly cookies in curl's cookies.txt extension: the
-// domain field carries this prefix before the actual domain.
+// httpOnlyPrefix marks HttpOnly cookies in the cookies.txt "#HttpOnly_"
+// extension: the domain field carries this prefix before the actual domain.
 const httpOnlyPrefix = "#HttpOnly_"
 
 // fieldCount is the number of TAB-separated columns per Netscape row:
@@ -24,9 +24,6 @@ const fieldCount = 7
 // directions: this codec does not normalise domain semantics — that is the
 // bridge's job (see doc.go). HostOnly maps one-to-one onto the file's
 // includeSubdomains column (TRUE => HostOnly=false, FALSE => HostOnly=true).
-//
-// Fields are ordered to minimise padding: time.Time (24B), the string block
-// (16B each), then the bool flags (1B each).
 type PersistentCookie struct {
 	Expires  time.Time
 	Domain   string
@@ -51,14 +48,13 @@ func (c PersistentCookie) unrepresentable() bool {
 
 // Parse decodes a cookies.txt document into its rows.
 //
-// Tolerance mirrors curl's cookie engine: comment lines and blank lines are
-// skipped, and malformed rows (wrong column count, a non-TRUE/FALSE flag, a
-// non-integer expiry, a negative expiry, or extra columns caused by a tab
-// inside the value) are skipped instead of failing the whole parse. A row
-// whose domain column starts with the "#HttpOnly_" prefix yields
-// HttpOnly=true with the prefix stripped; any other "#"-prefixed row is
-// treated as a comment. Both LF and CRLF line endings are accepted. The
-// function never fails and never panics on arbitrary input.
+// Tolerance: comment lines and blank lines are skipped, and malformed rows
+// (wrong column count, a non-TRUE/FALSE flag, a non-integer expiry, a negative
+// expiry, or extra columns caused by a tab inside the value) are skipped instead
+// of failing the whole parse. A row whose domain column starts with the
+// "#HttpOnly_" prefix yields HttpOnly=true with the prefix stripped; any other
+// "#"-prefixed row is treated as a comment. Both LF and CRLF line endings are
+// accepted. The function never fails and never panics on arbitrary input.
 func Parse(data []byte) []PersistentCookie {
 	var out []PersistentCookie
 	for _, raw := range strings.Split(string(data), "\n") {
@@ -117,8 +113,8 @@ func Parse(data []byte) []PersistentCookie {
 }
 
 // boolColumn parses a TRUE/FALSE column and reports whether it reads TRUE.
-// An empty column is treated as emptyIs (curl always writes one of the two
-// words, so this only guards hand-edited files); ok is false for any other
+// An empty column is treated as emptyIs; writers always emit one of the two
+// words, so this only guards hand-edited files. ok is false for any other
 // value, which makes the caller skip the row as malformed.
 func boolColumn(s string, emptyIs bool) (bool, bool) {
 	switch s {

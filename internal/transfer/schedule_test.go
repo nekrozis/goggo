@@ -10,7 +10,7 @@ import (
 
 // TestScheduleShared locks the mechanical semantics both download paths share:
 // an empty task list is a silent no-op, the worker count clamps to the task
-// count, cancellation surfaces as ctx.Err(), and the deliverer drains every
+// count, cancellation surfaces as ctx.Err, and the deliverer drains every
 // event before the run returns.
 func TestScheduleShared(t *testing.T) {
 	t.Run("empty is a no-op", func(t *testing.T) {

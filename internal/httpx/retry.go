@@ -22,12 +22,10 @@ type RetryPolicy struct {
 	ShouldRetry ShouldRetry
 }
 
-// DefaultPolicy returns the policy that reproduces the C++ retry loop of
-// CurlHandleGetResponse (util.cpp:783-806): retry transport errors (except
-// context cancellation) and HTTP statuses >= 400, but stop immediately on
-// 403 and 404. maxAttempts maps from the C++ max_retries counter as
-// maxAttempts = max_retries + 1 (the C++ value counts retries after the
-// first attempt).
+// DefaultPolicy returns a policy that retries transport errors (except context
+// cancellation) and HTTP statuses >= 400, but stops immediately on 403 and 404.
+// maxAttempts is the total number of attempts, so a caller that counts retries
+// after the first attempt passes retries+1.
 func DefaultPolicy(maxAttempts int, wait time.Duration) RetryPolicy {
 	if maxAttempts < 1 {
 		maxAttempts = 1
@@ -39,14 +37,12 @@ func DefaultPolicy(maxAttempts int, wait time.Duration) RetryPolicy {
 	}
 }
 
-// DefaultShouldRetry implements the C++ retry decision of util.cpp:783-806:
-// transport-level errors retry, HTTP errors retry except 403/404, and a
-// canceled/deadline-exceeded context never retries.
+// DefaultShouldRetry retries transport-level errors, retries HTTP errors except
+// 403/404, and never retries a canceled or deadline-exceeded context.
 //
-// It exists for behavioral compatibility with lgogdownloader; it is not
-// intended as a general HTTP retry policy. In particular it retries 401,
-// which OAuth flows must override (refresh the token, then re-issue the
-// request) instead of blindly re-sending.
+// It is tuned for these APIs rather than being a general HTTP retry policy. In
+// particular it retries 401, which OAuth flows must override (refresh the token,
+// then re-issue the request) instead of blindly re-sending.
 func DefaultShouldRetry(resp *http.Response, err error) bool {
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -96,7 +92,7 @@ func DoWithRetry(ctx context.Context, policy RetryPolicy, fn func(context.Contex
 	}
 }
 
-// sleepCtx waits for d or returns ctx.Err() if the context ends first.
+// sleepCtx waits for d or returns ctx.Err if the context ends first.
 func sleepCtx(ctx context.Context, d time.Duration) error {
 	t := time.NewTimer(d)
 	defer t.Stop()

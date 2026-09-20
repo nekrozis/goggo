@@ -14,9 +14,8 @@ import (
 	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
-// Messages the C++ source prints for these two commands instead of doing the
-// work (downloader.cpp:4363,4391,4859-4861,4885,4908,4912). They are messages,
-// not failures: main.cpp:842,897 never fold these commands into the exit code.
+// Messages printed for these two commands instead of doing the work. They are
+// messages, not failures:
 const (
 	msgNoProducts        = "Didn't match any products"
 	msgNoSelection       = "Unable to read selection"
@@ -26,31 +25,24 @@ const (
 	msgGenerationTwoOnly = "Only generation 2 builds are supported currently"
 )
 
-// errInstallerFallback is returned after the two Linux messages. The C++ source
-// continues into the game-details layer to list installers that can be used as
-// a repository (downloader.cpp:4863-4898); that layer is not ported, and
-// printing the two lines and exiting as though the fallback had run would report
-// work that never happened.
+// errInstallerFallback is returned after the two Linux messages: the installer
+// fallback is not implemented in this build, and printing the two lines and
+// exiting as though it had run would report work that never happened.
 var errInstallerFallback = errors.New(
 	"the installer fallback for a platform without Galaxy builds is not implemented in this build")
 
-// numericIDRE matches the product-id argument in its numeric form
-// (downloader.cpp:3850).
+// numericIDRE matches a product-id argument in its numeric form.
 var numericIDRE = regexp.MustCompile(`^[0-9]+$`)
 
-// Notice is a message the C++ source prints instead of doing the work. It is
-// not an error: the exit code stays 0. Err selects the stream, because the C++
-// source splits them — the support and generation messages go to stdout, the
-// argument-resolution failures to stderr.
+// Notice is a message printed instead of doing the work. It is not an error:
+// the exit code stays 0. Err selects the stream — the support and generation
+// messages go to stdout, the argument-resolution failures to stderr.
 type Notice struct {
 	Text string
 	Err  bool
 }
 
-// BuildRow is one line of the build listing printed when no build is selected
-// (downloader.cpp:4906-4913).
-//
-// Fields are ordered to minimise padding: the strings first, then the ints.
+// BuildRow is one line of the build listing printed when no build is selected.
 type BuildRow struct {
 	VersionName   string
 	DatePublished string
@@ -62,8 +54,8 @@ type BuildRow struct {
 
 // BuildsResult is what ShowBuilds produces. At most one of the three fields is
 // set: Builds carries the listing when no build was selected, Manifest the
-// document of the selected build, and Notice the message the C++ source prints
-// when it stops early.
+// document of the selected build, and Notice the message printed when the
+// command stops early.
 //
 // Notice and an error can come back together: the Linux fallback prints its two
 // lines and then reports that this build cannot continue, so the front end
@@ -74,17 +66,16 @@ type BuildsResult struct {
 	Notice   Notice
 }
 
-// CDNsResult is what ListCDNs produces: the endpoint names and, when the C++
-// source stops early, the message it prints instead.
+// CDNsResult is what ListCDNs produces: the endpoint names and, when the
+// command stops early, the message printed instead.
 type CDNsResult struct {
 	Names  []string
 	Notice Notice
 }
 
-// ShowBuilds mirrors Downloader::galaxyShowBuilds (downloader.cpp:4830-4838 and
-// 4840-4936): resolve the product id, read its build list, sort it the way
-// --galaxy-builds-sort asks, then either return the listing or fetch and return
-// the manifest of the selected build.
+// ShowBuilds resolves the product id, reads its build list, sorts it the way
+// --galaxy-builds-sort asks, then either returns the listing or fetches and
+// returns the manifest of the selected build.
 func (d *Downloader) ShowBuilds(ctx context.Context, productID, buildID string) (BuildsResult, error) {
 	id, notice, err := d.selectProductID(ctx, productID)
 	if err != nil {
@@ -94,20 +85,14 @@ func (d *Downloader) ShowBuilds(ctx context.Context, productID, buildID string) 
 		return BuildsResult{Notice: notice}, nil
 	}
 	if id == "" {
-		// The C++ source skips the work when the resolved id is empty
-		// (downloader.cpp:4833-4837).
+		// An empty resolved id means there is no work to do.
 		return BuildsResult{}, nil
 	}
 	return d.showBuildsFor(ctx, id, buildID)
 }
 
-// ListCDNs mirrors Downloader::galaxyListCDNs (downloader.cpp:4345-4353 and
-// 4355-4397): resolve the product id, read the build list, and print the CDN
+// ListCDNs resolves the product id, reads the build list, and returns the CDN
 // endpoint names of the secure link of the selected build.
-//
-// Difference (recorded): the C++ source also extracts the build hash here and
-// then never uses it. The extraction is dropped rather than carried as a dead
-// variable.
 func (d *Downloader) ListCDNs(ctx context.Context, productID, buildID string) (CDNsResult, error) {
 	id, notice, err := d.selectProductID(ctx, productID)
 	if err != nil {
@@ -141,7 +126,7 @@ func (d *Downloader) ListCDNs(ctx context.Context, productID, buildID string) (C
 	if err != nil {
 		return CDNsResult{}, err
 	}
-	if index < 0 { // build_index = std::max(0, build_index) (downloader.cpp:4368)
+	if index < 0 {
 		index = 0
 	}
 	generation, _, err := buildEntry(items, index)
@@ -163,8 +148,8 @@ func (d *Downloader) ListCDNs(ctx context.Context, productID, buildID string) (C
 	return CDNsResult{Names: names}, nil
 }
 
-// showBuildsFor is the by-id half of the C++ command
-// (downloader.cpp:4840-4936).
+// showBuildsFor is the by-id half of ShowBuilds: it reads the build list and
+// returns either the listing or the manifest of the selected build.
 func (d *Downloader) showBuildsFor(ctx context.Context, productID, buildID string) (BuildsResult, error) {
 	platform := platformName(d.cfg.DownloadConfig.GalaxyPlatform)
 	doc, err := d.galaxy.ProductBuilds(ctx, productID, platform, "")
@@ -175,10 +160,9 @@ func (d *Downloader) showBuildsFor(ctx context.Context, productID, buildID strin
 		return BuildsResult{}, err
 	}
 
-	// An empty answer for Linux is the C++ source's "the API has no Linux
-	// support" case (downloader.cpp:4858-4863). An HTTP failure does not land
-	// here: it is a *httpx.StatusError, unlike the C++ handle whose FAILONERROR
-	// leaves the body empty (S13 Δ1).
+	// An empty answer for Linux means the API has no Linux support. An HTTP
+	// failure does not land here: it is a *httpx.StatusError, not an empty
+	// document.
 	if len(doc) == 0 && platform == platformLinux {
 		return BuildsResult{
 			Notice: Notice{Text: msgNoLinuxSupport + "\n" + msgCheckInstallers},
@@ -232,17 +216,16 @@ func (d *Downloader) showBuildsFor(ctx context.Context, productID, buildID strin
 	}
 }
 
-// selectProductID mirrors Downloader::galaxySelectProductIdHelper
-// (downloader.cpp:3845-3898): a numeric argument IS the product id; anything
-// else is a game-name regular expression matched against the account's product
-// list, with an interactive selection when it matches more than one.
+// selectProductID resolves the product argument: a numeric argument IS the
+// product id; anything else is a game-name regular expression matched against
+// the account's product list, with an interactive selection when it matches
+// more than one.
 //
-// A non-empty Notice means the C++ source prints that message and stops; the
+// A non-empty Notice means the caller prints that message and stops; the
 // returned error is reserved for a real failure of the product list itself.
 //
-// Difference (recorded): the C++ source overwrites the global sGameRegex with
-// the argument before listing (downloader.cpp:3853). This port passes the
-// pattern to the one listing call instead, so nothing shared is edited.
+// The pattern is passed to the one listing call rather than stored anywhere
+// shared.
 func (d *Downloader) selectProductID(ctx context.Context, productID string) (string, Notice, error) {
 	if numericIDRE.MatchString(productID) {
 		return productID, Notice{}, nil
@@ -265,22 +248,19 @@ func (d *Downloader) selectProductID(ctx context.Context, productID string) (str
 	}
 	index, err := d.ui.SelectProduct(names)
 	if err != nil || index < 0 || index >= len(names) {
-		// The unanswerable-prompt case (downloader.cpp:3872-3876) and a console
-		// that hands back an unusable index are one outcome here: no selection
-		// was made.
+		// An unanswerable prompt and a console that hands back an unusable
+		// index are one outcome here: no selection was made.
 		return "", Notice{Text: msgNoSelection, Err: true}, nil
 	}
 	return res.Games[index].ID, Notice{}, nil
 }
 
-// gameListOptions assembles the product query for the game-name lookup. It
-// mirrors what the C++ source reaches through getGameList() → getGames()
-// (downloader.cpp:381-384, website.cpp:92-166).
+// gameListOptions assembles the product query for the game-name lookup.
 //
-// It duplicates the assembly in internal/cli/list.go on purpose: S17 leaves the
-// listing command where it is (review ruling D17=b), and the two copies converge
-// when that command moves into this package. Keeping them separate keeps this
-// step from changing listing behaviour.
+// It duplicates the assembly in internal/cli/list.go on purpose: the listing
+// command still lives there (D17), and the two copies converge when it moves
+// into this package. Keeping them separate keeps this step from changing
+// listing behaviour.
 func (d *Downloader) gameListOptions(gameRegex string) catalog.ListOptions {
 	cfg := d.cfg
 	return catalog.ListOptions{
@@ -298,15 +278,11 @@ func (d *Downloader) gameListOptions(gameRegex string) catalog.ListOptions {
 	}
 }
 
-// sortProductBuilds mirrors Downloader::sortGalaxyProductBuilds
-// (downloader.cpp:6824-6890): the requested order reorders the build list, and
-// anything else — empty, "none" or an unknown value — leaves it alone, because
-// the C++ source only writes the list back inside its two named branches.
+// sortProductBuilds applies the requested order to the build list. An empty,
+// "none" or unknown order leaves the document alone.
 //
-// Difference (recorded): the C++ source uses std::sort, which does not define
-// the order of entries with equal keys; this port uses sort.SliceStable and
-// keeps the document order for them. The difference matters here — equal keys
-// are what decide which entry a build index selects.
+// The sort is stable, so entries with equal keys keep the document order. That
+// matters here: equal keys are what decide which entry a build index selects.
 func (d *Downloader) sortProductBuilds(doc map[string]any) (map[string]any, error) {
 	order := d.cfg.GalaxyBuildSortingOrder
 	if order == "" || order == "none" || len(doc) == 0 {
@@ -321,9 +297,9 @@ func (d *Downloader) sortProductBuilds(doc map[string]any) (map[string]any, erro
 		return nil, err
 	}
 
-	// Both branches start the same way: newest first (downloader.cpp:6836-6843,
-	// 6851-6858). The branch is read here too, because the score pass needs it
-	// and reading it once keeps the two passes consistent.
+	// Both orders start the same way: newest first. The branch is read here
+	// too, because the score pass needs it and reading it once keeps the two
+	// passes consistent.
 	builds := make([]buildEntryDoc, len(items))
 	for i, raw := range items {
 		item, err := jsonval.Object(raw)
@@ -348,9 +324,8 @@ func (d *Downloader) sortProductBuilds(doc map[string]any) (map[string]any, erro
 	}
 
 	// score: the sorted position, with branch builds pushed behind and the
-	// "compatibility" branch further still (downloader.cpp:6860-6885). The
-	// scores are frozen before the second pass, because they are positions in
-	// the first one.
+	// "compatibility" branch further still. The scores are frozen before the
+	// second pass, because they are positions in the first one.
 	scores := make([]int, len(builds))
 	positions := make([]int, len(builds))
 	for i, b := range builds {
@@ -407,14 +382,10 @@ func buildItems(doc map[string]any) ([]any, error) {
 	return items, nil
 }
 
-// buildIndexFor mirrors Downloader::galaxyGetBuildIndexWithBuildId
-// (downloader.cpp:3811-3839): an exact build-id match wins, otherwise the
-// argument is used as an index. -1 means no build was selected, which is what
-// makes the command print the listing.
-//
-// Difference (recorded): the C++ source uses std::stoi, which accepts leading
-// whitespace and stops at the first non-digit, so "2x" means build 2; this port
-// requires the whole argument to be an integer.
+// buildIndexFor resolves the build argument: an exact build-id match wins,
+// otherwise the argument is used as an index. The whole argument must be an
+// integer; anything else means no build was selected (-1), which is what makes
+// the command print the listing.
 func buildIndexFor(items []any, buildID string) (int, error) {
 	for i, raw := range items {
 		item, err := jsonval.Object(raw)
@@ -431,13 +402,12 @@ func buildIndexFor(items []any, buildID string) (int, error) {
 	}
 	n, err := strconv.Atoi(buildID)
 	if err != nil {
-		// The C++ source catches the conversion failure and keeps -1.
 		return -1, nil
 	}
 	return n, nil
 }
 
-// buildRow reads one listing entry (downloader.cpp:4906-4913).
+// buildRow reads one listing entry.
 func buildRow(index int, item map[string]any) (BuildRow, error) {
 	var row BuildRow
 	var err error
@@ -460,9 +430,8 @@ func buildRow(index int, item map[string]any) (BuildRow, error) {
 }
 
 // buildEntry reads the generation and link of one build entry. An index outside
-// the list has no entry, exactly like the C++ source reading a null value, so
-// it reads as generation 0 with no link — which its switch turns into the
-// "only generation 1 and 2" message.
+// the list has no entry, so it reads as generation 0 with no link — which the
+// switch in showBuildsFor turns into the "only generation 1 and 2" message.
 func buildEntry(items []any, index int) (generation int, link string, err error) {
 	if index < 0 || index >= len(items) {
 		return 0, "", nil
@@ -481,8 +450,8 @@ func buildEntry(items []any, index int) (generation int, link string, err error)
 	return int(gen), link, nil
 }
 
-// endpointNames collects the non-empty endpoint names of a secure link document
-// (downloader.cpp:4383-4392).
+// endpointNames collects the non-empty endpoint names of a secure link
+// document.
 func endpointNames(doc map[string]any) ([]string, error) {
 	raw, ok := doc["urls"]
 	if !ok || raw == nil {
@@ -510,9 +479,7 @@ func endpointNames(doc map[string]any) ([]string, error) {
 }
 
 // hashFromLink takes the last path segment of a build link, which is the hash
-// ManifestV2 expects (downloader.cpp:4927-4928). A link without a "/" is the
-// whole string, mirroring the C++ arithmetic where a missing separator sends
-// the begin iterator to offset 0.
+// ManifestV2 expects. A link without a "/" is the whole string.
 func hashFromLink(link string) string {
 	if i := strings.LastIndexByte(link, '/'); i >= 0 {
 		return link[i+1:]
@@ -520,8 +487,7 @@ func hashFromLink(link string) string {
 	return link
 }
 
-// platformName maps the Galaxy platform mask onto the API path segment
-// (downloader.cpp:4843-4849).
+// platformName maps the Galaxy platform mask onto the API path segment.
 func platformName(platform uint32) string {
 	switch platform {
 	case config.PlatformLinux:

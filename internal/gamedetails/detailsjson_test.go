@@ -7,7 +7,7 @@ import (
 )
 
 // TestGameFileGetAsJson locks the file field table of the details-json
-// contract: every key present, version only when non-empty (gamefile.cpp).
+// contract: every key present, version only when non-empty.
 func TestGameFileGetAsJson(t *testing.T) {
 	gf := GameFile{Updated: 1, ID: "en1installer0", Name: "Installer", Path: "/setup.exe",
 		Size: "10", Platform: config.PlatformWindows, Language: config.LangEN, Silent: 0,
@@ -15,7 +15,7 @@ func TestGameFileGetAsJson(t *testing.T) {
 		Type: config.GFBaseInstaller, GalaxyDownlinkJSONURL: "https://api/dl"}
 	got := gf.GetAsJson()
 	if _, has := got["version"]; has {
-		t.Error("version present while empty, want it absent (the C++ conditional member)")
+		t.Error("version present while empty, want it absent (the conditional member)")
 	}
 	for _, key := range []string{"updated", "id", "name", "path", "size", "platform", "language",
 		"silent", "gamename", "title", "gamename_basegame", "title_basegame", "type", "galaxy_downlink_json_url"} {

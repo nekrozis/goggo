@@ -15,7 +15,7 @@ import (
 )
 
 // outcome is how a command line ended. It is the ONLY thing exitCode turns into
-// a number (review CLI1 §8): the contract — 0 success, 1 operational failure,
+// a number: the contract — 0 success, 1 operational failure,
 // 2 usage failure, 130 interrupted — lives in exactly one place, so no code path
 // can invent a fifth meaning for a code.
 type outcome uint8
@@ -50,7 +50,7 @@ func outcomeForError(err error) outcome {
 	return outcomeOperationFailure
 }
 
-// stopOutcome maps the install lifecycle's terminal reason (review UI1 v3 §6.E)
+// stopOutcome maps the install lifecycle's terminal reason
 // onto the same contract.
 func stopOutcome(reason stopReason) outcome {
 	switch reason {
@@ -83,7 +83,7 @@ func newConfig() (config.Config, error) {
 // streams it is given, so the whole front end is testable and nothing can reach
 // the real terminal. The command vocabulary, the option acceptance and the exit
 // codes are the ones the parser and the command tree define; this function only
-// decides which command runs (review CLI1 §6).
+// decides which command runs.
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return runWithDeps(args, stdin, stdout, stderr, core.Dependencies{})
 }
@@ -112,19 +112,18 @@ func fail(w io.Writer, err error) int {
 }
 
 // sessionRequest is the ONE place a command's declared session class becomes the
-// request core acts on (review CLI1 §7). The chain is short and has no second
-// source of truth: the tree declares the class, the parser copies it into the
-// invocation, and this function turns it into what OpenWith enforces.
+// request core acts on: the tree declares the class, the parser copies it into
+// the invocation, and this function turns it into what OpenWith enforces.
 //
 // interactive is the terminal answer (ui.IsTerminal), and it conditions only the
 // implicit login: without a terminal there is nobody to answer its prompts, so
 // such a run must fail with the actionable error instead. An explicit login is
 // not conditioned on it — its flow has a non-interactive branch of its own, and
-// stdin may still carry the browser callback URL (review S4, ruling 2).
+// stdin may still carry the browser callback URL.
 //
 // An undeclared class is a broken tree, not user input. It panics rather than
 // silently becoming "no session needed", which would let a command that needs
-// the account run unauthenticated (review S4).
+// the account run unauthenticated.
 func sessionRequest(class sessionClass, interactive bool) core.SessionRequest {
 	switch class {
 	case sessionNone:
@@ -187,24 +186,17 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		return outcomeOK
 	case cmdAuthLogin:
 		// An explicit login always runs the flow, even with a usable session
-		// stored: that is what asking to log in means (the upstream --login
-		// does the same, main.cpp:679-683).
+		// stored: that is what asking to log in means.
 		//
 		// It is set here, not in sessionRequest: SessionRequest says what the
 		// run needs from the session, while "the user ran the login command" is
-		// a fact about this command (review S4, ruling B).
+		// a fact about this command.
 		inv.cfg.Login = true
 	}
 
-	// The commands whose capability arrives in a later step of CLI1. They are
-	// registered so their names are stable and their help exists, but they must
-	// not pretend to have done something.
-	// (Nothing is stubbed any more: S6 wired the last two, orphans check and
-	// orphans remove.)
 	// The destructive commands must not run without a way to authorize them: a
 	// removal with no terminal to ask on and no --yes is a usage failure, and it
-	// is answered before any session or network work happens (review CLI1 §8,
-	// T12).
+	// is answered before any session or network work happens.
 	if inv.cmd == cmdOrphansRemove && !inv.yes && !ui.IsTerminal() {
 		return reportError(stderr, usagef(
 			"orphans remove needs --yes when the input is not a terminal"))
@@ -213,14 +205,14 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 	// The sampling surface belongs to the commands that poll it: an install
 	// or a download run publishes its per-task byte counts into this registry
 	// and the renderer reads it back. Every other command opens without one,
-	// which is the nil case transfer skips entirely (review S-ETA2).
+	// which is the nil case transfer skips entirely.
 	var progress *transfer.Progress
 	if inv.cmd == cmdInstall || inv.cmd == cmdDownload || inv.cmd == cmdDownloadFile {
 		progress = transfer.NewProgress()
 	}
 
 	// What this command asks of the session, decided once for every command
-	// that opens one (review CLI1 §7).
+	// that opens one.
 	req := sessionRequest(inv.session, ui.IsTerminal())
 	// The sampling surface is the CLI's own, so it only fills the field when
 	// this command publishes samples; an injected Progress (a test's) is left
@@ -234,7 +226,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 	}
 	defer func() { _ = d.Close() }()
 
-	// Downloader::init (main.cpp:802-806): a usable access token is checked
+	// Downloader::init: a usable access token is checked
 	// before any command runs, and a failure stops the run.
 	if err := d.Init(ctx); err != nil {
 		return reportError(stderr, err)
@@ -250,7 +242,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		// This case exists because its absence was invisible: `auth login`
 		// completed the login, stored the credentials, and then fell through
 		// to the no-handler default below — reporting failure for a command
-		// that had just succeeded (CLI1 S2 gap, found 2026-09-20). The
+		// that had just succeeded. The
 		// coverage test in dispatch_coverage_test.go now walks the tree so no
 		// command can reach that default again.
 		return outcomeOK
@@ -266,18 +258,17 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 
 	case cmdShowBuilds, cmdShowManifest:
 		// "show builds" lists a product's builds; "show manifest" shows one
-		// build's manifest. Upstream folded both into one option whose meaning
-		// changed with the argument (downloader.cpp:4833-4837); the split made
-		// the intent explicit, so a manifest request without a build means the
-		// build a plain install would pick (index 0), not "list them".
+		// build's manifest. They are separate commands, so a manifest request
+		// without a build means the build a plain install would pick (index 0),
+		// not "list them".
 		build := inv.target.Build
 		if inv.cmd == cmdShowManifest && build == "" {
 			build = "0"
 		}
 		res, err := d.ShowBuilds(ctx, inv.target.Product, build)
 		// The Linux support messages are rendered even when the run then fails:
-		// the C++ source prints them to stdout and this port reports the missing
-		// fallback on stderr afterwards (downloader.cpp:4858-4863).
+		// they go to stdout and the missing fallback is reported on stderr
+		// afterwards.
 		renderNotice(stdout, stderr, res.Notice)
 		if err != nil {
 			return reportError(stderr, err)
@@ -306,11 +297,11 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 
 	case cmdVerify:
 		// A verification reads the same installation an install writes, so it
-		// resolves its target exactly like one (review §13⑤) — and then only
+		// resolves its target exactly like one — and then only
 		// observes: the plan is built in verify mode (no destructive work, no
 		// free-space answer) and every expected file is classified. The plan's
 		// own messages are rendered first, the way an install emits them as it
-		// goes; on a plan failure that is all there is to show (review S5).
+		// goes; on a plan failure that is all there is to show.
 		req := core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build)
 		res, err := d.Verify(ctx, req)
 		for _, notice := range res.Notices {
@@ -334,11 +325,10 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		return ui.runOrphansRemove(ctx, d, inv, stdout, stderr)
 
 	case cmdInstall:
-		// The lifecycle has one owner and one order (review UI1 v3 §6.E):
-		// signal context → renderer start → the install with Stop deferred →
-		// signal restore. Stop covers every exit path — error, cancellation and
-		// panic — but never swallows: a panic propagates after the cleanup, as
-		// Go would.
+		// The lifecycle has one owner and one order: signal context → renderer
+		// start → the install with Stop deferred → signal restore. Stop covers
+		// every exit path — error, cancellation and panic — but never swallows:
+		// a panic propagates after the cleanup, as Go would.
 		req := core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build)
 		return stopOutcome(ui.runInstall(ctx, d, req, inv.cfg, progress))
 	}
@@ -370,9 +360,9 @@ func listFormat(id commandID) uint32 {
 
 // runInstall drives one install operation and returns its result. The reason
 // is fixed BEFORE the deferred Stop reads it, so a panic or an early return
-// finalizes with the right state (review UI1 v3, constraint 6): the result
-// variable starts at failed, so an unwound panic finalizes as failed and then
-// propagates — Stop cleans up, nothing is swallowed.
+// finalizes with the right state: the result variable starts at failed, so an
+// unwound panic finalizes as failed and then propagates — Stop cleans up,
+// nothing is swallowed.
 func (c *console) runInstall(ctx context.Context, d *core.Downloader, req core.InstallRequest, cfg config.Config, progress *transfer.Progress) stopReason {
 	ctx, stopSignal := signal.NotifyContext(ctx, os.Interrupt)
 	c.attachInstallUI(cfg, progress, "Installation")
@@ -387,7 +377,7 @@ func (c *console) runInstall(ctx context.Context, d *core.Downloader, req core.I
 	}()
 	// The rendering is finalized; only now does SIGINT regain its default
 	// behavior, so a second Ctrl+C during any remaining cleanup force-kills
-	// instead of being swallowed by the context (review UI1 v3, decision 4).
+	// instead of being swallowed by the context.
 	stopSignal()
 	c.endInstallScope()
 

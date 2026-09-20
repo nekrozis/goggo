@@ -21,10 +21,9 @@ var (
 	errDownlinkNotString = errors.New("galaxy: downlink is not a string")
 )
 
-// gamedetailsResolver is GD1's DownlinkResolver over the Galaxy API: one file
-// entry names a downlink JSON document, and the document names the url the file
-// is actually fetched from (galaxyapi.cpp:529-533, getResponseJson +
-// getPathFromDownlinkUrl).
+// gamedetailsResolver is a DownlinkResolver over the Galaxy API: one file entry
+// names a downlink JSON document, and the document names the url the file is
+// actually fetched from.
 //
 // It lives here because it needs all three of the API client, the url-to-path
 // helper and the conversion's result type, while internal/gamedetails must not
@@ -38,10 +37,9 @@ type gamedetailsResolver struct {
 // to satisfy it.
 var _ gamedetails.DownlinkResolver = (*gamedetailsResolver)(nil).Resolve
 
-// gamedetailsResolver builds the resolver this run's conversions use. It is the
-// Downloader-side constructor the type was missing while it had no consumer
-// (GD2), and its shape follows chunkURLProvider: the package's own credentials
-// and the refresh a request needs when they have expired.
+// gamedetailsResolver builds the resolver this run's conversions use. Its shape
+// follows chunkURLProvider: the package's own credentials and the refresh a
+// request needs when they have expired.
 func (d *Downloader) gamedetailsResolver() *gamedetailsResolver {
 	return &gamedetailsResolver{
 		galaxy:  d.galaxy,
@@ -52,7 +50,7 @@ func (d *Downloader) gamedetailsResolver() *gamedetailsResolver {
 // Resolve implements gamedetails.DownlinkResolver.
 //
 // The path is derived by galaxy.PathFromDownlinkURL and never reimplemented
-// here, so the one url-to-path rule in the port has one implementation.
+// here, so the one url-to-path rule has one implementation.
 func (r *gamedetailsResolver) Resolve(ctx context.Context, gamename, downlinkURL string) (gamedetails.ResolvedFile, error) {
 	if err := r.refresh.refreshIfExpired(ctx); err != nil {
 		return gamedetails.ResolvedFile{}, fmt.Errorf("galaxy: refresh login: %w", err)
@@ -70,8 +68,7 @@ func (r *gamedetailsResolver) Resolve(ctx context.Context, gamename, downlinkURL
 		return gamedetails.ResolvedFile{}, errNoDownlink
 	}
 	// Shape before value: jsonval.Str would happily stringify a number or an
-	// object, which is exactly what must not decide what this field is
-	// (GD1 §3, the conversion's type rule).
+	// object, which is exactly what must not decide what this field is.
 	downlink, ok := raw.(string)
 	if !ok {
 		return gamedetails.ResolvedFile{}, fmt.Errorf("%w: got %s", errDownlinkNotString, jsonval.Kind(raw))

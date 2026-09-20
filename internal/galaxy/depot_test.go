@@ -44,7 +44,7 @@ func depotItems(t *testing.T, manifest string, opts DepotOptions) (int, error) {
 	return len(items), err
 }
 
-// TestDepotItemsSmallFilesContainer locks galaxyapi.cpp:258-296, including the
+// TestDepotItemsSmallFilesContainer locks
 // three-way md5 fallback: the container's own md5, else the single chunk's md5,
 // else "".
 func TestDepotItemsSmallFilesContainer(t *testing.T) {
@@ -105,9 +105,9 @@ func TestDepotItemsSmallFilesContainer(t *testing.T) {
 	}
 }
 
-// TestDepotItemsRunningOffsets locks the accumulation of galaxyapi.cpp:279-283:
-// a chunk's offset is where the previous chunks ended, and the entry totals are
-// the sums. Order follows the document.
+// TestDepotItemsRunningOffsets locks the accumulation: a chunk's offset is where
+// the previous chunks ended, and the entry totals are the sums. Order follows the
+// document.
 func TestDepotItemsRunningOffsets(t *testing.T) {
 	const body = `{"depot":{"items":[` +
 		`{"path":"a.bin","chunks":[` +
@@ -148,7 +148,7 @@ func TestDepotItemsRunningOffsets(t *testing.T) {
 }
 
 // TestDepotItemsSkipsNonArrayChunks locks the per-entry filter of
-// galaxyapi.cpp:260 and 300: an entry without a chunks array is not an error, it
+// 300: an entry without a chunks array is not an error, it
 // is simply not a depot entry.
 func TestDepotItemsSkipsNonArrayChunks(t *testing.T) {
 	const body = `{"depot":{` +
@@ -172,7 +172,7 @@ func TestDepotItemsSkipsNonArrayChunks(t *testing.T) {
 	}
 }
 
-// TestDepotItemsSFCRef locks the sfcRef branch of galaxyapi.cpp:308-313.
+// TestDepotItemsSFCRef locks the sfcRef branch of
 func TestDepotItemsSFCRef(t *testing.T) {
 	const body = `{"depot":{"items":[` +
 		`{"path":"in-sfc.bin","chunks":[{"compressedMd5":"c1","md5":"u1","compressedSize":1,"size":1}],` +
@@ -195,9 +195,9 @@ func TestDepotItemsSFCRef(t *testing.T) {
 	}
 }
 
-// TestDepotItemsPathNormalisation locks galaxyapi.cpp:315-321: the lowercase
-// rule applies only on Windows and only when the setting is on, while the
-// backslash rewrite happens in every case.
+// TestDepotItemsPathNormalisation locks the path rules: the lowercase rule
+// applies only on Windows and only when the setting is on, while the backslash
+// rewrite happens in every case.
 func TestDepotItemsPathNormalisation(t *testing.T) {
 	const body = `{"depot":{"items":[{"path":"Dir\\Sub/File.BIN",` +
 		`"chunks":[{"compressedMd5":"c","md5":"u","compressedSize":1,"size":1}]}]}}`
@@ -228,9 +228,9 @@ func TestDepotItemsPathNormalisation(t *testing.T) {
 	}
 }
 
-// TestDepotItemsContainerShape locks the reviewed boundary for the containers: a
-// missing or null section means "not present", a section in the wrong shape is a
-// broken document and is reported.
+// TestDepotItemsContainerShape locks the container shape boundary: a missing or
+// null section means "not present", a section in the wrong shape is a broken
+// document and is reported.
 func TestDepotItemsContainerShape(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -267,9 +267,8 @@ func TestDepotItemsContainerShape(t *testing.T) {
 	}
 }
 
-// TestFilteredDepotItemsLanguage locks galaxyapi.cpp:630-639, including the
-// ruling that an empty or missing language list selects NOTHING: the C++ flag
-// starts false and is only set on a match.
+// TestFilteredDepotItemsLanguage locks the rule that an empty or missing language
+// list selects NOTHING: the flag starts false and is only set on a match.
 func TestFilteredDepotItemsLanguage(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -305,7 +304,7 @@ func TestFilteredDepotItemsLanguage(t *testing.T) {
 	}
 }
 
-// TestFilteredDepotItemsArch locks galaxyapi.cpp:641-654: a missing osBitness
+// TestFilteredDepotItemsArch locks the architecture rule: a missing osBitness
 // means "not architecture specific" and is selected; a present list must match.
 func TestFilteredDepotItemsArch(t *testing.T) {
 	cases := []struct {
@@ -344,7 +343,7 @@ func TestFilteredDepotItemsArch(t *testing.T) {
 	}
 }
 
-// TestFilteredDepotItemsStampsProductID locks galaxyapi.cpp:663-670.
+// TestFilteredDepotItemsStampsProductID locks
 func TestFilteredDepotItemsStampsProductID(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -374,7 +373,7 @@ func TestFilteredDepotItemsStampsProductID(t *testing.T) {
 }
 
 // TestFilteredDepotItemsInvalidRegex: a pattern that does not compile is reported
-// before anything is fetched (the S11b rule for invalid filters).
+// before anything is fetched.
 func TestFilteredDepotItemsInvalidRegex(t *testing.T) {
 	srv, calls := depotServer(t, oneChunkManifest)
 	cl := newTestClient(t, srv, nil)
@@ -388,8 +387,8 @@ func TestFilteredDepotItemsInvalidRegex(t *testing.T) {
 	}
 }
 
-// TestDepotItemsRequestsManifest: the expansion goes through the S14 manifest
-// chain, so the hash decides the URL.
+// TestDepotItemsRequestsManifest: the expansion goes through the manifest chain,
+// so the hash decides the URL.
 func TestDepotItemsRequestsManifest(t *testing.T) {
 	srv, got := requestRecordingServer(t, `{"depot":{"items":[]}}`)
 	cl := newTestClient(t, srv, nil)
@@ -406,8 +405,8 @@ func TestDepotItemsRequestsManifest(t *testing.T) {
 const oneChunkManifest = `{"depot":{"items":[{"path":"a.bin",` +
 	`"chunks":[{"compressedMd5":"c","md5":"u","compressedSize":1,"size":1}]}]}}`
 
-// TestUint64Value locks the reader's rules, which are deliberately stricter than
-// jsoncpp's asLargestUInt for strings and booleans.
+// TestUint64Value locks the reader's rules: strings and booleans are rejected
+// rather than coerced.
 func TestUint64Value(t *testing.T) {
 	cases := []struct {
 		name    string

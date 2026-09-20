@@ -43,14 +43,13 @@ func writeTestFile(t *testing.T, path, data string) {
 // induced deterministically: the obvious refusals (a non-empty directory,
 // permissions, a locked file) cannot be used in this test suite, because the
 // sandbox redirects deletions and reports them as successes even for a
-// non-empty directory — a probe run is recorded in dev/audit/S12.2-R5.md §9.3.
-// A test built on one of those would assert the environment, not the code.
+// non-empty directory. A test built on one of those would assert the
+// environment, not the code.
 const invalidPath = "invalid\x00path"
 
 // TestLogoutClearsAuthenticationStateOnly locks the scope of --logout: the two
-// authentication files go and everything sharing the tree stays. This is the Q4
-// ruling made executable — a future "helpful" widening of the deletion set
-// fails here.
+// authentication files go and everything sharing the tree stays — a future
+// "helpful" widening of the deletion set fails here.
 func TestLogoutClearsAuthenticationStateOnly(t *testing.T) {
 	cfg := newLogoutConfig(t)
 
@@ -90,8 +89,9 @@ func TestLogoutClearsAuthenticationStateOnly(t *testing.T) {
 	}
 }
 
-// TestLogoutIsIdempotent locks the Q6 ruling: logging out of a session that is
-// already gone is a success, not an error, so the operation can be repeated.
+// TestLogoutIsIdempotent locks the idempotence rule: logging out of a session
+// that is already gone is a success, not an error, so the operation can be
+// repeated.
 func TestLogoutIsIdempotent(t *testing.T) {
 	cfg := newLogoutConfig(t)
 	writeTestFile(t, core.TokenPath(cfg), "{}")
@@ -127,8 +127,8 @@ func TestLogoutOnMissingDirectoryIsSuccess(t *testing.T) {
 	}
 }
 
-// TestLogoutPropagatesRemovalFailure locks the error face of Q6: a removal that
-// is neither a success nor "already gone" stops the run and prints no success
+// TestLogoutPropagatesRemovalFailure locks the error face: a removal that is
+// neither a success nor "already gone" stops the run and prints no success
 // line, so the output never claims more than happened.
 //
 // It also pins the non-transactional behaviour: the token file is removed

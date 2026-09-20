@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// Galaxy OAuth credentials and redirect URI used by the GOG Galaxy client
-// (config.h:206-209). They are the fallback values whenever the stored token
-// JSON carries no client_id/client_secret override.
+// Galaxy OAuth credentials and redirect URI used by the GOG Galaxy client. They
+// are the fallback values whenever the stored token JSON carries no
+// client_id/client_secret override.
 const (
 	DefaultClientID     = "46899977096215655"
 	DefaultClientSecret = "9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9"
@@ -17,29 +17,22 @@ const (
 )
 
 // defaultExpiresIn is the token lifetime assumed when the server response
-// carries no usable expires_in (config.h:122).
+// carries no usable expires_in.
 const defaultExpiresIn int64 = 3600
 
-// GalaxyConfig mirrors class GalaxyConfig (config.h:69-213): a thread-safe
-// store for the Galaxy token JSON plus the semantic accessors around it.
+// GalaxyConfig is a thread-safe store for the Galaxy token JSON plus the
+// semantic accessors around it.
 //
-// Differences from the C++ class (intentional):
-//   - Used through *GalaxyConfig and created with NewGalaxyConfig; the C++
-//     value-copy semantics are replaced by explicit sharing. Never copy a
-//     GalaxyConfig by value and never accept one as a value parameter: sharing
-//     the pointer IS the design, and a silent copy would duplicate the lock and
-//     the state. Additionally, do not add a String()/formatting method that can
-//     dump the raw token — the store holds credentials.
-//   - Reads take an RWMutex (C++ uses std::mutex). Not observable.
-//   - GetJSON/SetJSON copy deeply and SetJSON never modifies its argument, so a
-//     caller cannot alias the store. C++ gets this for free from Json::Value's
-//     value semantics.
+// Use it through a pointer created with NewGalaxyConfig: never copy a
+// GalaxyConfig by value and never accept one as a value parameter, because
+// sharing the pointer IS the design and a silent copy would duplicate the lock
+// and the state. Do not add a String or formatting method that can dump the raw
+// token — the store holds credentials.
 //
-// Unknown JSON fields are preserved verbatim: the store is a JSON tree, not a
-// fixed record, so a field the server sends is written back unchanged.
-//
-// Fields are ordered to minimise padding: RWMutex (24B), then the strings
-// (16B each), then the map (8B).
+// GetJSON/SetJSON copy deeply and SetJSON never modifies its argument, so a
+// caller cannot alias the store. Unknown JSON fields are preserved verbatim: the
+// store is a JSON tree, not a fixed record, so a field the server sends is
+// written back unchanged.
 type GalaxyConfig struct {
 	mu          sync.RWMutex
 	filepath    string
@@ -57,7 +50,7 @@ func NewGalaxyConfig() *GalaxyConfig {
 }
 
 // IsExpired reports whether the access token has passed its expires_at; a
-// token without a usable expires_at counts as expired (config.h:75-79).
+// token without a usable expires_at counts as expired.
 func (g *GalaxyConfig) IsExpired() bool {
 	return g.expiredAt(time.Now().Unix())
 }
@@ -73,7 +66,7 @@ func (g *GalaxyConfig) expiredAt(now int64) bool {
 	return now > exp
 }
 
-// GetAccessToken returns the stored access token, or "" (config.h:82-89).
+// GetAccessToken returns the stored access token, or "".
 func (g *GalaxyConfig) GetAccessToken() string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -81,7 +74,7 @@ func (g *GalaxyConfig) GetAccessToken() string {
 	return v
 }
 
-// GetRefreshToken returns the stored refresh token, or "" (config.h:91-98).
+// GetRefreshToken returns the stored refresh token, or "".
 func (g *GalaxyConfig) GetRefreshToken() string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -89,7 +82,7 @@ func (g *GalaxyConfig) GetRefreshToken() string {
 	return v
 }
 
-// GetUserID returns the stored user id, or "" (config.h:106-114).
+// GetUserID returns the stored user id, or "".
 func (g *GalaxyConfig) GetUserID() string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -97,8 +90,8 @@ func (g *GalaxyConfig) GetUserID() string {
 	return v
 }
 
-// GetJSON returns an independent deep copy of the token store
-// (config.h:100-104); callers may mutate the result freely.
+// GetJSON returns an independent deep copy of the token store; callers may
+// mutate the result freely.
 func (g *GalaxyConfig) GetJSON() map[string]any {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -107,15 +100,15 @@ func (g *GalaxyConfig) GetJSON() map[string]any {
 
 // SetJSON stores a token response without modifying token. When the payload
 // lacks expires_at it is derived from expires_in (default 3600) so expiry can
-// be evaluated later without a clock dependency (config.h:116-131).
+// be evaluated later without a clock dependency.
 func (g *GalaxyConfig) SetJSON(token map[string]any) {
 	g.setJSONAt(token, time.Now().Unix())
 }
 
 // setJSONAt is SetJSON with an injected clock (test seam).
 func (g *GalaxyConfig) setJSONAt(token map[string]any, now int64) {
-	// Clone before deriving expires_at: C++ takes the Json::Value by value, so
-	// the caller's object is never touched and the derived field stays private.
+	// Clone before deriving expires_at so the caller's map is never touched and
+	// the derived field stays private.
 	stored := cloneJSONMap(token)
 	if _, ok := stored["expires_at"]; !ok {
 		expiresIn := defaultExpiresIn
@@ -129,7 +122,7 @@ func (g *GalaxyConfig) setJSONAt(token map[string]any, now int64) {
 	g.mu.Unlock()
 }
 
-// SetFilepath sets the on-disk location of the token store (config.h:133-143).
+// SetFilepath sets the on-disk location of the token store.
 func (g *GalaxyConfig) SetFilepath(path string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -143,7 +136,7 @@ func (g *GalaxyConfig) GetFilepath() string {
 	return g.filepath
 }
 
-// GetRedirectURI returns the OAuth redirect URI (config.h:175-179).
+// GetRedirectURI returns the OAuth redirect URI.
 func (g *GalaxyConfig) GetRedirectURI() string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -151,7 +144,7 @@ func (g *GalaxyConfig) GetRedirectURI() string {
 }
 
 // GetClientID returns a stored client_id override verbatim, falling back to
-// the Galaxy default (config.h:155-163).
+// the Galaxy default.
 func (g *GalaxyConfig) GetClientID() string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -162,7 +155,7 @@ func (g *GalaxyConfig) GetClientID() string {
 }
 
 // GetClientSecret returns a stored client_secret override verbatim, falling
-// back to the Galaxy default (config.h:165-173).
+// back to the Galaxy default.
 func (g *GalaxyConfig) GetClientSecret() string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -173,8 +166,8 @@ func (g *GalaxyConfig) GetClientSecret() string {
 }
 
 // ResetClient restores default client_id/client_secret when the store carries
-// overrides; absent keys stay absent, since the getters already fall back
-// (config.h:145-153).
+// overrides; absent keys stay absent, since the getters already fall back to the
+// defaults.
 func (g *GalaxyConfig) ResetClient() {
 	g.mu.Lock()
 	defer g.mu.Unlock()

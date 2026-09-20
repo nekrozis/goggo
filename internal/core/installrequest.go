@@ -6,8 +6,7 @@ import (
 )
 
 // defaultLanguageRegex is the expression the Galaxy depot filter falls back to
-// when the selected language flag matches no table entry
-// (downloader.cpp:3904).
+// when the selected language flag matches no table entry.
 const defaultLanguageRegex = "en|eng|english|en[_-]US"
 
 // InstallRequest is one Galaxy install request, resolved from the options into
@@ -17,9 +16,6 @@ const defaultLanguageRegex = "en|eng|english|en[_-]US"
 // directory. %install_dir% comes from the build manifest, which is fetched
 // during the install itself, so the template is resolved there; keeping the two
 // apart is what makes the request describable before any request is made.
-//
-// Fields are ordered to minimise padding: the strings (16B each) first, then
-// the uint32, then the bool.
 type InstallRequest struct {
 	ProductID      string
 	BuildID        string
@@ -52,9 +48,8 @@ func NewInstallRequest(cfg config.Config, productID, buildID string) InstallRequ
 }
 
 // languageRegex maps a Galaxy language flag onto the expression the depot
-// filter uses (downloader.cpp:3904-3913). A flag that matches no entry — which
-// is what an unrecognised --galaxy-language leaves behind — falls back to the
-// English expression, exactly as the C++ loop does when it finds nothing.
+// filter uses. A flag that matches no entry — which is what an unrecognised
+// --galaxy-language leaves behind — falls back to the English expression.
 func languageRegex(flag uint32) string {
 	if o, ok := util.OptionByID(flag, config.Languages); ok {
 		return o.Regexp

@@ -8,13 +8,10 @@ import (
 	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
-// strippedAllowed reports whether a byte survives getStrippedString.
-//
-// C++ keeps a char when (isspace(c) && isprint(c)) || isalnum(c) or it is in
-// {'-','_','.','(',')','[',']','{','}'}. On an unsigned char the only
-// whitespace that is also printable is the space (0x20), and isalnum covers
-// ASCII letters and digits only. The rule is therefore pinned to these exact
-// bytes; unicode helpers must NOT be used as a substitute.
+// strippedAllowed reports whether a byte survives StrippedString: an ASCII
+// letter or digit, the space, or one of '-', '_', '.', '(', ')', '[', ']', '{',
+// '}'. The rule is pinned to these exact bytes; unicode helpers must NOT be used
+// as a substitute.
 func strippedAllowed(c byte) bool {
 	switch {
 	case c == ' ':
@@ -33,10 +30,9 @@ func strippedAllowed(c byte) bool {
 	return false
 }
 
-// StrippedString mirrors Util::getStrippedString (util.cpp:643-662) as a
-// byte-level filter: it keeps ASCII [A-Za-z0-9], the space and -_.[]{}() and
-// drops every other byte (so UTF-8 multi-byte sequences are removed
-// byte-by-byte).
+// StrippedString is a byte-level filter: it keeps ASCII [A-Za-z0-9], the space
+// and -_.[]{} and drops every other byte (so UTF-8 multi-byte sequences are
+// removed byte-by-byte).
 func StrippedString(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
@@ -47,14 +43,13 @@ func StrippedString(s string) string {
 	return b.String()
 }
 
-// ManualURLsFromJSON collects every "manualUrl" value reachable from v,
-// mirroring Util::getManualUrlsFromJSON (util.cpp:415-429): a "manualUrl"
-// member is taken without recursing into it, any other value is walked.
+// ManualURLsFromJSON collects every "manualUrl" value reachable from v: a
+// "manualUrl" member is taken without recursing into it, any other value is
+// walked.
 //
-// Ordering (review lock, O1): JSON arrays keep their element order, exactly as
-// the C++ Json::Value iteration does. Go's map[string]any does not preserve the
-// document order of object members, so object members are visited in sorted
-// key order to keep the result deterministic. That affects only degenerate
+// Ordering: JSON arrays keep their element order. Go's map[string]any does not
+// preserve the document order of object members, so object members are visited in
+// sorted key order to keep the result deterministic. That affects only degenerate
 // object-shaped responses, not the array shape the account API returns.
 func ManualURLsFromJSON(v any) ([]string, error) {
 	var urls []string
@@ -64,9 +59,8 @@ func ManualURLsFromJSON(v any) ([]string, error) {
 	return urls, nil
 }
 
-// collectManualURLs is the recursive core of ManualURLsFromJSON. A value that
-// is neither an array nor an object contributes nothing, matching jsoncpp's
-// `root.size() > 0` guard.
+// collectManualURLs is the recursive core of ManualURLsFromJSON. A value that is
+// neither an array nor an object contributes nothing.
 func collectManualURLs(v any, urls *[]string) error {
 	switch t := v.(type) {
 	case map[string]any:
@@ -98,18 +92,15 @@ func collectManualURLs(v any, urls *[]string) error {
 	return nil
 }
 
-// dlcURLPrefix is the marker Util::getDLCNamesFromJSON keys on
-// (util.cpp:442).
+// dlcURLPrefix is the marker DLCNamesFromJSON keys on.
 const dlcURLPrefix = "/downloads/"
 
 // DLCNamesFromJSON extracts the distinct DLC names referenced by a game's
-// "dlcs" subtree (util.cpp:431-459): for every manual URL that contains
+// "dlcs" subtree: for every manual URL that contains
 // "/downloads/", the segment between that marker and the LAST '/' of the URL
 // is a DLC name, de-duplicated with the first occurrence winning.
 //
-// A URL whose "/downloads/" marker has no following '/' is skipped; the C++
-// source would form an invalid iterator range there (undefined behaviour), so
-// skipping is the Go-side hardening.
+// A URL whose "/downloads/" marker has no following '/' is skipped.
 func DLCNamesFromJSON(v any) ([]string, error) {
 	urls, err := ManualURLsFromJSON(v)
 	if err != nil {

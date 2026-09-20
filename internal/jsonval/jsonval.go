@@ -1,14 +1,14 @@
-// Package jsonval provides the JSON value readers the ported code needs to
-// mirror the jsoncpp accessors used by the C++ original (asString, asInt,
-// asDouble/isDouble, asBool, isObject/isArray, and its range-for iteration).
+// Package jsonval provides the JSON value readers the rest of goggo uses:
+// strings, integers, floats, booleans, objects, arrays and iteration.
 //
 // It is a shared value layer: webapi (HTTP response decoding), catalog (list
 // assembly) and util (text extraction) all read decoded JSON with the same
-// semantics. Every reader is deliberately narrow — it implements exactly one
-// conversion the original performs and returns an error where jsoncpp would
-// fail the process. This package must not grow into a general "best effort"
-// coercion layer, and it stays free of HTTP concepts (response-shape errors
-// such as webapi.ErrNotJSON belong to the transport-facing package).
+// semantics. Every reader is deliberately narrow — it performs exactly one
+// conversion, and where that conversion cannot be made it returns an error
+// rather than coercing the value into something plausible. This package must
+// not grow into a general "best effort" coercion layer, and it stays free of
+// HTTP concepts (response-shape errors such as webapi.ErrNotJSON belong to the
+// transport-facing package).
 package jsonval
 
 import (
@@ -16,14 +16,6 @@ import (
 	"math"
 	"strconv"
 )
-
-//	jsoncpp               reader
-//	asString()            Str
-//	asInt()               Int
-//	isDouble()/asDouble() Num / IsNumber
-//	asBool()              Bool
-//	isObject()/isArray()  Object / Array
-//	range-for             Children
 
 // Kind names a decoded JSON value's type, for error messages.
 func Kind(v any) string {
@@ -63,9 +55,9 @@ func Array(v any) ([]any, error) {
 	return arr, nil
 }
 
-// Children returns the values a jsoncpp range-for would visit: array elements
-// in order, or the member values of an object. It is used where the original
-// iterates a value without asserting its container kind (website.cpp:837).
+// Children returns the values of a container: array elements in order, or the
+// member values of an object. It is used where a caller iterates a value
+// without asserting its container kind.
 func Children(v any) ([]any, error) {
 	switch t := v.(type) {
 	case []any:
@@ -81,9 +73,9 @@ func Children(v any) ([]any, error) {
 	}
 }
 
-// Str mirrors jsoncpp's asString(): null becomes "", strings pass through,
+// Str renders a scalar as a string: null becomes "", strings pass through,
 // booleans and numbers are stringified. Arrays and objects have no string form
-// in the original; they are errors here instead of terminating the process.
+// and are an error.
 func Str(v any) (string, error) {
 	switch t := v.(type) {
 	case nil:
@@ -105,10 +97,8 @@ func Str(v any) (string, error) {
 	}
 }
 
-// formatNumber renders a number the way jsoncpp stringifies a real value (%g
-// with 17 significant digits), so integral values lose no information
-// (123 -> "123"). This is a cross-implementation approximation of jsoncpp's
-// valueToString, not a shared algorithm. NaN and infinities cannot appear in a
+// formatNumber renders a float with 17 significant digits, so integral values
+// lose no information (123 -> "123"). NaN and infinities cannot appear in a
 // decoded JSON document; they are formatted by Go's own rules if hand-built
 // values inject them.
 func formatNumber(f float64) string {
@@ -120,10 +110,9 @@ func formatNumber(f float64) string {
 // to be >=.
 const maxInt64Exclusive = float64(1 << 63)
 
-// Int mirrors jsoncpp's asInt() for the integer shapes, but refuses values that
-// would need a lossy conversion: a non-integral number is an error (jsoncpp
-// truncates silently) because every caller treats these fields as integers.
-// null is 0 and a boolean is 0/1, as in the original.
+// Int reads an integer. It refuses values that would need a lossy conversion: a
+// non-integral number is an error, because every caller treats these fields as
+// integers. null is 0 and a boolean is 0/1.
 func Int(v any) (int64, error) {
 	switch t := v.(type) {
 	case nil:
@@ -155,7 +144,7 @@ func Int(v any) (int64, error) {
 	}
 }
 
-// IsNumber mirrors isDouble(), which is true for integers as well as reals.
+// IsNumber reports whether v is a JSON number, integral or real.
 func IsNumber(v any) bool {
 	switch v.(type) {
 	case int, int64, uint64, float64:
@@ -165,10 +154,9 @@ func IsNumber(v any) bool {
 	}
 }
 
-// Num mirrors asDouble(): numbers, plus the conversions jsoncpp performs for
-// null (0) and booleans (0/1). Strings are errors — callers that expect the
-// original's `isDouble() ? number : asString()` split test IsNumber first and
-// fall back to Str.
+// Num reads a float: numbers, plus null (0) and booleans (0/1). Strings are
+// errors; a caller that wants a number-or-string split tests IsNumber first and
+// falls back to Str.
 func Num(v any) (float64, error) {
 	switch t := v.(type) {
 	case nil:
@@ -191,7 +179,7 @@ func Num(v any) (float64, error) {
 	}
 }
 
-// Bool mirrors asBool(): booleans, null (false) and numbers (!= 0).
+// Bool reads a boolean: booleans, null (false) and numbers (!= 0).
 func Bool(v any) (bool, error) {
 	switch t := v.(type) {
 	case nil:

@@ -86,7 +86,7 @@ func successLoginServer(t *testing.T, withRecaptcha bool) (*httptest.Server, *st
 				t.Errorf("_token = %q", got)
 			}
 			// Relative Location: proves ResolveReference is used, not string
-			// concatenation (review lock).
+			// concatenation.
 			http.Redirect(w, r, "/cb?code=AUTH1", http.StatusFound)
 		case "/cb":
 			fmt.Fprint(w, "ok")
@@ -100,10 +100,10 @@ func successLoginServer(t *testing.T, withRecaptcha bool) (*httptest.Server, *st
 	return srv, &gotCode
 }
 
-// TestLoginTokenExchangeErrorHidesCredentials locks the R4a call site: the token
-// exchange URL carries client_secret and the one-time code, so a failing
-// exchange must be rendered without it (httpx.SafeError). This was observed in
-// the field (a GATE-A run pasted the full URL into a report).
+// TestLoginTokenExchangeErrorHidesCredentials locks the redaction at the call
+// site: the token exchange URL carries client_secret and the one-time code, so a
+// failing exchange must be rendered without it (httpx.SafeError). This was
+// observed in the field.
 func TestLoginTokenExchangeErrorHidesCredentials(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -460,7 +460,7 @@ func TestExtractCodeTable(t *testing.T) {
 
 // TestTokenRetryBoundaries locks the retry-count semantics at the edges:
 // Retries=0 yields exactly one attempt (no retry), and Retries larger than 3
-// caps at min(3,Retries)+1 attempts (website.cpp:33 clamps to 3).
+// caps at min(3,Retries)+1 attempts.
 func TestTokenRetryBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		retries  int
@@ -599,9 +599,9 @@ func TestContinueLoginConsumedOnSecondCall(t *testing.T) {
 	}
 }
 
-// TestContinueLoginConsumedBeforeSideEffect locks the v4 review point: the
-// challenge is consumed BEFORE the network submission, so a failed submission
-// still cannot be retried with the same challenge.
+// TestContinueLoginConsumedBeforeSideEffect: the challenge is consumed BEFORE
+// the network submission, so a failed submission still cannot be retried with
+// the same challenge.
 func TestContinueLoginConsumedBeforeSideEffect(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -767,15 +767,14 @@ func TestWalkRedirectChainBoundaries(t *testing.T) {
 	}
 }
 
-// --- R4c: offline negative semantics -----------------------------------------
+// --- offline negative semantics ----------------------------------------------
 //
 // These three lock the branches the field cannot reach reliably (2FA is hard to
-// trigger), and they are the offline substitute for the GATE-A negative items
-// that were handed over to S12.2-R4c (see dev/audit/GATE-A.md §3.2).
+// trigger).
 
-// TestContinueLoginRejectsWrongCodeLengthLocally locks the local validation
-// (login.go:217-220): a code of the wrong length is rejected BEFORE any network
-// side effect, and the rejected attempts do not consume the challenge.
+// TestContinueLoginRejectsWrongCodeLengthLocally locks the local validation: a
+// code of the wrong length is rejected BEFORE any network side effect, and the
+// rejected attempts do not consume the challenge.
 func TestContinueLoginRejectsWrongCodeLengthLocally(t *testing.T) {
 	var requests atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -859,7 +858,7 @@ func TestLoginCaptchaMarkerYieldsBrowserChallenge(t *testing.T) {
 }
 
 // TestLoginNoCodeAndNoCaptchaFails is the counterpart: with no auth code and no
-// captcha marker the login fails outright (website.cpp:339-343) instead of
+// captcha marker the login fails outright instead of
 // falling back to the browser.
 func TestLoginNoCodeAndNoCaptchaFails(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

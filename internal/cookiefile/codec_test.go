@@ -229,7 +229,7 @@ func TestWriteHeaderEmittedOnce(t *testing.T) {
 // and leading dots survive byte-for-byte. If a future test ever expects
 // normalisation here (e.g. "Example.COM" -> "example.com"), that is a
 // responsibility leak — domain/host-only/path semantics belong to the
-// S10b-2 bridge, never to the format codec.
+// httpx bridge, never to the format codec.
 func TestDomainPreservedVerbatim(t *testing.T) {
 	cases := []PersistentCookie{
 		pc("Example.COM", "/", "n1", "v1", true),

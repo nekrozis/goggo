@@ -14,7 +14,7 @@ import (
 // The scheduler owns no failure semantics of its own. A task that fails emits
 // its own failure events through emit and returns the error; a non-nil return
 // only matters when the context is cancelled, which the scheduler surfaces as
-// the run's error (review D65a and D67).
+// the run's error (D67).
 func schedule[T any](ctx context.Context, tasks []T, workers int, deliver func(Event), run func(context.Context, T, func(Event)) error) error {
 	if len(tasks) == 0 {
 		return nil

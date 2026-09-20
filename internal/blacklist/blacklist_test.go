@@ -18,7 +18,7 @@ func TestInitializeAndMatch(t *testing.T) {
 		`R ^game/`,    // prefix-like, still a search
 		`pR \.exe$`,   // 'p' is a no-op
 		"z R\\.log$",  // unknown flag 'z', and then no 'R' at all
-		"R",           // flags without an expression: upstream crashes here
+		"R",           // flags without an expression
 		"R invalid [", // an invalid regexp is reported, not fatal
 	})
 

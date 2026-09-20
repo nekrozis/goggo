@@ -21,8 +21,7 @@ import (
 
 // ErrEmptyDownlink and ErrNoDownlink are the two downlink responses the website
 // worker skips: an empty document, and one without a "downlink" member. Both
-// are upstream warnings (downloader.cpp:3096-3106) and their text is the
-// message the front end sees.
+// are warnings, and their text is the message the front end sees.
 var (
 	ErrEmptyDownlink = errors.New("Empty JSON response, skipping file")
 	ErrNoDownlink    = errors.New("Invalid JSON response, skipping file")
@@ -41,7 +40,7 @@ const (
 // (keep the partial file vs remove it); retryable decides whether another
 // attempt may follow. The two are independent: a transport failure keeps the
 // file and may retry, a local I/O failure removes it and never retries
-// (review round 2, D71).
+// (D71).
 type downloadError struct {
 	err       error
 	kind      downloadFailureKind
@@ -61,7 +60,7 @@ type WebsiteURLProvider interface {
 }
 
 // WebsiteDeps carries everything the website run needs from outside. The flag
-// fields are explicit values, not configuration reads (review D25); the XML
+// fields are explicit values, not configuration reads (D25); the XML
 // directory is where the remote checksum documents are cached.
 type WebsiteDeps struct {
 	HTTP              *httpx.Client
@@ -73,19 +72,17 @@ type WebsiteDeps struct {
 	TrustAPIForExtras bool
 	SizeOnly          bool
 	// TaskResult, when set, receives the run's terminal outcome for every
-	// task: nil for a success and for each skip the worker semantics
-	// authorise, non-nil for an operational failure. The event stream
-	// carries the same facts as messages; this seam exists because a
-	// message kind is not a result code — counting failures must not
-	// infer from an event sequence (the UI1-R2 rule), and GD4's aggregate
-	// exit contract needs the per-task verdict (plan §5, transfer row).
+	// task: nil for a success and for each skip the worker semantics authorise,
+	// non-nil for an operational failure. The event stream carries the same
+	// facts as messages; this seam exists because a message kind is not a
+	// result code, so counting failures must not infer from an event sequence.
 	TaskResult func(task model.WebsiteTask, err error)
 }
 
 // RunWebsite executes the website download path: the single-file downloads with
 // their version checks, resume handling and failure cleanup.
 //
-// Failure semantics are the website worker's own (review D68): per-item
+// Failure semantics are the website worker's own (D68): per-item
 // problems — blacklisted files, missing directories, unusable downlink
 // documents, renames that fail — are reported and skipped without failing the
 // run, and a download that exhausts its retries is cleaned up according to the
@@ -93,7 +90,7 @@ type WebsiteDeps struct {
 // anything else removes it). RunWebsite returns nil when every task has ended;
 // only a cancelled context makes it return an error.
 //
-// The scheduling is shared with the Galaxy path (review D67); everything below
+// The scheduling is shared with the Galaxy path (D67); everything below
 // the fan-out is this worker's own.
 func RunWebsite(ctx context.Context, tasks []model.WebsiteTask, opts Options, deps WebsiteDeps) error {
 	if deps.HTTP == nil || deps.URL == nil || deps.Observer == nil {
@@ -110,10 +107,11 @@ func RunWebsite(ctx context.Context, tasks []model.WebsiteTask, opts Options, de
 		})
 }
 
-// runWebsiteTask downloads one website file, mirroring
-// Downloader::processDownloadQueue's per-item body (downloader.cpp:2972-3450).
-// Conditions that make upstream skip a file return nil; conditions that fail a
-// download return the error after emitting the failure events.
+// runWebsiteTask downloads one website file: the blacklist filter, the
+// directory check, the downlink document, the version and completeness checks,
+// then the download loop. Conditions that merely skip a file return nil;
+// conditions that fail a download return the error after emitting the failure
+// events.
 func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, deps WebsiteDeps, emit func(Event)) error {
 	name := filepath.Base(task.Destination)
 
@@ -130,12 +128,12 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 
 	emit(Event{Path: task.Destination, Kind: EventTaskStart})
 
-	// The blacklist filter (downloader.cpp:3003-3007).
+	// The blacklist filter.
 	if deps.Blacklist != nil && deps.Blacklist(task.Destination) {
 		return skip(EventMessageInfo, "Blacklisted file: "+task.Destination)
 	}
 
-	// Directories (downloader.cpp:3019-3040): an occupied path skips the file
+	// Directories: an occupied path skips the file
 	// with a warning, a failed creation with an error; both are non-fatal.
 	dir := filepath.Dir(task.Destination)
 	if fi, err := os.Stat(dir); err == nil {
@@ -146,7 +144,7 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 		return skip(EventMessageError, "Failed to create directory ("+dir+"), skipping file ("+name+")")
 	}
 
-	// The downlink document (downloader.cpp:3094-3106).
+	// The downlink document.
 	downlink, checksumXML, err := deps.URL.Resolve(ctx, task)
 	if err != nil {
 		switch {
@@ -158,7 +156,7 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 		return fail(err.Error())
 	}
 
-	// The version and completeness checks (downloader.cpp:3108-3186).
+	// The version and completeness checks.
 	fileExists := regularFileExists(task.Destination)
 	bSameVersion := true
 	bIsComplete := false
@@ -168,8 +166,7 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 
 	if task.Checksummed && deps.RemoteXML && checksumXML != "" {
 		localHash := localFileHash(deps.XMLDirectory, task.Destination, task.Gamename)
-		// SizeOnly fetches the document but skips the comparison
-		// (downloader.cpp:3124-3129).
+		// SizeOnly fetches the document but skips the comparison.
 		if localHash != "" && !deps.SizeOnly {
 			remoteMD5, remoteSize, perr := parseFileXML(checksumXML)
 			if perr == nil {
@@ -192,7 +189,7 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 		}
 
 		// The API is not trusted for extras unless asked: the comparison size
-		// comes from a content-length probe instead (downloader.cpp:3155-3170).
+		// comes from a content-length probe instead.
 		var filesizeCompare int64
 		if deps.TrustAPIForExtras {
 			filesizeCompare = apiSize
@@ -212,7 +209,7 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 				bSameVersion = true
 			} else {
 				// Assume same version while the local file is smaller than the
-				// remote one (downloader.cpp:3182-3184).
+				// remote one.
 				bSameVersion = filesizeLocal < filesizeCompare
 			}
 		}
@@ -222,7 +219,7 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 		emit(Event{Path: task.Destination, Text: "Skipping complete file: " + name, Kind: EventMessageInfo})
 	}
 
-	// Resume or rename (downloader.cpp:3188-3218).
+	// Resume or rename.
 	bResume := false
 	if fileExists && !bIsComplete {
 		if bSameVersion {
@@ -247,7 +244,7 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 		}
 	}
 
-	// Save the remote checksum document (downloader.cpp:3222-3257).
+	// Save the remote checksum document.
 	if checksumXML != "" {
 		bLocalXMLExists := localXMLExists(deps.XMLDirectory, task.Gamename, name)
 		if !bLocalXMLExists || (bLocalXMLExists && !bSameVersion) {
@@ -260,23 +257,22 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 		}
 	}
 
-	// A complete file is skipped once its xml data is saved
-	// (downloader.cpp:3260-3262).
+	// A complete file is skipped once its xml data is saved.
 	if bIsComplete {
 		emit(Event{Path: task.Destination, Kind: EventTaskFinish})
 		return nil
 	}
 
-	// The download loop (downloader.cpp:3264-3354) — the attempt/retry/cleanup
-	// contract shared with the GD5 direct artifact download.
+	// The download loop — the attempt/retry/cleanup contract shared with the
+	// direct artifact download.
 	return downloadWithRetries(ctx, task, opts, deps, downlink, bResume, emit)
 }
 
 // downloadWithRetries is the ONE attempt loop: retry classification, the
 // resume handoff between attempts, the success timestamp and the failure
-// cleanup live here once. RunWebsite's tasks and DownloadArtifact's logos
-// and icons both run through it — GD5 ruling 3 forbids a second HTTP stack,
-// so the artifact path synthesizes a task carrying only its destination.
+// cleanup live here once. RunWebsite's tasks and DownloadArtifact's logos and
+// icons both run through it, so the artifact path synthesizes a task carrying
+// only its destination rather than adding a second download implementation.
 func downloadWithRetries(ctx context.Context, task model.WebsiteTask, opts Options, deps WebsiteDeps, downlink string, bResume bool, emit func(Event)) error {
 	name := filepath.Base(task.Destination)
 	var lastErr error
@@ -302,9 +298,9 @@ func downloadWithRetries(ctx context.Context, task model.WebsiteTask, opts Optio
 			return ctx.Err()
 		}
 		if derr == nil {
-			// Success (downloader.cpp:3356-3404): the server's timestamp moves
+			// Success: the server's timestamp moves
 			// onto the file, then the completion message. The rate suffix is
-			// rendered by the progress step (S20).
+			// rendered by the progress step.
 			if !lastModified.IsZero() {
 				if err := os.Chtimes(task.Destination, lastModified, lastModified); err != nil {
 					emit(Event{Path: task.Destination, Text: err.Error(), Kind: EventMessageWarning})
@@ -317,12 +313,11 @@ func downloadWithRetries(ctx context.Context, task model.WebsiteTask, opts Optio
 		lastErr = derr.err
 		lastKeep = derr.kind == failureKeep
 		// The retry budget mirrors the galaxy path: Retries retries on top of
-		// the initial attempt (downloader.cpp:3336-3342).
+		// the initial attempt.
 		if !derr.retryable || attempt >= opts.Retries {
 			break
 		}
-		// Whatever landed on disk makes the next attempt a resume
-		// (downloader.cpp:3345-3349).
+		// Whatever landed on disk makes the next attempt a resume.
 		if regularFileExists(task.Destination) {
 			bResume = true
 			lastResume = true
@@ -330,7 +325,7 @@ func downloadWithRetries(ctx context.Context, task model.WebsiteTask, opts Optio
 		reason = lastErr.Error()
 	}
 
-	// The failure cleanup (downloader.cpp:3406-3429): the message, then the
+	// The failure cleanup: the message, then the
 	// partial file's fate — a transport break or a resume attempt keeps it,
 	// any other failure removes it, and a zero-length file always goes.
 	emit(Event{Path: task.Destination, Text: "Download complete (" + lastErr.Error() + "): " + name, Kind: EventMessageWarning})
@@ -354,13 +349,13 @@ func downloadWithRetries(ctx context.Context, task model.WebsiteTask, opts Optio
 // attempt succeeded; otherwise keep decides the cleanup and retryable whether
 // another attempt may follow. The classification happens where each error is
 // produced — network-side failures keep the partial file, local-side failures
-// remove it (review round 2, D71).
+// remove it (D71).
 func websiteDownloadAttempt(ctx context.Context, task model.WebsiteTask, deps WebsiteDeps, url string, resume bool, emit func(Event)) (lastModified time.Time, derr *downloadError) {
 	var f *os.File
 	var err error
 	if resume {
 		// Resume opens without truncation; the Range header moves the server's
-		// start to what is already on disk (downloader.cpp:3320-3327).
+		// start to what is already on disk.
 		f, err = os.OpenFile(task.Destination, os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
 			return time.Time{}, &downloadError{fmt.Errorf("Failed to open %s: %w", task.Destination, err), failureRemove, false}
@@ -389,11 +384,9 @@ func websiteDownloadAttempt(ctx context.Context, task model.WebsiteTask, deps We
 	}
 	defer resp.Body.Close()
 
-	// A 416 on a resume means the file on disk is already complete — upstream
-	// folds it into the success branch (downloader.cpp:3356). A fresh download
-	// that receives one is a failure whose empty file the cleanup removes;
-	// upstream would have reported it complete too, which this port does not
-	// (review round 2).
+	// A 416 on a resume means the file on disk is already complete, and is
+	// treated as success. On a fresh download it is a failure whose empty file
+	// the cleanup removes.
 	if resp.StatusCode == http.StatusRequestedRangeNotSatisfiable && resume {
 		f.Close()
 		return lastModifiedFrom(resp), nil
@@ -409,7 +402,7 @@ func websiteDownloadAttempt(ctx context.Context, task model.WebsiteTask, deps We
 
 	// The stream is read and written block by block so that a read error (the
 	// network side) and a write error (the local side) classify separately —
-	// an io.Copy error could be either (review round 2, D71).
+	// an io.Copy error could be either (D71).
 	buf := make([]byte, 64<<10)
 	for {
 		if ctx.Err() != nil {
@@ -447,10 +440,10 @@ func lastModifiedFrom(resp *http.Response) time.Time {
 	return time.Time{}
 }
 
-// localFileHash mirrors Util::getLocalFileHash (util.cpp:581): the md5 stored
-// in the local xml wins when the fast check can run, otherwise the file's own
-// md5 is computed. A cache document without an md5 attribute yields "" without
-// falling back to computing — upstream as written.
+// localFileHash returns the local file's md5: the md5 stored in the cached
+// checksum document wins when that document exists, otherwise the file's own
+// md5 is computed. A document without an md5 attribute yields "" without
+// falling back to computing the hash.
 func localFileHash(xmlDir, dest, gamename string) string {
 	localXML := localXMLPath(xmlDir, gamename, dest)
 	if _, err := os.Stat(localXML); err == nil {
@@ -478,8 +471,7 @@ func localFileHash(xmlDir, dest, gamename string) string {
 }
 
 // localXMLPath is the cached checksum document of one file:
-// <dir>/<gamename>/<name>.xml, or <dir>/<name>.xml without a game name
-// (downloader.cpp:3022-3026).
+// <dir>/<gamename>/<name>.xml, or <dir>/<name>.xml without a game name.
 func localXMLPath(xmlDir, gamename, dest string) string {
 	name := filepath.Base(dest) + ".xml"
 	if gamename == "" {
@@ -495,8 +487,7 @@ func localXMLExists(xmlDir, gamename, dest string) bool {
 }
 
 // parseFileXML reads the md5 and total_size attributes of a checksum document
-// ("<file md5="…" total_size="…"/>"). An unparsable size counts as 0, the way
-// the C++ source catches its own conversion failures.
+// ("<file md5="…" total_size="…"/>"). An unparsable size counts as 0.
 func parseFileXML(data string) (md5hex string, totalSize int64, err error) {
 	var doc struct {
 		MD5       string `xml:"md5,attr"`
@@ -512,9 +503,8 @@ func parseFileXML(data string) (md5hex string, totalSize int64, err error) {
 	return doc.MD5, n, nil
 }
 
-// contentLength probes the download url's content length with a HEAD request
-// (downloader.cpp:3161-3172 uses a NOBODY curl for the same purpose). A failed
-// probe counts as zero, as the untouched curl variable would.
+// contentLength probes the download url's content length with a HEAD request. A
+// failed probe counts as zero.
 func contentLength(ctx context.Context, hx *httpx.Client, url string) int64 {
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
 	if err != nil {

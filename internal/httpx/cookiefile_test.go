@@ -264,7 +264,7 @@ func TestLoadSessionCookieStaysSession(t *testing.T) {
 
 // TestLoadFeedsEventsThroughRecord proves Load goes through the SetCookies
 // event path rather than writing persist directly: an already-expired row is
-// refused by record(), exactly as a live expired event would be.
+// refused by record, exactly as a live expired event would be.
 func TestLoadFeedsEventsThroughRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cookies.txt")
 	writeFixture(t, path, "example.com\tFALSE\t/\tFALSE\t1\tOLD\tv7") // expiry 1970 -> past
@@ -374,9 +374,9 @@ func TestSaveReplacesFileAtomicallyWith0600(t *testing.T) {
 	}
 }
 
-// TestRoundTripPreservesSendBehaviourAndBytes is the integration test for
-// S10b-2b: state saved by one client and loaded by a fresh one must send the
-// same cookies, and re-saving must produce identical bytes.
+// TestRoundTripPreservesSendBehaviourAndBytes is the integration test: state
+// saved by one client and loaded by a fresh one must send the same cookies, and
+// re-saving must produce identical bytes.
 func TestRoundTripPreservesSendBehaviourAndBytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cookies.txt")
 

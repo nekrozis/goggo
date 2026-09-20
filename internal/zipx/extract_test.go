@@ -36,7 +36,7 @@ func buildLocalEntry(p centralEntryParams, data []byte) []byte {
 }
 
 // rawDeflate compresses payload as a raw RFC 1951 stream (no zlib wrapper),
-// the format flate.NewReader expects and the C++ noheader mode decodes.
+// the format flate.NewReader expects.
 func rawDeflate(t *testing.T, payload []byte) []byte {
 	t.Helper()
 	var b bytes.Buffer
@@ -111,7 +111,7 @@ func TestExtractDeflateIgnoresTrailingBytes(t *testing.T) {
 
 // TestExtractStoreNotTruncatedToCompSize locks the no-truncation rule for
 // stored entries: the declared compressed size is smaller than the data
-// present, yet everything up to EOF is copied (ziputil.cpp copies to EOF).
+// present, yet everything up to EOF is copied ( copies to EOF).
 func TestExtractStoreNotTruncatedToCompSize(t *testing.T) {
 	data := []byte("0123456789abcdef")
 	entry := buildLocalEntry(centralEntryParams{
@@ -129,8 +129,8 @@ func TestExtractStoreNotTruncatedToCompSize(t *testing.T) {
 }
 
 // TestExtractStoreShortInputNoError: a stored entry whose input ends early is
-// just an early EOF for io.Copy, NOT an error — the C++ code has no
-// decompressor on this path and never validates sizes.
+// just an early EOF for io.Copy, NOT an error — there is no decompressor on this
+// path and sizes are never validated.
 func TestExtractStoreShortInputNoError(t *testing.T) {
 	entry := buildLocalEntry(centralEntryParams{
 		name: "s.txt", method: MethodStore,

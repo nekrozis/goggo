@@ -114,17 +114,16 @@ func TestProductSkipsExpansionWithoutDLCInformation(t *testing.T) {
 	}
 }
 
-// TestProductSkipsExpansionForNonObjectDLCs locks the isObject() guard of
-// galaxyapi.cpp:360 (DEFECT-GD3-2 / ruling D52): a dlcs member that is present
-// but not an object — the empty array the live API really sends for products
-// without DLC information (dev/audit/evidence/D52-dlcs-census.txt), a filled
-// array, or any scalar — does not enter the expansion block: no request, no
-// expanded_dlcs, and the product document comes back as the API answered it.
+// TestProductSkipsExpansionForNonObjectDLCs locks the dlcs guard (D52): a dlcs
+// member that is present but not an object — the empty array the live API really
+// sends for products without DLC information
+// (dev/audit/evidence/D52-dlcs-census.txt), a filled array, or any scalar — does
+// not enter the expansion block: no request, no expanded_dlcs, and the product
+// document comes back as the API answered it.
 //
 // This test REVERSES the earlier TestProductRejectsAMalformedDLCsMember, which
-// asserted an error here. That behavior rejected 8 of 14 probed account
-// products at the Product() call; the guard upstream applies to those shapes
-// is a silent skip, and the live API proved the difference is not academic.
+// asserted an error here. That behaviour rejected 8 of 14 probed account products
+// at the Product call, and the live API proved the difference is not academic.
 func TestProductSkipsExpansionForNonObjectDLCs(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -149,9 +148,8 @@ func TestProductSkipsExpansionForNonObjectDLCs(t *testing.T) {
 			if _, present := got["expanded_dlcs"]; present {
 				t.Errorf("expanded_dlcs = %v, want the member absent (nothing was expanded)", got["expanded_dlcs"])
 			}
-			// The document is untouched apart from the missing injection: that
-			// is the C++ path — the guard is skipped and product_info returns
-			// as getResponseJson built it.
+			// The document is untouched apart from the missing injection: the
+			// guard is skipped and the response is returned as it arrived.
 			if got["slug"] != "game" {
 				t.Errorf("slug = %v, want the original value", got["slug"])
 			}
@@ -162,10 +160,9 @@ func TestProductSkipsExpansionForNonObjectDLCs(t *testing.T) {
 	}
 }
 
-// TestProductExpandsDLCsInOneRequest locks the first branch of
-// galaxyapi.cpp:367-370: at most maxDLCBatchSize ids are all fetched in one
-// request to the url the document advertises, and the response array is what
-// lands under expanded_dlcs.
+// TestProductExpandsDLCsInOneRequest locks the single-request branch: at most
+// maxDLCBatchSize ids are all fetched in one request to the url the document
+// advertises, and the response array is what lands under expanded_dlcs.
 func TestProductExpandsDLCsInOneRequest(t *testing.T) {
 	f := newProductFixture(t)
 	expansion := `[{"id":"2"},{"id":"3"}]`
@@ -201,7 +198,7 @@ func TestProductExpandsDLCsInOneRequest(t *testing.T) {
 	}
 }
 
-// TestProductBatchesDLCIDs locks the second branch (galaxyapi.cpp:371-399): the
+// TestProductBatchesDLCIDs locks the second branch: the
 // ids go out in batches of 45, the responses are appended in order, and a count
 // that is an exact multiple of the batch size does not send a trailing empty
 // request.
@@ -274,11 +271,11 @@ func TestProductBatchesDLCIDs(t *testing.T) {
 	}
 }
 
-// TestProductExpandsNumericDLCIDs locks DEFECT-GD3-1 on the GD2 side: the live
-// API sends dlcs.products ids as JSON numbers (galaxyapi.cpp:384 reads them
-// with jsoncpp's asString), and that read only happens on the batching branch
-// — more than maxDLCBatchSize ids — so this fixture crosses the 45 boundary on
-// purpose. The ids= list must carry the numbers stringified, in order.
+// TestProductExpandsNumericDLCIDs locks the numeric identifier read: the live
+// API sends dlcs.products ids as JSON numbers, and that read only happens on the
+// batching branch — more than maxDLCBatchSize ids — so this fixture crosses the
+// 45 boundary on purpose. The ids= list must carry the numbers stringified, in
+// order.
 func TestProductExpandsNumericDLCIDs(t *testing.T) {
 	const total = maxDLCBatchSize + 1
 	entries := make([]any, 0, total)
@@ -336,9 +333,9 @@ func TestProductExpandsNumericDLCIDs(t *testing.T) {
 }
 
 // TestProductRejectsAStructuredDLCID locks the one shape the identifier read
-// refuses: jsoncpp's asString crashes on an object, so this port reports
-// instead of inventing a text form. The read lives on the batching branch, so
-// the entry list crosses the boundary.
+// refuses: a structured value is reported instead of being turned into some
+// invented text form. The read lives on the batching branch, so the entry list
+// crosses the boundary.
 func TestProductRejectsAStructuredDLCID(t *testing.T) {
 	entries := make([]any, 0, maxDLCBatchSize+1)
 	entries = append(entries, map[string]any{"id": map[string]any{}})
@@ -364,9 +361,9 @@ func TestProductRejectsAStructuredDLCID(t *testing.T) {
 	}
 }
 
-// TestProductSkipsTheRequestForAnUnusableExpansionURL locks the case the C++
-// source leaves undefined: an empty (or missing) expanded_all_products_url is
-// not requested, it produces an empty result.
+// TestProductSkipsTheRequestForAnUnusableExpansionURL locks the defined case: an
+// empty (or missing) expanded_all_products_url is not requested, it produces an
+// empty result.
 func TestProductSkipsTheRequestForAnUnusableExpansionURL(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -397,8 +394,8 @@ func TestProductSkipsTheRequestForAnUnusableExpansionURL(t *testing.T) {
 }
 
 // TestProductRejectsANonArrayExpansion locks the shape gate on the expansion
-// response: upstream stores whatever JSON came back (galaxyapi.cpp:369); this
-// port requires the array the API documents.
+// response: the array the API documents is required, not whatever JSON came
+// back.
 func TestProductRejectsANonArrayExpansion(t *testing.T) {
 	f := newProductFixture(t)
 	f.setServe(func(uri string) (string, int) {
@@ -424,8 +421,8 @@ func TestProductRejectsANonArrayExpansion(t *testing.T) {
 }
 
 // TestProductRequestShapes locks the two urls byte for byte: the expand list is
-// the one the C++ source spells, and the batch ids are joined with commas in
-// order, without any re-encoding or sorting.
+// the documented one, and the batch ids are joined with commas in order, without
+// any re-encoding or sorting.
 func TestProductRequestShapes(t *testing.T) {
 	f := newProductFixture(t)
 	f.setServe(func(uri string) (string, int) {
@@ -477,10 +474,10 @@ func TestProductRejectsANonObjectDocument(t *testing.T) {
 	}
 }
 
-// TestDecodeDocumentTakesArraysWhileResponseJSONRefusesThem locks the transport
-// change of GD2 from both sides: the product expansion reads a top-level array,
-// and the object-shaped entry point every existing caller uses is not loosened
-// by that — the very same body still fails it.
+// TestDecodeDocumentTakesArraysWhileResponseJSONRefusesThem locks both sides of
+// the split: the product expansion reads a top-level array, and the object-shaped
+// entry point every other caller uses is not loosened by that — the very same
+// body still fails it.
 func TestDecodeDocumentTakesArraysWhileResponseJSONRefusesThem(t *testing.T) {
 	const body = `[{"id":"2"}]`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

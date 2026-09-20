@@ -9,15 +9,11 @@ import (
 )
 
 // freeSpaceAvailable returns the bytes available to the caller on the volume
-// that contains path. Bavail is the unprivileged free block count — the counter
-// boost::filesystem::space reports as available.
+// that contains path. Bavail is the unprivileged free block count.
 //
-// The build constraint names the platforms whose Statfs_t actually carries the
-// Bavail/Bsize pair. The previous !windows tag also claimed openbsd (whose
-// Statfs_t names them F_bavail/F_bsize), netbsd and solaris (which have no
-// syscall.Statfs/Statfs_t at all) and the non-unix ports, so those targets
-// never compiled. Everything outside this set builds through
-// freespace_unsupported.go instead (review 2026-09-12).
+// The build constraint names the platforms whose Statfs_t carries the
+// Bavail/Bsize pair. Everything outside this set builds through
+// freespace_unsupported.go instead.
 func freeSpaceAvailable(path string) (uint64, error) {
 	var st unix.Statfs_t
 	if err := unix.Statfs(path, &st); err != nil {

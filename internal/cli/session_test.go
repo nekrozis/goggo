@@ -19,8 +19,8 @@ var _ core.Console = (*console)(nil)
 
 // TestPromptPasswordWithoutTerminal covers the injected-reader branch: with no
 // terminal to hide behind the line is read normally, which is what keeps the
-// front end testable. The hidden path (term.ReadPassword) needs a real console
-// and is verified by the GATE-A run on Windows.
+// front end testable. The hidden path (term.ReadPassword) needs a real console,
+// so it is not covered here.
 func TestPromptPasswordWithoutTerminal(t *testing.T) {
 	var out, errOut bytes.Buffer
 	ui := newConsole(strings.NewReader("secret\n"), &out, &errOut)
@@ -59,9 +59,9 @@ func TestPromptEmailWritesToStderr(t *testing.T) {
 	}
 }
 
-// browserBlockRE matches the ordered four-line browser block
-// (website.cpp:614-617): the URL line, the blank line after it, the paste
-// instruction and the `URL: ` prompt. A partial move would fail here.
+// browserBlockRE matches the ordered four-line browser block: the URL line, the
+// blank line after it, the paste instruction and the `URL: ` prompt. A partial
+// move would fail here.
 func browserBlockRE(t *testing.T, browserURL string) *regexp.Regexp {
 	t.Helper()
 	return regexp.MustCompile(`^Login using browser at the following url\n` +
@@ -76,7 +76,7 @@ func browserBlockRE(t *testing.T, browserURL string) *regexp.Regexp {
 // The challenges are built by hand, so webapi rejects them with
 // ErrChallengeClientMismatch before any network work — that rejection is the
 // proof that the console passed the answer on. The prompt itself is printed
-// first, which is what this test is about (website.cpp:519,524,614-617).
+// first, which is what this test is about.
 func TestResolveChallengeWording(t *testing.T) {
 	hx, err := httpx.New(httpx.Config{})
 	if err != nil {
@@ -101,9 +101,9 @@ func TestResolveChallengeWording(t *testing.T) {
 			wantOut: "Security code: ",
 		},
 		{
-			// The 6-character authenticator code is asked for differently
-			// (website.cpp:521-525); webapi exposes only the length, so this case
-			// is what pins the wording branch.
+			// The 6-character authenticator code is asked for differently;
+			// webapi exposes only the length, so this case is what pins the
+			// wording branch.
 			name: "authenticator code", stdin: "123456\n",
 			ch:      &webapi.LoginChallenge{Kind: webapi.ChallengeTwoFactor, CodeLength: 6},
 			wantOut: "Authenticator security code: ",
@@ -124,7 +124,7 @@ func TestResolveChallengeWording(t *testing.T) {
 				t.Errorf("stderr = %q, want it to carry %q", errOut.String(), c.wantOut)
 			}
 			if c.wantBody != "" && !browserBlockRE(t, c.wantBody).MatchString(errOut.String()) {
-				t.Errorf("browser block is not the ordered upstream block: %q", errOut.String())
+				t.Errorf("browser block is not the ordered block: %q", errOut.String())
 			}
 			if out.Len() != 0 {
 				t.Errorf("stdout = %q, want empty: prompts belong on stderr", out.String())
@@ -137,12 +137,11 @@ func TestResolveChallengeWording(t *testing.T) {
 }
 
 // TestSelectProductWithoutTerminal locks the listing the user is shown when the
-// selection cannot be answered: the C++ source prints the candidates and only
-// THEN checks isatty (downloader.cpp:3867-3875), so a non-interactive run still
-// sees them. The candidates go to stdout and the prompt would go to stderr.
+// selection cannot be answered: the candidates are printed and only THEN is the
+// terminal checked, so a non-interactive run still sees them. The candidates go
+// to stdout and the prompt would go to stderr.
 //
-// Coverage boundary (recorded in the audit): the interactive loop needs a real
-// terminal, and manufacturing a fake one is ruled out (S12), so the index it
+// Coverage boundary: the interactive loop needs a real terminal, so the index it
 // returns is covered in internal/core through the Console double.
 func TestSelectProductWithoutTerminal(t *testing.T) {
 	var out, errOut bytes.Buffer

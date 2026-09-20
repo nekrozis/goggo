@@ -6,16 +6,11 @@ import (
 	"github.com/nekrozis/goggo/internal/config"
 )
 
-// GameFile mirrors class gameFile (include/gamefile.h:17-44). Field
-// semantics follow the original names, e.g. Size is a string because GOG
+// GameFile is one file of a product's details. Size is a string because GOG
 // reports file sizes as strings.
 //
-// Filepath mirrors the C++ private member with its setFilepath/getFilepath
-// accessors collapsed into one exported field (see setFilepath in
-// src/gamefile.cpp:23-31).
-//
-// Fields are ordered to minimise padding: the string block (16B each) first,
-// then 8B ints, then 4B flags.
+// Filepath is the absolute local path the file is saved to; it is never
+// serialised.
 type GameFile struct {
 	GameName              string
 	ID                    string
@@ -38,8 +33,8 @@ type GameFile struct {
 	Type     uint32
 }
 
-// NewGameFile mirrors the default constructor (src/gamefile.cpp:9-16):
-// platform defaults to Windows and language to English.
+// NewGameFile returns a GameFile with the platform defaulted to Windows and
+// the language to English.
 func NewGameFile() GameFile {
 	return GameFile{
 		Platform: config.PlatformWindows,
@@ -47,9 +42,8 @@ func NewGameFile() GameFile {
 	}
 }
 
-// MarshalJSON mirrors gameFile::getAsJson (src/gamefile.cpp:33-55): the
-// version key is emitted only when non-empty; score and filepath are never
-// emitted.
+// MarshalJSON emits the version key only when non-empty; score and filepath are
+// never emitted.
 func (f GameFile) MarshalJSON() ([]byte, error) {
 	obj := map[string]any{
 		"updated":                  f.Updated,

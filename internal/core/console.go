@@ -15,8 +15,7 @@ import (
 // imports this package, not the other way round). A test provides its own
 // implementation instead of a terminal.
 //
-// Stream policy follows the C++ source: prompts and status lines go to ErrOut,
-// program output to Out (downloader.cpp:267,270, website.cpp:519,524,614-617).
+// Stream policy: prompts and status lines go to ErrOut, program output to Out.
 type Console interface {
 	// Out carries program output: the product list a selection is made from,
 	// for instance.
@@ -25,9 +24,8 @@ type Console interface {
 	// ErrOut carries prompts and status lines.
 	ErrOut() io.Writer
 
-	// IsTerminal reports whether prompts can be answered here. It maps the C++
-	// isatty(STDIN_FILENO) test that selects between prompting and the headless
-	// login branch (downloader.cpp:256).
+	// IsTerminal reports whether prompts can be answered here. It selects
+	// between prompting and the headless login branch.
 	IsTerminal() bool
 
 	// PromptEmail asks for the account e-mail.
@@ -42,26 +40,25 @@ type Console interface {
 	// than retried.
 	ResolveChallenge(ctx context.Context, web *webapi.Client, ch *webapi.LoginChallenge) error
 
-	// SelectProduct prints the numbered product list and asks for an index
-	// (downloader.cpp:3865-3886). An error means the selection cannot be made
-	// here — no terminal, or unreadable input — and the caller reports it the
-	// way the C++ source reports an unanswerable prompt.
+	// SelectProduct prints the numbered product list and asks for an index. An
+	// error means the selection cannot be made here — no terminal, or
+	// unreadable input — and the caller reports it as an unanswerable prompt.
 	SelectProduct(items []string) (int, error)
 }
 
 // transferEventSink is the optional ability of a front end to consume the full
 // transfer event stream, the per-task progress included. The install run
 // checks for it with a type assertion and hands the whole stream to a front
-// end that has it; a plain Console keeps the message-only path (review D75).
+// end that has it; a plain Console keeps the message-only path (D75).
 // The interface stays unexported on purpose: the CLI satisfies it structurally
 // and core's public surface does not grow.
 type transferEventSink interface {
 	OnEvent(transfer.Event)
 }
 
-// installRootSetter is the optional ability UI1-R2 added: a front end that
-// renders task rows wants the plan's semantic install root so it can display
-// task paths relative to it. The install run hands res.InstallPath over after
+// installRootSetter is the optional ability of a front end that renders task
+// rows to receive the plan's semantic install root, so it can display task
+// paths relative to it. The install run hands res.InstallPath over after
 // BuildPlan — the ONE root with the right semantics (the %install_dir%
 // template resolved; not cfg.Directories.Directory, which a subdir template
 // can differ from). Like transferEventSink the interface itself stays

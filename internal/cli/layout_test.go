@@ -7,7 +7,7 @@ import (
 	"github.com/nekrozis/goggo/internal/ui/progress"
 )
 
-// TestVisibleWidth locks the cell arithmetic (review UI1 v3 §6.B): ANSI
+// TestVisibleWidth locks the cell arithmetic: ANSI
 // sequences are zero-width, East Asian wide runes are two cells, everything
 // else one.
 func TestVisibleWidth(t *testing.T) {
@@ -49,10 +49,10 @@ func TestTruncateVisiblePreservesANSI(t *testing.T) {
 	}
 }
 
-// TestLayoutNoWrapInvariant is the P0 guard (review UI1 v3 §6.B): with wide
-// task paths, colored bars and a narrow terminal, every emitted line must fit
-// the width budget — the coordinator's row arithmetic depends on the frame
-// never wrapping.
+// TestLayoutNoWrapInvariant locks the no-wrap invariant: with wide task paths,
+// colored bars and a narrow terminal, every emitted line must fit the width
+// budget — the coordinator's row arithmetic depends on the frame never
+// wrapping.
 func TestLayoutNoWrapInvariant(t *testing.T) {
 	vm := viewModel{
 		active: 3, queued: 150,
@@ -75,9 +75,9 @@ func TestLayoutNoWrapInvariant(t *testing.T) {
 	}
 }
 
-// TestLayoutHeightTrim locks the height rule (review UI1 v3 §6.B): the frame
-// is built first and the task rows are trimmed to the terminal height, so the
-// physical row count never exceeds it and the overflow is announced.
+// TestLayoutHeightTrim locks the height rule: the frame is built first and the
+// task rows are trimmed to the terminal height, so the physical row count never
+// exceeds it and the overflow is announced.
 func TestLayoutHeightTrim(t *testing.T) {
 	vm := viewModel{active: 50, queued: 100, rate: 1e6, remaining: 5 << 20, etaValid: true, etaSecs: 5}
 	for i := 0; i < 50; i++ {
@@ -93,10 +93,10 @@ func TestLayoutHeightTrim(t *testing.T) {
 	}
 }
 
-// TestCompactPath locks the fish-style hierarchy-preserving compaction
-// (review UI1-R2 §3): the basename is never sacrificed, leading directories
-// abbreviate first, ancestors drop behind …/ only under heavier pressure,
-// and a path that fits is never touched for tidiness.
+// TestCompactPath locks the hierarchy-preserving compaction: the basename is
+// never sacrificed, leading directories abbreviate first, ancestors drop behind
+// …/ only under heavier pressure, and a path that fits is never touched for
+// tidiness.
 func TestCompactPath(t *testing.T) {
 	p := "Maps/Campaign/Shadow of Death/foo.h3m" // 38 cells; base foo.h3m = 8
 	stages := []struct {
@@ -115,8 +115,8 @@ func TestCompactPath(t *testing.T) {
 		}
 	}
 	// Identity is never lost while context still fits: two same-named files
-	// under different dirs compact to DIFFERENT forms (review UI1-R2 — the
-	// basename is an escape hatch, not the norm).
+	// under different dirs compact to DIFFERENT forms (the basename is an escape
+	// hatch, not the norm).
 	a := compactPath("Mods/Old/Data/Heroes3.exe", 20)
 	b := compactPath("Mods/Old/Patch/Heroes3.exe", 20)
 	if a != "…/Data/Heroes3.exe" || b != "…/Patch/Heroes3.exe" {
@@ -128,7 +128,7 @@ func TestCompactPath(t *testing.T) {
 	}
 }
 
-// TestTaskLineDegradation locks the priority order (D31 + UI1-R2 §2): the bar
+// TestTaskLineDegradation locks the priority order (D31): the bar
 // goes first, then the path compacts hierarchically, then the byte counts,
 // then the rate — the percentage and the row number survive everything short
 // of a truncation, and compaction exists only for width.
@@ -155,10 +155,10 @@ func TestTaskLineDegradation(t *testing.T) {
 	}
 }
 
-// TestLayoutTinyHeights locks the UI1-R1 fix: the height invariant holds at
-// any terminal height, because summary, message, tasks and the overflow
-// notice all draw from ONE row budget — at height 1–3 the frame shows only
-// the highest-priority rows that fit instead of overflowing.
+// TestLayoutTinyHeights locks the height invariant at any terminal height,
+// because summary, message, tasks and the overflow notice all draw from ONE row
+// budget — at height 1–3 the frame shows only the highest-priority rows that
+// fit instead of overflowing.
 func TestLayoutTinyHeights(t *testing.T) {
 	vm := viewModel{
 		active: 3, queued: 100, rate: 1e6, remaining: 5 << 20, etaValid: true, etaSecs: 5,
@@ -189,7 +189,7 @@ func TestLayoutTinyHeights(t *testing.T) {
 	}
 	// Height 5 (maxRows 4): the notice takes the only row left, and it must
 	// count ALL hidden tasks — the reservation shrinks what fits, so the
-	// count is computed from what is actually shown (review UI1-R1).
+	// count is computed from what is actually shown.
 	lines = layoutFrame(vm, 80, 5, nil, 0)
 	if len(lines) != 4 || !strings.Contains(lines[3], "... 3 more") {
 		t.Errorf("height 5 frame = %q, want summary + message + '... 3 more'", lines)

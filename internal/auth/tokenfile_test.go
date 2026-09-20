@@ -61,9 +61,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
-// TestLoadMissingExpiresAtUsesMtime locks the review point: when the file has
-// no expires_at, it must be derived from the file mtime (NOT the current
-// time) plus expires_in, like downloader.cpp:140-150.
+// TestLoadMissingExpiresAtUsesMtime: with no expires_at in the file, it must be
+// derived from the file mtime (NOT the current time) plus expires_in.
 func TestLoadMissingExpiresAtUsesMtime(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "old.json")
@@ -100,9 +99,9 @@ func TestLoadMissingExpiresAtUsesMtime(t *testing.T) {
 	}
 }
 
-// TestLoadMissingExpiresAtNoExpiresIn: with expires_in also missing, C++
-// asLargestInt yields 0, so expires_at lands exactly on the file mtime
-// (already-expired token). The Go port keeps that behaviour.
+// TestLoadMissingExpiresAtNoExpiresIn: with expires_in also missing, the value
+// contributes 0, so expires_at lands exactly on the file mtime (already-expired
+// token).
 func TestLoadMissingExpiresAtNoExpiresIn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bare.json")
 	data := []byte(`{"access_token":"at","refresh_token":"rt"}`)

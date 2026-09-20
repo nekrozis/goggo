@@ -144,7 +144,7 @@ func TestDefaultShouldRetryMatrix(t *testing.T) {
 		code int
 		want bool
 	}{
-		{http.StatusBadRequest, true},   // C++ retries every >=400 except 403/404
+		{http.StatusBadRequest, true},   // every >=400 except 403/404 is retried
 		{http.StatusUnauthorized, true}, // default policy retries 401 too; OAuth overrides later
 		{http.StatusRequestTimeout, true},
 		{http.StatusTooManyRequests, true},

@@ -8,7 +8,7 @@ import (
 // TestCoordinatorFrameTransaction locks the Frame transaction's shape: the
 // first draw paints the rows; the second erases exactly the previous frame's
 // rows before painting — the row arithmetic the no-wrap layout invariant
-// makes trustworthy (review UI1 v3 §6.C).
+// makes trustworthy.
 func TestCoordinatorFrameTransaction(t *testing.T) {
 	var out, errOut strings.Builder
 	c := newTerminalCoordinator(&out, &errOut)
@@ -30,10 +30,10 @@ func TestCoordinatorFrameTransaction(t *testing.T) {
 	}
 }
 
-// TestCoordinatorDiagnosticTransaction is the P0 regression (review UI1 v3,
-// constraint 8): a diagnostic lands on stderr with the frame torn down around
-// it, the frame is redrawn intact, and the NEXT frame starts from the same
-// canonical position — the same row count is erased as was on screen.
+// TestCoordinatorDiagnosticTransaction locks the diagnostic transaction: a
+// diagnostic lands on stderr with the frame torn down around it, the frame is
+// redrawn intact, and the NEXT frame starts from the same canonical position —
+// the same row count is erased as was on screen.
 func TestCoordinatorDiagnosticTransaction(t *testing.T) {
 	var out, errOut strings.Builder
 	c := newTerminalCoordinator(&out, &errOut)
@@ -117,11 +117,10 @@ func TestCoordinatorFinalizeRefusesWrites(t *testing.T) {
 	}
 }
 
-// TestConsoleRoutesThroughCoordinator locks the single-entry wiring (review
-// UI1 v3 §6.C, constraint 1): during the install's TTY lifetime the console's
-// Out/ErrOut return coordinator writers — a caller that only knows io.Writer
-// still lands on the coordinator; after the scope ends the plain streams come
-// back.
+// TestConsoleRoutesThroughCoordinator locks the single-entry wiring: during the
+// install's TTY lifetime the console's Out/ErrOut return coordinator writers — a
+// caller that only knows io.Writer still lands on the coordinator; after the
+// scope ends the plain streams come back.
 func TestConsoleRoutesThroughCoordinator(t *testing.T) {
 	var out, errOut strings.Builder
 	c := newConsole(strings.NewReader(""), &out, &errOut)

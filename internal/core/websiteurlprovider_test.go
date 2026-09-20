@@ -67,8 +67,7 @@ func newProvider(t *testing.T, f *providerFixture, remoteXML bool, refreshes *at
 }
 
 // newProviderWithPolicy is newProvider with the checksum policy pinned: the
-// batch chain runs the gated policy, the single-file chain the always policy
-// (GD4 §3.5).
+// batch chain runs the gated policy, the single-file chain the always policy.
 func newProviderWithPolicy(t *testing.T, f *providerFixture, remoteXML bool, refreshes *atomic.Int32, policy checksumPolicy) *websiteURLProvider {
 	t.Helper()
 	hx, err := httpx.New(httpx.Config{UserAgent: "goggo-test/1.0"})
@@ -160,9 +159,9 @@ func TestWebsiteURLProviderResolve(t *testing.T) {
 	}
 }
 
-// TestWebsiteURLProviderConcurrentRefresh locks the S18d1 review fix on the
-// website path too: workers that all see an expired token produce exactly one
-// refresh, not one per worker.
+// TestWebsiteURLProviderConcurrentRefresh locks the concurrent-refresh rule on
+// the website path too: workers that all see an expired token produce exactly
+// one refresh, not one per worker.
 func TestWebsiteURLProviderConcurrentRefresh(t *testing.T) {
 	f := newProviderFixture(t)
 	f.set("/downlink", `{"downlink":"https://cdn.example.com/file.bin"}`)

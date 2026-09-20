@@ -11,9 +11,9 @@ import (
 	"github.com/nekrozis/goggo/internal/gamedetails"
 )
 
-// GD5 contract tests: the three writer contracts, the fail-closed serials
-// boundary, the acquisition request-count regression (C6) and the list
-// read-only guarantee. C1-C6 are the Gate 1 mandated standalone assertions.
+// Contract tests: the three writer contracts, the fail-closed serials boundary,
+// the acquisition request-count regression (C6) and the list read-only
+// guarantee. C1-C6 are the standalone assertions behind them.
 
 func TestWriteSerialsSkipsExisting(t *testing.T) { // C1
 	dir := t.TempDir()
@@ -70,9 +70,9 @@ func TestWriteOrFailDirectoryContracts(t *testing.T) {
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// The DIRECT parent exists as a file ⇒ the upstream "is not directory"
-	// branch (boost's exists() succeeds there). A parent under a file does
-	// not exist, and there upstream prints "Failed to create directory".
+	// The DIRECT parent exists as a file ⇒ the "is not directory" branch (the
+	// exists test succeeds there). A parent under a file does not exist, and
+	// that reports "Failed to create directory".
 	a := writeJSONFile(filepath.Join(blocker, "serials.txt"), "{}", ArtifactProductJSON, "g")
 	if a.Action != ArtifactFailed || !strings.Contains(a.Err.Error(), "is not directory") {
 		t.Errorf("blocked parent = %v/%v, want failed 'is not directory'", a.Action, a.Err)
@@ -98,7 +98,7 @@ func TestSerialsFromCDKeyShapes(t *testing.T) { // C5
 		{"a<br/>b<br />c", "a\nb\nc\n", false},
 		{"", "", false},
 		{"<span>x</span>", "", true},
-		{"<BR>", "<BR>\n", false}, // boost's regex is case-sensitive: not a break
+		{"<BR>", "<BR>\n", false}, // the regex is case-sensitive: not a break
 	}
 	for _, tc := range cases {
 		got, unsupported := gamedetails.SerialsFromCDKey(tc.in)
@@ -114,7 +114,7 @@ func TestChangelogFromJSONWrapping(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(got, `<!DOCTYPE html>`) || !strings.Contains(got, "<title>Changelog: Game</title>") ||
-		!strings.HasSuffix(got, "<body><p>fix</p></body>\n</html>") { // the C++ literal has the newline
+		!strings.HasSuffix(got, "<body><p>fix</p></body>\n</html>") { // the literal has the newline
 		t.Errorf("wrapped changelog = %q", got)
 	}
 	if got, _ := gamedetails.ChangelogFromJSON(map[string]any{"changelog": ""}); got != "" {
@@ -123,7 +123,7 @@ func TestChangelogFromJSONWrapping(t *testing.T) {
 	if got, _ := gamedetails.ChangelogFromJSON(map[string]any{}); got != "" {
 		t.Errorf("missing changelog = %q, want nothing", got)
 	}
-	// The title test is presence, not value (the C++ isMember): an empty
+	// The title test is presence, not value: an empty
 	// title still renders "Changelog: ".
 	got, _ = gamedetails.ChangelogFromJSON(map[string]any{"changelog": "c", "title": ""})
 	if !strings.Contains(got, "<title>Changelog: </title>") {
@@ -185,8 +185,8 @@ func TestSaveSectionFailClosedAndContracts(t *testing.T) {
 	}
 }
 
-// TestSaveAcquisitionRequestCounting is C6, the GD5 regression lock: with
-// every save flag off the details document is never requested; with any
+// TestSaveAcquisitionRequestCounting is C6, the request-count regression lock:
+// with every save flag off the details document is never requested; with any
 // combination on, it is requested EXACTLY once per product (three consumers,
 // one fetch).
 func TestSaveAcquisitionRequestCounting(t *testing.T) {
@@ -254,7 +254,7 @@ func TestSaveChangelogAlreadyPresentSkipsOnSecondRun(t *testing.T) {
 	}
 }
 
-// TestArtifactFailureMovesExitCode locks the Gate 1 approval: a failed
+// TestArtifactFailureMovesExitCode locks the failure contract: a failed
 // artifact continues the run, reports itself, and moves the exit verdict.
 func TestArtifactFailureMovesExitCode(t *testing.T) {
 	f, cfg, dir := saveFixtureProduct(t, "KEY-1", "cl")
@@ -282,8 +282,9 @@ func TestArtifactFailureMovesExitCode(t *testing.T) {
 	}
 }
 
-// TestListGameDetailsIsReadOnlyAndEnumeratesAccount locks ruling 7: no
-// arguments means the whole account, and the path writes nothing.
+// TestListGameDetailsIsReadOnlyAndEnumeratesAccount locks the read-only
+// enumeration: no arguments means the whole account, and the path writes
+// nothing.
 func TestListGameDetailsIsReadOnlyAndEnumeratesAccount(t *testing.T) {
 	f := newGameInfoFixture(t)
 	f.setProduct("100", gameInfoDoc("100", "base_game", "Base Game", windowsInstaller("base.exe"), nil, nil, ""))

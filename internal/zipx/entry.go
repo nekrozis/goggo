@@ -8,10 +8,10 @@ import (
 )
 
 // ParseCDEntry reads one entry from a stream positioned at its header and
-// returns the parsed entry. It mirrors readZipCDEntry (ziputil.cpp:253-476),
-// handling both central-directory and local-file header layouts and the
-// 0x0001 ZIP64, 0x5455 extended-timestamp and 0x7875 unix extra fields.
-// Errors are returned instead of panicking on truncated input.
+// returns the parsed entry. It handles both central-directory and local-file
+// header layouts and the 0x0001 ZIP64, 0x5455 extended-timestamp and 0x7875
+// unix extra fields. Errors are returned instead of panicking on truncated
+// input.
 func ParseCDEntry(r io.Reader) (CDEntry, error) {
 	var cd CDEntry
 	header, err := readU32(r)
@@ -118,7 +118,7 @@ func ParseCDEntry(r io.Reader) (CDEntry, error) {
 	return cd, nil
 }
 
-// parseExtraFields walks the raw extra field data (ziputil.cpp:334-467).
+// parseExtraFields walks the raw extra field data.
 func parseExtraFields(cd *CDEntry) error {
 	if len(cd.Extra) == 0 {
 		return nil
@@ -145,8 +145,7 @@ func parseExtraFields(cd *CDEntry) error {
 		case zipExtendedTimestamp:
 			parseExtendedTimestamp(cd, data)
 		case zipInfoZipUnixNew:
-			// Version-gated uid/gid data is not consumed by the original
-			// program beyond skipping unknown versions (cpp:436-460).
+			// Version-gated uid/gid data is skipped.
 		default:
 			// Unknown extra field: skipped.
 		}
@@ -155,7 +154,7 @@ func parseExtraFields(cd *CDEntry) error {
 }
 
 // parseZip64Extra consumes values only for fields whose 32-bit counterpart
-// holds the sentinel, in spec order (ziputil.cpp:346-365).
+// holds the sentinel, in spec order.
 func parseZip64Extra(cd *CDEntry, data []byte) error {
 	br := bytes.NewReader(data)
 	readIf := func() (uint64, error) {
@@ -196,9 +195,8 @@ func parseZip64Extra(cd *CDEntry, data []byte) error {
 }
 
 // parseExtendedTimestamp applies the 0x5455 modification time only when its
-// info flag bit 0 is set (ziputil.cpp:366-421). Access/creation times are
-// read and ignored, matching the original. When the flag is absent the DOS
-// timestamp computed earlier is kept.
+// info flag bit 0 is set. Access and creation times are read and ignored. When
+// the flag is absent the DOS timestamp computed earlier is kept.
 func parseExtendedTimestamp(cd *CDEntry, data []byte) {
 	if len(data) < 1 {
 		return

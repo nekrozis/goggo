@@ -1,12 +1,10 @@
 package gamedetails
 
-// GetDetailsAsJson ports gameDetails::getDetailsAsJson (gamedetails.cpp):
-// the object the `list json` output is built from. The field set, the
-// VECTOR ORDER (extras, installers, patches, languagepacks — the display
-// contract, deliberately not the file-vector order) and the DLC recursion
-// are all part of the output contract locked by GD5's tests (ruling 8).
-// Empty vectors are absent members, the way jsoncpp's append loop leaves
-// them: a key appears exactly when it has entries.
+// GetDetailsAsJson returns the object the `list json` output is built from. The
+// field set, the vector order (extras, installers, patches, languagepacks — the
+// display order, deliberately not the file-vector order) and the DLC recursion
+// are all part of the output contract. Empty vectors are absent members: a key
+// appears exactly when it has entries.
 func (gd *GameDetails) GetDetailsAsJson() map[string]any {
 	out := map[string]any{
 		"gamename":          gd.Gamename,

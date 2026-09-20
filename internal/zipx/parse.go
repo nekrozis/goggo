@@ -1,6 +1,6 @@
 package zipx
 
-// ZIP signatures and extra-field header ids (ziputil.h:16-22).
+// ZIP signatures and extra-field header ids.
 const (
 	zipLocalHeaderSignature  uint32 = 0x04034b50
 	zipCDHeaderSignature     uint32 = 0x02014b50

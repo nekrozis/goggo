@@ -12,9 +12,8 @@ import (
 
 // ApplyPlanChanges executes the plan's destructive pre-work: the old-build
 // deletions, then the parent directories of every task. Per-item failures are
-// reported as error notices and skipped — the C++ source treats them the same
-// way, non-fatally — while a whole-function error means the run cannot
-// continue, e.g. a cancelled context (review D62).
+// reported as error notices and skipped, non-fatally; a whole-function error
+// means the run cannot continue, e.g. a cancelled context (D62).
 //
 // It does not create the task files themselves, download anything or clean up
 // partial downloads: those belong to the transfer and its failure handling.
@@ -25,7 +24,7 @@ func (d *Downloader) ApplyPlanChanges(ctx context.Context, plan model.DownloadPl
 			return notices, err
 		}
 		// A path that is already gone is fine; anything else that fails is
-		// reported and skipped, as the C++ source does for its deletions.
+		// reported and skipped.
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			notices = append(notices, Notice{Text: "Failed to delete " + path, Err: true})
 		}

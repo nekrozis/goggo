@@ -1,7 +1,7 @@
 package config
 
 // Option is one selectable value of a command-line option group (languages,
-// platforms, game-file types, ...). ID is a single-bit (or composite) flag
+// platforms, game-file types,...). ID is a single-bit (or composite) flag
 // mask, Code is the canonical short name used on the command line, Name is a
 // human-readable string and Regexp matches user-supplied aliases.
 type Option struct {
@@ -11,11 +11,8 @@ type Option struct {
 	Regexp string
 }
 
-// Game detail cache entry versions and format markers are defined in
-// constants.go; this file ports the option tables from
-// include/globalconstants.h:30-174.
-
-// Language bit flags. Values match the original 1<<N assignment order.
+// LangEN and the following constants are the language bit flags used by the
+// Languages table.
 const (
 	LangEN uint32 = 1 << iota
 	LangDE
@@ -47,7 +44,7 @@ const (
 	LangTH
 )
 
-// Languages is the full language table (globalconstants.h:63-93).
+// Languages is the full language table.
 var Languages = []Option{
 	{LangEN, "en", "English", "en|eng|english|en[_-]US"},
 	{LangDE, "de", "German", "de|deu|ger|german|de[_-]DE"},
@@ -79,33 +76,34 @@ var Languages = []Option{
 	{LangTH, "th", "Thai", "th|tha|thai|th[_-]TH"},
 }
 
-// Platform bit flags.
+// PlatformWindows and the following constants are the installer platform bit
+// flags.
 const (
 	PlatformWindows uint32 = 1 << iota
 	PlatformMac
 	PlatformLinux
 )
 
-// Platforms is the installer platform table (globalconstants.h:100-105).
+// Platforms is the installer platform table.
 var Platforms = []Option{
 	{PlatformWindows, "win", "Windows", "w|win|windows"},
 	{PlatformMac, "mac", "Mac", "m|mac|osx"},
 	{PlatformLinux, "linux", "Linux", "l|lin|linux"},
 }
 
-// Galaxy architecture bit flags.
+// ArchX86 and ArchX64 are the Galaxy depot architecture bit flags.
 const (
 	ArchX86 uint32 = 1 << iota
 	ArchX64
 )
 
-// GalaxyArchs is the Galaxy depot architecture table (globalconstants.h:111-115).
+// GalaxyArchs is the Galaxy depot architecture table.
 var GalaxyArchs = []Option{
 	{ArchX86, "32", "32-bit", "32|x86|32bit|32-bit"},
 	{ArchX64, "64", "64-bit", "64|x64|64bit|64-bit"},
 }
 
-// --list format bit flags.
+// ListFormatGames and the following constants are the --list format bit flags.
 const (
 	ListFormatGames uint32 = 1 << iota
 	ListFormatDetailsText
@@ -116,7 +114,7 @@ const (
 	ListFormatWishlist
 )
 
-// ListFormats is the --list format table (globalconstants.h:125-134).
+// ListFormats is the --list format table.
 var ListFormats = []Option{
 	{ListFormatGames, "games", "Games", "g|games"},
 	{ListFormatDetailsText, "details", "Details", "d|details"},
@@ -127,7 +125,7 @@ var ListFormats = []Option{
 	{ListFormatWishlist, "wishlist", "Wishlist", "w|wishlist"},
 }
 
-// Game-file type bit flags (globalconstants.h:136-156).
+// GFBaseInstaller and the following constants are the game-file type bit flags.
 const (
 	GFBaseInstaller uint32 = 1 << iota
 	GFBaseExtra
@@ -141,7 +139,8 @@ const (
 	GFCustomDLC
 )
 
-// Composite game-file masks mirroring GFTYPE_* in the original header.
+// GFBase and the following constants are composite masks combining the
+// game-file type bits above.
 const (
 	GFBase      = GFBaseInstaller | GFBaseExtra | GFBasePatch | GFBaseLangPack | GFCustomBase
 	GFDLC       = GFDLCInstaller | GFDLCExtra | GFDLCPatch | GFDLCLangPack | GFCustomDLC
@@ -152,8 +151,7 @@ const (
 	GFCustom    = GFCustomBase | GFCustomDLC
 )
 
-// IncludeOptions is the --include/--exclude option table
-// (globalconstants.h:158-174).
+// IncludeOptions is the --include/--exclude option table.
 var IncludeOptions = []Option{
 	{GFBaseInstaller, "bi", "Base game installers", "bi|basegame_installers"},
 	{GFBaseExtra, "be", "Base game extras", "be|basegame_extras"},

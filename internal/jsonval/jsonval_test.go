@@ -58,8 +58,8 @@ func TestJSONChildren(t *testing.T) {
 	}
 }
 
-// TestJSONStr mirrors jsoncpp's asString(): null/boolean/numbers stringify,
-// containers do not.
+// TestJSONStr locks the string form: null/boolean/numbers stringify, containers
+// do not.
 func TestJSONStr(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -93,8 +93,8 @@ func TestJSONStr(t *testing.T) {
 	}
 }
 
-// TestJSONInt covers the integer reader: jsoncpp's null/bool handling is kept,
-// non-integral numbers and strings are refused instead of truncated.
+// TestJSONInt covers the integer reader: null and bool are handled, non-integral
+// numbers and strings are refused instead of truncated.
 func TestJSONInt(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -134,8 +134,8 @@ func TestJSONInt(t *testing.T) {
 	}
 }
 
-// TestJSONNum mirrors asDouble(): numbers plus jsoncpp's null (0) and boolean
-// (0/1) conversions; strings and containers are refused.
+// TestJSONNum covers the float reader: numbers plus null (0) and boolean (0/1)
+// conversions; strings and containers are refused.
 func TestJSONNum(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -179,8 +179,8 @@ func TestIsJSONNumber(t *testing.T) {
 	}
 }
 
-// TestJSONBool mirrors asBool(): null is false, numbers are != 0, strings are
-// refused instead of parsed.
+// TestJSONBool covers the boolean reader: null is false, numbers are != 0,
+// strings are refused instead of parsed.
 func TestJSONBool(t *testing.T) {
 	cases := []struct {
 		name    string

@@ -178,16 +178,15 @@ func newOfflineDownloaderWith(t *testing.T, srv *httptest.Server, cfg config.Con
 	return &Downloader{cfg: cfg, ui: ui, http: hx, web: web, galaxy: gx, progress: deps.Progress, token: store}
 }
 
-// TestTransportOwnedByCallerPersistsCookies locks the S12-R ownership rule: the
+// TestTransportOwnedByCallerPersistsCookies locks the ownership rule: the
 // transport is created (and therefore owned) by the caller, and the jar that
 // carried a session cookie is the one SaveCookies writes and LoadCookies
 // restores.
 //
-// Coverage boundary (recorded in the audit): the cookie is set by a direct
-// request rather than "during a webapi call", because webapi's endpoints have
-// no injection point. The property being tested — one transport, one jar, one
-// persistence path — is what the ownership change guarantees; the end-to-end
-// form is verified by GATE-A.
+// Coverage boundary: the cookie is set by a direct request rather than "during a
+// webapi call", because webapi's endpoints have no injection point. The property
+// being tested — one transport, one jar, one persistence path — is what the
+// ownership change guarantees.
 func TestTransportOwnedByCallerPersistsCookies(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -240,11 +239,10 @@ func TestTransportOwnedByCallerPersistsCookies(t *testing.T) {
 }
 
 // TestCredentialsPromptOnDemand locks the credentialed prompting rule: only the
-// values that were not supplied are asked for (intentional difference from the
-// C++ behaviour of prompting for both unless both flags are set), with
-// --browser-login asking for nothing at all. The prompts themselves go to
-// ErrOut — the CLI console owns that wording — so this test asserts what was
-// asked for and that stdout stayed empty.
+// values that were not supplied are asked for, with --browser-login asking for
+// nothing at all. The prompts themselves go to ErrOut — the CLI console owns
+// that wording — so this test asserts what was asked for and that stdout stayed
+// empty.
 func TestCredentialsPromptOnDemand(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -269,7 +267,7 @@ func TestCredentialsPromptOnDemand(t *testing.T) {
 			want: [2]string{"a@b", "pw"}, wantPrompts: []string{"email", "password"},
 		},
 		{
-			// --browser-login needs no credentials (downloader.cpp:254).
+			// --browser-login needs no credentials.
 			name: "browser login asks nothing", interactive: true, forceBrowser: true,
 			want: [2]string{"", ""},
 		},
@@ -298,27 +296,25 @@ func TestCredentialsPromptOnDemand(t *testing.T) {
 	}
 }
 
-// TestCredentialsEmptyValuesReported covers the upstream failure for a prompt
-// answered with an empty line (downloader.cpp:282-288): the value is missing,
-// so the login is not attempted.
+// TestCredentialsEmptyValuesReported covers the failure for a prompt answered
+// with an empty line: the value is missing, so the login is not attempted.
 func TestCredentialsEmptyValuesReported(t *testing.T) {
 	ui := newFakeConsole("", "")
 	cfg := config.NewConfig("/cfg", "/cache")
 
 	_, _, err := credentials(cfg, ui, true)
 	if err == nil || err.Error() != "Email and/or password empty" {
-		t.Fatalf("credentials err = %v, want the upstream empty-credentials message", err)
+		t.Fatalf("credentials err = %v, want the empty-credentials message", err)
 	}
 	if ui.out.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", ui.out.String())
 	}
 }
 
-// TestCredentialsHeadless locks the non-terminal branch (downloader.cpp:256-265)
-// against review rulings Q1=b, ① and S4-2 (which replaced ②'s hint wording): the
-// two persistence paths go to stdout, nothing is prompted, the failure text is
-// the same whether or not those files exist, and an empty credential pair is
-// never posted — the branch fails instead. credentials performs no HTTP work at
+// TestCredentialsHeadless locks the non-terminal branch: the two persistence
+// paths go to stdout, nothing is prompted, the failure text is the same whether
+// or not those files exist, and an empty credential pair is never posted — the
+// branch fails instead. credentials performs no HTTP work at
 // all, so "nothing was posted" is structural rather than merely observed here.
 func TestCredentialsHeadless(t *testing.T) {
 	newCfg := func(t *testing.T) (config.Config, string, string) {
@@ -352,7 +348,7 @@ func TestCredentialsHeadless(t *testing.T) {
 	})
 
 	t.Run("stores present, same message", func(t *testing.T) {
-		// Ruling ①: the presence of the stores does not change the message —
+		// The presence of the stores does not change the message —
 		// what the caller has to do is identical, and the behavioural
 		// difference (no empty-credential request) is in the implementation.
 		cfg, cookieFile, tokenFile := newCfg(t)
@@ -395,7 +391,7 @@ func TestCredentialsHeadless(t *testing.T) {
 	})
 
 	t.Run("email only falls through to the branch", func(t *testing.T) {
-		// downloader.cpp:249 tests the PAIR first, so a lone --login-email does
+		//
 		// not become a password-less login.
 		cfg, _, _ := newCfg(t)
 		cfg.Email = "a@b"
@@ -425,25 +421,24 @@ func TestCredentialsHeadless(t *testing.T) {
 			t.Errorf("credentials = %q/%q, want the supplied pair", email, password)
 		}
 		if ui.out.Len() != 0 || ui.errOut.Len() != 0 {
-			t.Errorf("output = %q / %q, want nothing (downloader.cpp:249-253 takes the pair first)",
+			t.Errorf("output = %q / %q, want nothing (the credential pair is read first)",
 				ui.out.String(), ui.errOut.String())
 		}
 	})
 }
 
-// headlessMessage is the single non-interactive failure text: review ruling ①
-// unified the two sub-cases, and S4 ruling 2 replaced the hint: the flags it
-// named (--login, --login-email, --login-password) are not part of this CLI any
-// more, so it points at the login command and the terminal it needs.
+// headlessMessage is the single non-interactive failure text: both sub-cases
+// report it, and the hint points at the login command and the terminal it needs
+// rather than at login flags this CLI does not have.
 const headlessMessage = "no credentials available in a non-interactive session; " +
 	"run `goggo auth login` in a terminal"
 
 // TestLoginStreamsAndStatus drives the login flow offline and locks the R2
 // stream policy: every status line goes to stderr, stdout stays empty, and the
 // challenge reaches the console — which is what selects the wording the CLI
-// prints (website.cpp:515-525,614-617).
+// prints.
 //
-// Coverage boundary (recorded in the audit): the double hands httpx a
+// Coverage boundary: the double hands httpx a
 // caller-provided HTTPClient, and httpx deliberately refuses cookie persistence
 // in that configuration, so the flow ends by reporting exactly that error.
 // Everything this step guarantees happens before it — the final assertion pins
@@ -513,10 +508,10 @@ func TestLoginStreamsAndStatus(t *testing.T) {
 	}
 }
 
-// TestLoginFailureReportsOnce locks the review point that the added status
-// output must not double-report: on the failure path login writes no status line
-// at all, and the reason plus its upstream label travel in a SINGLE error chain
-// that the front end renders as exactly one `Error: …` line.
+// TestLoginFailureReportsOnce locks that the status output must not
+// double-report: on the failure path login writes no status line at all, and the
+// reason plus its label travel in a SINGLE error chain that the front end
+// renders as exactly one `Error: …` line.
 func TestLoginFailureReportsOnce(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -524,8 +519,7 @@ func TestLoginFailureReportsOnce(t *testing.T) {
 			fmt.Fprint(w, `<html><body><form><input name="login[_token]" value="tok"></form></body></html>`)
 		case "/login_check":
 			// The callback carries no auth code and the page has no reCAPTCHA
-			// marker, so the form login yields nothing and Login fails
-			// (website.cpp:339-343).
+			// marker, so the form login yields nothing and Login fails.
 			http.Redirect(w, r, "/callback", http.StatusFound)
 		case "/callback":
 			fmt.Fprint(w, "callback")
@@ -545,7 +539,7 @@ func TestLoginFailureReportsOnce(t *testing.T) {
 		t.Fatal("login must fail when the server returns no auth code")
 	}
 	if !strings.HasPrefix(err.Error(), "Galaxy: Login failed: ") {
-		t.Errorf("error = %q, want the upstream label at the head of one error chain", err.Error())
+		t.Errorf("error = %q, want the label at the head of one error chain", err.Error())
 	}
 	if got := strings.Count(err.Error(), "Login failed"); got != 1 {
 		t.Errorf("error = %q mentions the failure %d times, want exactly one", err.Error(), got)
@@ -597,16 +591,16 @@ func TestEnsureDirectories(t *testing.T) {
 	}
 }
 
-// TestInitRefreshesAndSavesExpiredToken covers the reviewer-requested boundary:
+// TestInitRefreshesAndSavesExpiredToken covers the boundary:
 // load, notice the token is expired, refresh it and save the result — without
 // binding to the token file format. The store is seeded through the production
 // writer and the result is read back through the production reader, so nothing
 // here depends on how the file is laid out.
 //
-// Coverage boundary (recorded in the audit): the sequence runs through
-// auth.LoadTokenFile plus Downloader.Init rather than through Open, because Open
-// builds its transport from the configuration and therefore cannot be pointed at
-// a test server. Open's own glue stays GATE-A territory, as it was before S17.
+// Coverage boundary: the sequence runs through auth.LoadTokenFile plus
+// Downloader.Init rather than through Open, because Open builds its transport
+// from the configuration and therefore cannot be pointed at a test server. Open's
+// own glue is not exercised here.
 func TestInitRefreshesAndSavesExpiredToken(t *testing.T) {
 	var tokenRequests int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -663,9 +657,8 @@ func TestInitRefreshesAndSavesExpiredToken(t *testing.T) {
 	}
 }
 
-// TestInitWithoutUsableTokenReportsFailure locks the upstream contract that a
-// failed initialisation stops the run (downloader.cpp:203-209 returns 0, which
-// makes main.cpp:802-806 exit 1).
+// TestInitWithoutUsableTokenReportsFailure locks the contract that a failed
+// initialisation stops the run.
 func TestInitWithoutUsableTokenReportsFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nope", http.StatusInternalServerError)
@@ -762,7 +755,7 @@ func seededToken(t *testing.T, cfg config.Config, expiresIn int) {
 }
 
 // TestOpenWithInjectedTransportSeesAFreshAccount covers the seam's happy path
-// and the reason it replaces only the network exit (review ruling D28-3): the
+// and the reason it replaces only the network exit (D28): the
 // run keeps its cookie file, so the session it builds persists like any other.
 func TestOpenWithInjectedTransportSeesAFreshAccount(t *testing.T) {
 	srv := newOpenTestServer(t)
@@ -798,7 +791,7 @@ func TestOpenWithInjectedTransportSeesAFreshAccount(t *testing.T) {
 }
 
 // TestOpenWithInjectedTransportRefreshesExpiredToken covers the refresh branch
-// through Open itself (the S17 boundary this step exists to close).
+// through Open itself.
 func TestOpenWithInjectedTransportRefreshesExpiredToken(t *testing.T) {
 	srv := newOpenTestServer(t)
 	cfg := config.NewConfig(t.TempDir(), t.TempDir())
@@ -853,8 +846,7 @@ func TestOpenWithInjectedTransportWithoutLoginPermission(t *testing.T) {
 }
 
 // TestOpenWithInjectedTransportWithoutToken covers a fresh install: no token
-// file at all is not an error, exactly like the C++ loader leaving an empty
-// store.
+// file at all is not an error — the store is simply left empty.
 func TestOpenWithInjectedTransportWithoutToken(t *testing.T) {
 	srv := newOpenTestServer(t)
 	cfg := config.NewConfig(t.TempDir(), t.TempDir())
@@ -901,7 +893,7 @@ func TestOpenWithInjectedTransportRunsTheFullLogin(t *testing.T) {
 }
 
 // TestSessionRequestReadOnlyNeverLogsIn locks the read-only half of the login
-// contract (review CLI1 §7): a command that needs a session and may not create
+// contract: a command that needs a session and may not create
 // one fails with the one actionable error, without prompting and without the
 // login flow — even though this console could answer, which is what makes the
 // refusal policy rather than a missing terminal.
@@ -937,10 +929,10 @@ func TestSessionRequestReadOnlyNeverLogsIn(t *testing.T) {
 }
 
 // TestSessionRequestNonInteractiveFailFast locks the writing half on a machine
-// that cannot answer (review CLI1 §7). The run stops with the actionable error
+// that cannot answer. The run stops with the actionable error
 // and never reaches the headless credentials branch: that branch's fingerprint
-// is the two store paths it prints, and it is written for an explicit login only
-// (review S4, ruling 2).
+// is the two store paths it prints, and it is written for an explicit login
+// only.
 func TestSessionRequestNonInteractiveFailFast(t *testing.T) {
 	srv := newOpenTestServer(t)
 	cfg := config.NewConfig(t.TempDir(), t.TempDir())
@@ -966,9 +958,9 @@ func TestSessionRequestNonInteractiveFailFast(t *testing.T) {
 	}
 }
 
-// TestSessionRequestImplicitLoginOnATerminal covers automatic login (review CLI1
-// §7): the two prompts a missing account needs are asked, the flow completes and
-// the run comes back usable.
+// TestSessionRequestImplicitLoginOnATerminal covers automatic login: the two
+// prompts a missing account needs are asked, the flow completes and the run
+// comes back usable.
 func TestSessionRequestImplicitLoginOnATerminal(t *testing.T) {
 	srv := newOpenTestServer(t)
 	cfg := config.NewConfig(t.TempDir(), t.TempDir())
@@ -992,7 +984,7 @@ func TestSessionRequestImplicitLoginOnATerminal(t *testing.T) {
 }
 
 // TestSessionRequestExplicitLoginKeepsTheNonInteractiveBranch locks why an
-// explicit login is its own class (review S4, ruling 2): with no terminal it
+// explicit login is its own class: with no terminal it
 // still runs and reports the missing credentials, and a session-requiring
 // command reports that real failure rather than ErrSessionRequired — the login
 // attempt comes before the requirement is judged.
@@ -1022,10 +1014,9 @@ func TestSessionRequestExplicitLoginKeepsTheNonInteractiveBranch(t *testing.T) {
 	}
 }
 
-// TestRetryWaitIsMilliseconds locks the conversion BUG-1 fixed. The CLI's
-// --wait counts MILLISECONDS (main.cpp:292, multiplied by 1000 before usleep at
-// main.cpp:516-517), so the website backoff must be built from milliseconds;
-// the earlier microsecond reading made every retry wait 1000x shorter than the
+// TestRetryWaitIsMilliseconds locks the unit the CLI exposes: --wait counts
+// MILLISECONDS, so the website backoff must be built from milliseconds; the
+// earlier microsecond reading made every retry wait 1000x shorter than the
 // option asked for.
 func TestRetryWaitIsMilliseconds(t *testing.T) {
 	for _, tc := range []struct {

@@ -3,7 +3,7 @@
 // account's games.
 //
 // The front end lives in internal/cli; this file is only the process entry
-// point. The full option set and the complete help text are ported in S24.
+// point.
 package main
 
 import (

@@ -323,7 +323,7 @@ func TestRunWebsiteChecksummedCompleteSkip(t *testing.T) {
 }
 
 // TestRunWebsiteVersionRename locks the different-version branch: the local
-// file moves to the dated .old name and the new content downloads.
+// file moves to the dated.old name and the new content downloads.
 func TestRunWebsiteVersionRename(t *testing.T) {
 	f := newWebsiteFixture(t)
 	dest := filepath.Join(t.TempDir(), "game", "setup.bin")
@@ -438,8 +438,8 @@ func TestRunWebsiteRetryAndCleanupMatrix(t *testing.T) {
 		if fi, err := os.Stat(dest); err != nil || fi.Size() == 0 {
 			t.Errorf("partial file = %v, want it kept for a later resume", err)
 		}
-		// The failed attempt leaves as the upstream warning ("Download complete
-		// (<err>): <name>", downloader.cpp:3406-3410), not as an error.
+		// The failed attempt leaves as the "Download complete (<err>): <name>"
+		// warning, not as an error.
 		var sawFailure bool
 		for _, ev := range env.obs.events {
 			if ev.Kind == EventMessageWarning && strings.Contains(ev.Text, "Download complete (") {
@@ -553,11 +553,11 @@ func md5Of(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// TestWebsiteTaskResultVerdicts locks the GD4 aggregation seam: the callback
-// sees one verdict per task — nil for a success and for an authorised skip,
-// non-nil for the exhausted-retries failure — and the run itself still ends
-// without error so the other tasks keep their chance (the aggregate exit
-// contract rides on these verdicts, not on the event texts).
+// TestWebsiteTaskResultVerdicts locks the aggregation seam: the callback sees one
+// verdict per task — nil for a success and for an authorised skip, non-nil for
+// the exhausted-retries failure — and the run itself still ends without error so
+// the other tasks keep their chance (the aggregate exit contract rides on these
+// verdicts, not on the event texts).
 func TestWebsiteTaskResultVerdicts(t *testing.T) {
 	f := newWebsiteFixture(t)
 	f.set("/good.bin", "payload")
@@ -604,10 +604,9 @@ func TestWebsiteTaskResultVerdicts(t *testing.T) {
 	}
 }
 
-// TestDownloadArtifact locks the GD5 direct-link primitive: served bytes
-// land at the destination with the server timestamp attempt semantics, a 404
-// fails and leaves nothing, and there is NO exists-skip — the second run
-// re-downloads, the way upstream re-fetches logos and icons every run.
+// TestDownloadArtifact locks the direct-link primitive: served bytes land at the
+// destination with the server timestamp attempt semantics, a 404 fails and leaves
+// nothing, and there is NO exists-skip — the second run re-downloads.
 func TestDownloadArtifact(t *testing.T) {
 	f := newWebsiteFixture(t)
 	f.set("/logo.jpg", "jpeg-bytes")

@@ -50,7 +50,7 @@ type planFixture struct {
 
 // heldBody is a response the fixture serves in two halves, waiting for the
 // test between them. It gives a test a deterministic window in which a
-// transfer is provably in flight (review S-ETA2).
+// transfer is provably in flight.
 type heldBody struct {
 	body    string
 	release <-chan struct{}
@@ -180,7 +180,7 @@ func planTestConfig(t *testing.T) config.Config {
 	// default; the test applies both so the plan sees production shapes.
 	cfg.Directories.Directory = dir + "/"
 	cfg.Directories.SubDirectories = true
-	// The subdirectory template is a Parse-time default (review D35/Delta 5):
+	// The subdirectory template is a Parse-time default (D35):
 	// config.NewConfig does not carry it, so the test supplies the value Parse
 	// would.
 	cfg.Directories.GalaxyInstallSubdir = "%install_dir%"
@@ -249,7 +249,7 @@ func TestBuildPlanFullChain(t *testing.T) {
 	}
 
 	// The container is a task; the file inside it is plan data for the
-	// extraction step, not a download target (review D50).
+	// extraction step, not a download target (D50).
 	if len(res.Plan.SFC) != 1 {
 		t.Fatalf("SFC groups = %d, want 1", len(res.Plan.SFC))
 	}
@@ -281,7 +281,7 @@ func TestBuildPlanFullChain(t *testing.T) {
 		t.Errorf("messages = %+v, want the Deleting line", res.Messages)
 	}
 
-	// The summary lines (downloader.cpp:4212-4214).
+	// The summary lines.
 	var sawTitle, sawCount, sawSize bool
 	for _, m := range res.Messages {
 		switch {
@@ -352,7 +352,7 @@ func TestBuildPlanContainerDroppedWhenInstalled(t *testing.T) {
 }
 
 // TestBuildPlanGenerationGate locks that a non-generation-2 build stops with
-// the message alone: an empty plan and no error, because main.cpp never folds
+// the message alone: an empty plan and no error, because never folds
 // this message into the exit code.
 func TestBuildPlanGenerationGate(t *testing.T) {
 	f := newPlanFixture(t)
@@ -374,7 +374,7 @@ func TestBuildPlanGenerationGate(t *testing.T) {
 	}
 }
 
-// TestBuildPlanLinuxFallback locks the not-ported fallback: the two support
+// TestBuildPlanLinuxFallback locks the unimplemented fallback: the two support
 // messages and an error that names the missing engine, not a silent success.
 func TestBuildPlanLinuxFallback(t *testing.T) {
 	f := newPlanFixture(t)
@@ -484,7 +484,7 @@ func planMessageTexts(res PlanResult) string {
 	return b.String()
 }
 
-// TestBuildPlanSkipAggregation locks the UI1-R2 plan-side rules: a destination
+// TestBuildPlanSkipAggregation locks the plan-side skip rules: a destination
 // already satisfying its item leaves the queue with NO transfer task and
 // lands in the Skipped report; the per-file ": OK" is a verbose record, not a
 // default notice; the header names the semantic install root exactly once; and
@@ -564,9 +564,9 @@ func TestBuildPlanSkipAggregation(t *testing.T) {
 	}
 }
 
-// TestBuildPlanNothingToDownload locks scene ②: every item already satisfies
-// the manifest ⇒ zero tasks, zero bytes to fetch, and the two aggregate
-// sentences.
+// TestBuildPlanNothingToDownload locks the fully-up-to-date case: every item
+// already satisfies the manifest ⇒ zero tasks, zero bytes to fetch, and the two
+// aggregate sentences.
 func TestBuildPlanNothingToDownload(t *testing.T) {
 	f := newPlanFixture(t)
 	const contentA = "already on disk A"
@@ -626,7 +626,7 @@ func (f *planFixture) exact(want string) int {
 
 // TestBuildPlanInstallDirTemplateNeedsProductInfo locks the one place the plan
 // fetches a product document: a template whose value comes from the product, and
-// only then (downloader.cpp:6679-6691). The three outcomes are the fetch itself,
+// only then. The three outcomes are the fetch itself,
 // the skip when the manifest names no base product, and the templates that never
 // need a document.
 func TestBuildPlanInstallDirTemplateNeedsProductInfo(t *testing.T) {
@@ -637,8 +637,8 @@ func TestBuildPlanInstallDirTemplateNeedsProductInfo(t *testing.T) {
 
 	productDoc := `{"id":"` + planProductID + `","slug":"` + slug + `","title":"` + title + `"}`
 
-	// A manifest without a base product id. GD3 defines this case (upstream
-	// requests the empty id): no request goes out and the name stays literal.
+	// A manifest without a base product id: no request goes out and the name
+	// stays literal.
 	manifestWithoutBase := `{"installDirectory":"W3 GOTY","version":2,` +
 		`"products":[{"name":"` + title + `"}],` +
 		`"depots":[{"productId":"` + planProductID + `","languages":["en-US"],"osBitness":["64"],` +

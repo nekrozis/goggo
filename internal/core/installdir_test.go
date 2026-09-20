@@ -62,9 +62,8 @@ func TestInstallSubdirTemplateTable(t *testing.T) {
 }
 
 // TestResolveInstallSubdir locks the six names, the values each one reads and,
-// above all, that matching is whole-string: upstream looks the value up in a map
-// rather than substituting placeholders inside a longer path
-// (downloader.cpp:6686-6698).
+// above all, that matching is whole-string: the value is looked up as a whole
+// name rather than substituting placeholders inside a longer path.
 func TestResolveInstallSubdir(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -117,12 +116,12 @@ func TestResolveInstallSubdir(t *testing.T) {
 	}
 }
 
-// TestResolveInstallSubdirEmptyProductInfo locks ruling D: a template whose
-// value is missing is registered with nothing, so the lookup misses and the
-// NAME ITSELF is the result. Returning an empty value instead would turn
-// "%title%/setup" into "/setup" — a path that silently points somewhere else.
-// Each row states the three answers, and the literal appears exactly where the
-// document carries no usable value.
+// TestResolveInstallSubdirEmptyProductInfo locks the missing-value rule: a
+// template whose value is missing is registered with nothing, so the lookup
+// misses and the NAME ITSELF is the result. Returning an empty value instead
+// would turn "%title%/setup" into "/setup" — a path that silently points
+// somewhere else. Each row states the three answers, and the literal appears
+// exactly where the document carries no usable value.
 func TestResolveInstallSubdirEmptyProductInfo(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -240,8 +239,8 @@ func TestResolveInstallSubdirManifestShape(t *testing.T) {
 				t.Errorf("product_id = %q, %v; want empty and no error", got, err)
 			}
 			// An empty value is registered, so the two stripped names are the
-			// empty string rather than the literal — upstream always has the
-			// %install_dir% key in its map.
+			// empty string rather than the literal — the %install_dir% key is
+			// always present.
 			if got, err := ResolveInstallSubdir("%install_dir_stripped%", c.manifest, nil); err != nil || got != "" {
 				t.Errorf("install_dir_stripped = %q, %v; want empty and no error", got, err)
 			}
@@ -264,9 +263,9 @@ func TestResolveInstallSubdirManifestShape(t *testing.T) {
 		})
 	}
 
-	// The manifest is read whole, as the C++ source reads both entries before
-	// it consults the template: a malformed baseProductId is an error even when
-	// the requested name does not use it.
+	// The manifest is read whole, both entries before the template is consulted:
+	// a malformed baseProductId is an error even when the requested name does
+	// not use it.
 	if _, err := ResolveInstallSubdir("%install_dir%", map[string]any{"baseProductId": map[string]any{}}, nil); err == nil {
 		t.Error("a malformed baseProductId must be an error whatever the template is")
 	}
@@ -319,13 +318,13 @@ func TestResolveInstallSubdirWithoutProduct(t *testing.T) {
 // TestResolveInstallSubdirErrorsAreNotSilent locks the failure modes apart: a
 // malformed document reports itself instead of coming back as a value, and the
 // reader's contract for a scalar is the one the manifest reader has always had
-// (a scalar field is read, whatever its JSON spelling — jsoncpp's asString,
-// which is what upstream calls here; the field-level shape gate belongs to the
-// conversion, where a field's type decides the tree, not to a path template).
+// (a scalar field is read, whatever its JSON spelling; the field-level shape
+// gate belongs to the conversion, where a field's type decides the tree, not to
+// a path template).
 func TestResolveInstallSubdirErrorsAreNotSilent(t *testing.T) {
 	got, err := ResolveInstallSubdir("%gamename%", installManifest(), map[string]any{"slug": 42})
 	if err != nil {
-		t.Fatalf("a numeric slug is read the way jsoncpp reads it: %v", err)
+		t.Fatalf("a numeric slug is read as a string: %v", err)
 	}
 	if got != "42" {
 		t.Errorf("value = %q, want the scalar rendered as its text", got)

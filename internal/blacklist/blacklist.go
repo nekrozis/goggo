@@ -16,7 +16,7 @@ type item struct {
 	re     *regexp.Regexp
 }
 
-// flag bits (blacklist.cpp:14-17).
+// flag bits.
 const (
 	flagRX   = 1 << 0
 	flagPerl = 1 << 1
@@ -34,17 +34,16 @@ type Blacklist struct {
 
 // Initialize parses the lines into filters and returns one diagnostic per
 // problem line, in order. It never aborts: an unparsable or unknown-type line
-// is reported and skipped, exactly as the C++ source does — except that the
-// diagnostics are returned for the caller to render instead of printed here,
-// and a line that carries flags but no expression is reported rather than
-// crashing (upstream's substr runs past the end there, blacklist.cpp:43-56).
+// is reported and skipped, and a line that carries flags but no expression is
+// reported rather than crashing. The diagnostics are returned for the caller to
+// render instead of being printed here.
 func (b *Blacklist) Initialize(lines []string) (diagnostics []string) {
 	for nr, line := range lines {
 		linenr := nr + 1
 		// A file with CRLF endings leaves a '\r' on every line when split on
 		// '\n', which would end up inside the expression and break '$'
-		// anchors. Stripping it is an intentional difference, the same one the
-		// catalog filter reader makes.
+		// anchors. Stripping it is deliberate, as in the catalog filter
+		// reader.
 		line = strings.TrimSuffix(line, "\r")
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -77,8 +76,7 @@ func (b *Blacklist) Initialize(lines []string) (diagnostics []string) {
 		source := line[i:]
 		re, err := regexp.Compile(source)
 		if err != nil {
-			// Upstream assigns into a boost::regex, which throws on an invalid
-			// pattern; here the line is reported and skipped.
+			// An invalid pattern is reported and skipped, not fatal.
 			diagnostics = append(diagnostics, fmt.Sprintf("invalid regexp in blacklist line %d: %v", linenr, err))
 			continue
 		}
@@ -88,8 +86,8 @@ func (b *Blacklist) Initialize(lines []string) (diagnostics []string) {
 	return diagnostics
 }
 
-// IsBlacklisted reports whether path matches any entry (blacklist.cpp:65-72).
-// The search is unanchored: an entry matches a path that contains it.
+// IsBlacklisted reports whether path matches any entry; see the package doc for
+// the matching semantics.
 func (b *Blacklist) IsBlacklisted(path string) bool {
 	for _, it := range b.items {
 		if it.re.MatchString(path) {
@@ -107,10 +105,9 @@ func (b *Blacklist) Diagnostics() []string {
 }
 
 // LoadBlacklist reads the file at path and parses its lines. A missing file is
-// the empty blacklist, which filters nothing — the state upstream is in when
-// no blacklist.txt exists. Any other read error is returned: an unreadable
-// file must not silently become "nothing is blacklisted". The parse
-// diagnostics stay on the value (see Diagnostics).
+// the empty blacklist, which filters nothing. Any other read error is returned:
+// an unreadable file must not silently become "nothing is blacklisted". The
+// parse diagnostics stay on the value (see Diagnostics).
 func LoadBlacklist(path string) (*Blacklist, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

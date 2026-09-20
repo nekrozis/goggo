@@ -2,9 +2,9 @@ package config
 
 import "runtime"
 
-// NewConfig returns the configuration defaults main.cpp establishes before any
-// command-line flag is applied (main.cpp:67-84), plus the option defaults that
-// belong to the config domain rather than the CLI.
+// NewConfig returns the configuration defaults applied before any command-line
+// flag is parsed, plus the option defaults that belong to the config domain
+// rather than the CLI.
 //
 // It is a pure constructor: it opens no files, creates no directories and reads
 // no environment. The two XDG roots are passed in rather than looked up here,
@@ -20,9 +20,8 @@ func NewConfig(configHome, cacheHome string) Config {
 	cfg.VersionNumber = Version
 	cfg.Curl.UserAgent = DefaultUserAgent()
 
-	// Directories (main.cpp:71-84). The paths follow the C++ concatenation
-	// exactly, so an XDG variable that is set but empty yields the same
-	// root-relative path as the original.
+	// Directories. Paths are concatenated with "/", so a root that is set but
+	// empty yields a root-relative path.
 	cfg.CacheDirectory = cacheHome + "/" + ProgramName
 	cfg.XMLDirectory = cfg.CacheDirectory + "/xml"
 	cfg.ConfigDirectory = configHome + "/" + ProgramName
@@ -32,9 +31,7 @@ func NewConfig(configHome, cacheHome string) Config {
 	cfg.IgnorelistFilePath = cfg.ConfigDirectory + "/ignorelist.txt"
 	cfg.TransformConfigFilePath = cfg.ConfigDirectory + "/transformations.json"
 
-	// Option defaults (main.cpp:276-323). Only the subset the S12 CLI
-	// registers is set here; the remaining defaults are added with the full
-	// option table in S24.
+	// Option defaults. The CLI option table supplies the fields not set here.
 	cfg.Directories.Directory = "."
 	cfg.PlatformPriority = DefaultPlatformPriority
 	cfg.LanguagePriority = DefaultLanguagePriority
@@ -42,18 +39,17 @@ func NewConfig(configHome, cacheHome string) Config {
 	cfg.UnitFormat = UnitFormatIEC
 	cfg.Retries = 3
 	cfg.Wait = 0
-	// Transfer guard (main.cpp:314-315, CURLOPT_LOW_SPEED_TIME/LIMIT): abort a
-	// transfer that stays below 200 B/s for 30 s. The names cross over —
-	// LowSpeedTimeout is the duration in seconds, LowSpeedTimeoutRate the rate
-	// in bytes per second.
+	// Transfer guard: abort a transfer that stays below 200 B/s for 30 s. The
+	// names cross over — LowSpeedTimeout is the duration in seconds,
+	// LowSpeedTimeoutRate the rate in bytes per second.
 	cfg.Curl.LowSpeedTimeout = 30
 	cfg.Curl.LowSpeedTimeoutRate = 200
 	cfg.Color = true   // --no-color clears it
-	cfg.Unicode = true // --no-unicode clears it (main.cpp:283,538)
+	cfg.Unicode = true // --no-unicode clears it
 	return cfg
 }
 
-// Option defaults shared with the CLI option table (main.cpp:280-281,307-308).
+// Option defaults shared with the CLI option table.
 const (
 	// DefaultPlatformPriority is the --platform default install priority.
 	DefaultPlatformPriority = "w+l"
@@ -63,9 +59,8 @@ const (
 )
 
 // IncludeAllMask is the mask `--include all` resolves to: the OR of every
-// IncludeOptions entry, exactly like Util::getOptionValue("all", ...). The
-// custom-file bits are not offered by --include, so they are absent here even
-// though the GFBase/GFDLC composites carry them.
+// IncludeOptions entry. The custom-file bits are not offered by --include, so
+// they are absent here even though the GFBase/GFDLC composites carry them.
 func IncludeAllMask() uint32 {
 	var mask uint32
 	for _, o := range IncludeOptions {
@@ -75,13 +70,8 @@ func IncludeAllMask() uint32 {
 }
 
 // DefaultUserAgent builds the User-Agent string from this program's own
-// identity and version.
-//
-// Intentional difference (recorded in the audit): the upstream value is
-// composed at build time as "LGOGDownloader/<ver> (<CMAKE_SYSTEM_NAME>
-// <CMAKE_SYSTEM_PROCESSOR>)" (CMakeLists.txt:76). This port identifies itself
-// as goggo and uses Go's own GOOS/GOARCH spellings rather than mapping them to
-// the upstream wording. The User-Agent plays no part in authentication.
+// identity and version, using Go's GOOS/GOARCH spellings. The User-Agent plays
+// no part in authentication.
 func DefaultUserAgent() string {
 	return ProgramName + "/" + Version + " (" + runtime.GOOS + " " + runtime.GOARCH + ")"
 }

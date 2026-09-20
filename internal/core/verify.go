@@ -34,23 +34,23 @@ type VerifyResult struct {
 
 	// Facts covers the plan's whole expected file set — one entry per file, in
 	// the plan's order (path order), with failures keeping their place. The
-	// order is a contract of this type, not of the renderer (review S5).
+	// order is a contract of this type, not of the renderer.
 	Facts []FileFact
 
 	// Notices are the plan-phase messages a verification should show: the
 	// blacklist report, the verbose item lines, the Linux fallback. The
-	// install-shaped summary is not among them (planMode, review S5).
+	// install-shaped summary is not among them.
 	Notices []Notice
 }
 
 // Verify reports the fact for every file the installation is expected to have.
 //
-// It is read-only in the strictest sense (review CLI1 §7, §13②③): it builds the
+// It is read-only in the strictest sense: it builds the
 // plan in verify mode, which neither downloads nor deletes nor answers for disk
 // space, and then only observes — no file is written, replaced, removed or
 // touched, and a mismatch is never repaired. The file set it reports on is
 // PlanResult.Expected alone, so a verification and an install cannot disagree
-// about which files the installation owns (review S5).
+// about which files the installation owns.
 //
 // An observation failure does not stop the run: one unreadable file must not
 // hide the state of the rest, so it is reported as a fact with an error and the

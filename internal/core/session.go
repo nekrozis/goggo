@@ -16,7 +16,7 @@ import (
 )
 
 // SessionRequest is what a run needs from the session before its command can
-// work (review CLI1 §7).
+// work.
 //
 // The two fields are independent on purpose: a read-only command needs a session
 // but must never create one, while an explicit login creates one without needing
@@ -41,7 +41,7 @@ type SessionRequest struct {
 // ErrSessionRequired is the one failure a session-requiring command has when
 // there is no usable session and this run may not log in.
 //
-// The wording is the hint the CLI contract promises (review CLI1 §7): the user's
+// The wording is the hint the CLI contract promises: the user's
 // next step is the login command, not a retry. It names no command of its own,
 // so every command reports the same sentence instead of inventing its own.
 var ErrSessionRequired = errors.New("not logged in; run `goggo auth login`")
@@ -54,17 +54,15 @@ var ErrSessionRequired = errors.New("not logged in; run `goggo auth login`")
 // it fails with ErrSessionRequired when req.Required says the command cannot
 // work without a session and none exists.
 //
-// req exists because the C++ front end has callers with different needs: it
-// answers --check-login-status before it ever considers logging in
-// (main.cpp:685-698), and a command that is not allowed to log in must fail
-// instead of starting an interactive login on a machine that cannot answer it
-// (review CLI1 §7).
+// req exists because callers have different needs: --check-login-status is
+// answered before logging in is ever considered, and a command that is not
+// allowed to log in must fail instead of starting an interactive login on a
+// machine that cannot answer it.
 func Open(ctx context.Context, cfg config.Config, ui Console, req SessionRequest) (*Downloader, error) {
 	return OpenWith(ctx, cfg, ui, req, Dependencies{})
 }
 
-// OpenWith is Open with the outside pieces supplied (see Dependencies). The
-// sequence and every decision below are the ones the C++ front end makes; only
+// OpenWith is Open with the outside pieces supplied (see Dependencies). Only
 // the network exit of the transport can differ, which is what makes this seam
 // worth having.
 func OpenWith(ctx context.Context, cfg config.Config, ui Console, req SessionRequest,
@@ -97,8 +95,7 @@ func OpenWith(ctx context.Context, cfg config.Config, ui Console, req SessionReq
 		if !errors.Is(err, fs.ErrNotExist) {
 			return nil, err
 		}
-		// No token file yet: a fresh install, exactly like the C++ loader
-		// leaving an empty store.
+		// No token file yet: a fresh install, which leaves the store empty.
 	}
 	d.token.SetFilepath(TokenPath(cfg))
 
@@ -119,8 +116,7 @@ func OpenWith(ctx context.Context, cfg config.Config, ui Console, req SessionReq
 	// A command that needs a session and was not allowed to create one fails
 	// here, once, with the action the user can take. Letting the command fail
 	// on its own would report a protocol error that reads like a network
-	// fault, mixing "no local session" with "the API is broken" (review S4,
-	// ruling 4).
+	// fault, mixing "no local session" with "the API is broken".
 	if req.Required && !d.loggedIn {
 		return nil, ErrSessionRequired
 	}
@@ -144,37 +140,30 @@ func httpxCfg(cfg config.Config, deps Dependencies) httpx.Config {
 		// The website retry rule (min(3, retries) additional attempts) stays a
 		// webapi concern; the wait between attempts comes from retryWait.
 		RetryPolicy: webapi.RetryPolicyFor(cfg.Retries, retryWait(cfg)),
-		// The transfer guard mirrors --lowspeed-timeout / --lowspeed-rate; the
-		// C++ field names cross over: LowSpeedTimeout is the duration in
-		// seconds, LowSpeedTimeoutRate the rate in bytes per second.
+		// The transfer guard: LowSpeedTimeout is a duration in seconds,
+		// LowSpeedTimeoutRate a rate in bytes per second.
 		LowSpeedLimit: cfg.Curl.LowSpeedTimeoutRate,
 		LowSpeedTime:  time.Duration(cfg.Curl.LowSpeedTimeout) * time.Second,
 	}
 }
 
 // retryWait is the single place the website retry wait is built from the
-// configuration: the unit exposed by the CLI is milliseconds, and this is
-// where it becomes a time.Duration.
-//
-// The CLI's --wait is a count of MILLISECONDS (main.cpp:292 help text, and the
-// value is multiplied by 1000 once before every usleep — main.cpp:516-517 —
-// precisely to reach microseconds). This port keeps the option's raw value and
-// converts here, exactly as the transfer path does (install.go's Options.Wait).
-// The earlier microsecond reading came from looking at usleep alone and missing
-// the *1000; it made the website backoff 1000x shorter than the option asked
-// for (review CLI1/BUG-1).
+// configuration: the unit exposed by the CLI is milliseconds, and this is where
+// it becomes a time.Duration. The transfer path converts the same way
+// (install.go's Options.Wait).
 func retryWait(cfg config.Config) time.Duration {
 	return time.Duration(cfg.Wait) * time.Millisecond
 }
 
-// TokenPath is the Galaxy token store location (main.cpp:81). It is exported
+// TokenPath is the Galaxy token store location. It is exported
 // because the location is this layer's to define: Open loads and saves through
 // it, and the front end's local logout removes exactly this file.
 func TokenPath(cfg config.Config) string {
 	return cfg.ConfigDirectory + "/galaxy_tokens.json"
 }
 
-// checkLoggedIn mirrors Downloader::isLoggedIn (downloader.cpp:179-198).
+// checkLoggedIn probes the website session and requires an unexpired Galaxy
+// token.
 func (d *Downloader) checkLoggedIn(ctx context.Context) bool {
 	ok, err := d.web.IsLoggedIn(ctx)
 	if err != nil {
@@ -183,13 +172,12 @@ func (d *Downloader) checkLoggedIn(ctx context.Context) bool {
 	return ok && !d.token.IsExpired()
 }
 
-// ensureDirectories creates the per-user directories the program writes to,
-// mirroring main.cpp:377-406 (the XML, configuration and cache directories).
+// ensureDirectories creates the per-user directories the program writes to: the
+// XML, configuration and cache directories.
 //
 // The token, cookie and configuration files all live under the configuration
 // directory and their writers create temporary files there, so it has to exist
-// before the first persistence — the C++ front end creates it during startup
-// for the same reason.
+// before the first persistence.
 //
 // The mode is Unix semantics. On Windows the permission bits carry no
 // filesystem meaning; there the requirement is simply that the directory gets
@@ -203,22 +191,17 @@ func ensureDirectories(cfg config.Config) error {
 	return nil
 }
 
-// credentials resolves the credentials the login flow needs. It follows the
-// branch structure of Downloader::login (downloader.cpp:249-288):
+// credentials resolves the credentials the login flow needs:
 //
 //   - a supplied pair (flags or configuration) is used as it is;
 //   - with --browser-login the credentials are irrelevant, so nothing is asked
-//     for and an empty pair is not an error (downloader.cpp:254,376);
+//     for and an empty pair is not an error;
 //   - otherwise a non-terminal input takes the headless branch, which names the
 //     files it expects instead of prompting. A PARTIALLY supplied pair takes
-//     that branch too: the C++ tests the pair before anything else
-//     (downloader.cpp:249), so a lone --login-email is not used without a
-//     terminal either;
-//   - otherwise each MISSING value is asked for on demand — an intentional
-//     difference from the C++, which prompts for both unless both flags are set
-//     (review ruling B, S12.2-R1);
-//   - and a value still empty is reported the way upstream reports it
-//     (downloader.cpp:282-288).
+//     that branch too: a lone --login-email is not used without a terminal
+//     either;
+//   - otherwise each MISSING value is asked for on demand;
+//   - and a value still empty is reported as an error.
 //
 // interactive is passed in rather than read from the console here so the branch
 // structure is testable without a terminal; the decision itself lives in one
@@ -250,26 +233,18 @@ func credentials(cfg config.Config, ui Console, interactive bool) (email, passwo
 	return email, password, nil
 }
 
-// headlessCredentials mirrors the non-terminal branch of Downloader::login
-// (downloader.cpp:256-265): with no terminal there is nobody to prompt, so the
-// cookie file and the token file it would have used are printed to stdout and
-// the login gives up.
+// headlessCredentials is the non-terminal branch of the login flow: with no
+// terminal there is nobody to prompt, so the cookie file and the token file it
+// would have used are printed to stdout and the login gives up.
 //
-// Intentional differences, all review rulings:
-//
-//   - Q1=b: where the C++ source goes on to log in with the empty credential
-//     pair when both files exist, this port stops. An empty credential pair is
-//     never posted, so this branch always ends in an explicit failure.
-//   - ①: the failure message is the same whether or not the two files exist,
-//     because both cases leave the caller with the same job — supply
-//     credentials. The behavioural difference the C++ source attached to the
-//     file check lives in the code above, not in the wording.
-//   - S4 ruling 2 replaces ②: the hint names `goggo auth login` only. The flags
-//     the C++ wording pointed at (--login, --login-email, --login-password) are
-//     not part of this CLI, so a diagnostic that kept naming them would send the
-//     user straight into a usage error. Saying "in a terminal" keeps ②'s point —
-//     the hint has to be something the reader can actually do — since there is no
-//     configuration-file credential source yet.
+// An empty credential pair is never posted, so this branch always ends in an
+// explicit failure. The failure message is the same whether or not the two
+// files exist, because both cases leave the caller with the same job — supply
+// credentials. The hint names `goggo auth login` only: the login flags of the
+// original CLI are not part of this one, so a diagnostic naming them would send
+// the user straight into a usage error. "in a terminal" is the part of the hint
+// the reader can act on, since there is no configuration-file credential source
+// yet.
 //
 // Only an explicit login request reaches this branch: an implicit login is
 // allowed solely when a terminal can answer it (see SessionRequest.AllowLogin).
@@ -280,8 +255,7 @@ func headlessCredentials(cfg config.Config, ui Console) error {
 		"run `goggo auth login` in a terminal")
 }
 
-// Login runs the login flow (downloader.cpp:243-326), reporting progress on
-// stderr the way the C++ source does.
+// Login runs the login flow, reporting progress on stderr.
 func (d *Downloader) Login(ctx context.Context) error {
 	email, password, err := credentials(d.cfg, d.ui, d.ui.IsTerminal())
 	if err != nil {
@@ -296,22 +270,19 @@ func (d *Downloader) Login(ctx context.Context) error {
 	}
 	if challenge != nil {
 		if err := d.ui.ResolveChallenge(ctx, d.web, challenge); err != nil {
-			// An unfinished challenge leaves the flow without tokens, which
-			// the C++ source also reports as a Galaxy login failure
-			// (website.cpp:345-348, downloader.cpp:300-304).
+			// An unfinished challenge leaves the flow without tokens, which is
+			// reported as a Galaxy login failure.
 			return fmt.Errorf("Galaxy: Login failed: %w", err)
 		}
 	}
 	fmt.Fprintln(d.ui.ErrOut(), "Galaxy: Login successful")
 
-	// Persist what the login produced: the token file (saveGalaxyJSON,
-	// downloader.cpp:308-312) and the cookie jar (the C++ COOKIELIST FLUSH).
+	// Persist what the login produced: the token file and the cookie jar.
 	if err := auth.SaveTokenFile(d.token, d.token.GetFilepath()); err != nil {
 		return err
 	}
 
-	// The website session probe that decides HTTP login success
-	// (downloader.cpp:314-322).
+	// The website session probe that decides HTTP login success.
 	ok, err := d.web.IsLoggedIn(ctx)
 	if err != nil {
 		return fmt.Errorf("HTTP: Login failed: %w", err)
@@ -325,7 +296,7 @@ func (d *Downloader) Login(ctx context.Context) error {
 	return err
 }
 
-// Close flushes the cookie jar, mirroring the C++ flush on the way out.
+// Close flushes the cookie jar.
 func (d *Downloader) Close() error {
 	_, err := d.http.SaveCookies()
 	return err

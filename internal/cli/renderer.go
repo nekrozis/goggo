@@ -15,11 +15,10 @@ import (
 // progressSource is the sampling surface the renderer polls, declared here
 // because this is where it is consumed: transfer's *Progress satisfies it
 // structurally, so the front end never depends on a transfer interface. It is
-// the ONLY numeric progress authority of the display (review UI1 v3 §6.A):
-// the bytes, the totals, the percentages and the pending side all come from
-// here, never from the progress events. Queue is the run-level snapshot the
-// pending side derives from; its false means "no snapshot", never "empty
-// queue" (reviews S-ETA2, S-ETA3).
+// the ONLY numeric progress authority of the display: the bytes, the totals,
+// the percentages and the pending side all come from here, never from the
+// progress events. Queue is the run-level snapshot the pending side derives
+// from; its false means "no snapshot", never "empty queue".
 type progressSource interface {
 	Bytes(task string) (int64, bool)
 	Total(task string) (int64, bool)
@@ -29,8 +28,7 @@ type progressSource interface {
 var _ progressSource = (*transfer.Progress)(nil)
 
 // stopReason is the terminal state an install run ended in. It is the single
-// result value the exit code maps from (review UI1 v3 §6.E: one owner of the
-// reason→code mapping, in run.go).
+// result value the exit code maps from; run.go owns that mapping.
 type stopReason uint8
 
 const (
@@ -41,12 +39,12 @@ const (
 
 // finalLines are the terminal's closing state for each reason. A canceled run
 // never shows a completion count: its active tasks were interrupted, not
-// finished (review UI1 v2 §E). A zero-transfer run shows no count line — the
-// plan's "Nothing to download." already said it (review UI1-R2 §3, scene ②).
-// The subject names what the run was: an install closes as "Installation
-// failed.", a download as "Download failed." — the closing line must not
-// misname the command it closes (GD4). An empty subject keeps the install
-// wording, which is what every pre-GD4 evidence log shows.
+// finished. A zero-transfer run shows no count line — the plan's "Nothing to
+// download." already said it.
+//
+// subject names what the run was: an install closes as "Installation failed.",
+// a download as "Download failed." — the closing line must not misname the
+// command it closes. An empty subject keeps the install wording.
 func finalLines(reason stopReason, st runStats, subject string) []string {
 	switch reason {
 	case stopCompleted:
@@ -73,7 +71,7 @@ func finalLines(reason stopReason, st runStats, subject string) []string {
 // the renderer's mutex held — the event deliverer and the repaint loop are
 // the only callers, so a sink needs no lock of its own. The paths crossing
 // this boundary are display paths — relative to the install root once the
-// plan has handed it over (UI1-R2); diagnostics keep their absolute text.
+// plan has handed it over; diagnostics keep their absolute text.
 type sink interface {
 	// info renders a short-lived informational line. TTY: it becomes the
 	// frame's transient message row on the next repaint; log: stdout now.
@@ -96,7 +94,7 @@ type sink interface {
 // runStats are the terminal-state counters: transferred completions, tasks
 // the transfer resumed from a partial file, and tasks the transfer skipped
 // authoritatively (the dynamic-skip case; plan-level skips never reach the
-// queue at all). Review UI1-R2 §5.
+// queue at all).
 type runStats struct {
 	completed int
 	resumed   int
@@ -105,13 +103,11 @@ type runStats struct {
 
 // renderer turns the transfer event stream plus the Progress sampling surface
 // into a derived view model, and hands frames to a sink. It holds state, not
-// terminal: it never writes directly (review UI1 v3 — renderer produces
-// Frames, the coordinator owns the terminal).
+// terminal: it never writes directly — the coordinator owns the terminal.
 //
 // Progress is the numeric authority; the events are lifecycle and messages
-// only. EventProgress carries no display state anymore — the renderer does
-// not read its Current at all (review UI1 v3 §6.A; the field stays in the
-// event contract, transfer keeps emitting it, only the consumption is gone).
+// only. EventProgress carries no display state: the renderer never reads its
+// Current, though the field stays in the event contract.
 type renderer struct {
 	bar      *progress.Bar
 	interval time.Duration
@@ -126,7 +122,7 @@ type renderer struct {
 	finishedCount  int
 	startedBytes   int64  // Σ started tasks' totals, accumulated at TaskStart
 	message        string // the latest transient info/success line
-	installRoot    string // the plan's semantic install root (UI1-R2); "" until handed over
+	installRoot    string // the plan's semantic install root; "" until handed over
 	resumed        int    // resumed tasks, counted from the explicit marker alone
 	skippedDynamic int    // transfer-side skips, counted from the explicit marker alone
 
@@ -139,7 +135,7 @@ type renderer struct {
 // renderTask is one active task's view: its path, when the renderer first saw
 // it (the session average counts from there) and its sample window. The byte
 // counts are NOT stored — they are read from Progress at view-model build
-// time, so there is exactly one numeric source (review UI1 v3 §6.A/§20).
+// time, so there is exactly one numeric source.
 type renderTask struct {
 	path   string
 	start  time.Time
@@ -174,9 +170,8 @@ type taskRow struct {
 	rate  float64
 }
 
-// rateWindow is the sliding byte window behind the instantaneous rate: the
-// 10 s, 100-point cap mirrors upstream's TimeAndSize deque
-// (downloader.cpp:1541-1548).
+// rateWindow is the sliding byte window behind the instantaneous rate: at most
+// 10 seconds of samples, capped at 100 points.
 type rateWindow struct {
 	points [][2]int64 // (unixNano, cumulative installed bytes)
 	cap    int
@@ -184,8 +179,8 @@ type rateWindow struct {
 
 func (w *rateWindow) add(t time.Time, bytes int64) {
 	w.points = append(w.points, [2]int64{t.UnixNano(), bytes})
-	// Two trim conditions, the way the review locked the window (D76): the
-	// slope only spans the last 10 seconds, and at most 100 samples are kept.
+	// Two trim conditions (D76): the slope only spans the last 10 seconds, and
+	// at most 100 samples are kept.
 	cutoff := t.UnixNano() - int64(10*time.Second)
 	keep := 0
 	for keep < len(w.points) && w.points[keep][0] < cutoff {
@@ -200,8 +195,8 @@ func (w *rateWindow) add(t time.Time, bytes int64) {
 }
 
 // live returns the window's samples that are still inside the 10 s span at
-// now — the query-time trim the review locked (D76): the samples a stall has
-// aged out must not keep feeding a slope.
+// now — the query-time trim (D76): the samples a stall has aged out must not
+// keep feeding a slope.
 func (w *rateWindow) live(now time.Time) [][2]int64 {
 	cutoff := now.UnixNano() - int64(10*time.Second)
 	live := w.points
@@ -233,10 +228,9 @@ func (w *rateWindow) reset() {
 
 // addSample feeds one sampled value into the window. A value below the newest
 // sample means the task went backwards — a failed hash discards the chunk
-// buffer and the next attempt starts from the chunk's offset again — and the
-// review locked the answer: drop the old samples and start again from this
-// one. Never a negative slope, never a sample clamped back to its predecessor
-// (review S-ETA2).
+// buffer and the next attempt starts from the chunk's offset again — so the old
+// samples are dropped and the window restarts from this one. Never a negative
+// slope, never a sample clamped back to its predecessor.
 func (w *rateWindow) addSample(now time.Time, value int64) {
 	if newest, ok := w.newest(); ok && value < newest {
 		w.reset()
@@ -247,8 +241,7 @@ func (w *rateWindow) addSample(now time.Time, value int64) {
 // rate is the bytes-per-second slope over the last 10 seconds counted from
 // now — the query time, not the newest sample's time. A window that holds
 // fewer than two live samples has no slope to report and returns zero; the
-// task falls back to its session average (review S-ETA1). Callers hold the
-// renderer's mutex.
+// task falls back to its session average. Callers hold the renderer's mutex.
 func (w *rateWindow) rate(now time.Time) float64 {
 	live := w.live(now)
 	if len(live) < 2 {
@@ -264,8 +257,8 @@ func (w *rateWindow) rate(now time.Time) float64 {
 
 // rate is the task's download rate in bytes per second: the slope of its own
 // window, or its session average when the window holds fewer than two live
-// samples (review S-ETA1). done is the task's current sampled byte count,
-// read from Progress by the caller. Callers hold the mutex.
+// samples. done is the task's current sampled byte count, read from Progress by
+// the caller. Callers hold the mutex.
 func (t *renderTask) rate(now time.Time, done int64) float64 {
 	if t.window.samples(now) >= 2 {
 		return t.window.rate(now)
@@ -278,8 +271,7 @@ func (t *renderTask) rate(now time.Time, done int64) float64 {
 }
 
 // newRenderer wires a renderer over a sink. source is the numeric authority
-// and is required: the display has exactly one numeric feed (review UI1 v3
-// §6.A).
+// and is required: the display has exactly one numeric feed.
 func newRenderer(sink sink, bar *progress.Bar, interval time.Duration, source progressSource) *renderer {
 	if interval <= 0 {
 		interval = 100 * time.Millisecond
@@ -299,9 +291,7 @@ func newRenderer(sink sink, bar *progress.Bar, interval time.Duration, source pr
 // Start runs the repaint loop until Stop. A second Start is a no-op, and so
 // is a Start after Stop: the run is finalized, its terminal state is on
 // screen, and a ticker launched then would never see a stop signal again —
-// every later Stop refuses itself on the finalize flag (review UI1-R1: the
-// Stop-before-Start → Start-after-Stop sequence left exactly such a
-// goroutine behind).
+// every later Stop refuses itself on the finalize flag.
 func (r *renderer) Start() {
 	r.mu.Lock()
 	if r.started || r.finalize {
@@ -328,11 +318,9 @@ func (r *renderer) Start() {
 // Stop ends the repaint loop and emits the run's terminal state. It covers
 // every exit path — success, error, cancellation and panic (the caller's
 // defer reaches it with whatever reason was current) — but it never swallows
-// anything: a panic propagates after the cleanup, exactly as Go would
-// (review UI1 v3, constraint 7). A second Stop is a no-op, and a Stop without
-// a Start (nothing to wait for) finalizes synchronously instead of blocking
-// on the loop that never ran — the deadlock a test binary caught on the first
-// cut.
+// anything: a panic propagates after the cleanup, exactly as Go would. A
+// second Stop is a no-op, and a Stop without a Start (nothing to wait for)
+// finalizes synchronously instead of blocking on the loop that never ran.
 func (r *renderer) Stop(reason stopReason) {
 	r.mu.Lock()
 	if r.finalize {
@@ -361,7 +349,7 @@ func (r *renderer) stats() runStats {
 // SetInstallRoot records the plan's semantic install root (the core seam of
 // the same name calls this after BuildPlan). Task rows display paths relative
 // to it; without it they keep the absolute form, which is never wrong, only
-// verbose (review UI1-R2 §6.B).
+// verbose.
 func (r *renderer) SetInstallRoot(path string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -382,15 +370,15 @@ func (r *renderer) displayPath(path string) string {
 }
 
 // OnEvent implements transfer.Observer. The call is serial — transfer delivers
-// through one goroutine (review D59) — while the repaint loop reads the same
+// through one goroutine (D59) — while the repaint loop reads the same
 // state, hence the mutex. Progress events are lifecycle noise here: the
-// numeric authority is Progress, so they are dropped (review UI1 v3 §6.A).
+// numeric authority is Progress, so they are dropped.
 func (r *renderer) OnEvent(ev transfer.Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch ev.Kind {
 	case transfer.EventTaskStart:
-		// RES1 publishes the task's total before emitting TaskStart, so the
+		// The task's total is published before TaskStart is emitted, so the
 		// pending-byte side can accumulate it here and stays correct after
 		// finished tasks leave the active model.
 		r.activeTasks[ev.Path] = newRenderTask(ev.Path, r.now())
@@ -407,10 +395,9 @@ func (r *renderer) OnEvent(ev transfer.Event) {
 		r.sink.taskFinish(r.indexOf(ev.Path), r.displayPath(ev.Path))
 	case transfer.EventMessageInfo, transfer.EventMessageSuccess:
 		// The explicit resume/skip markers are counters, not display
-		// material: N identical lifecycle records aggregate (review UI1-R2
-		// §4.3). Their event text is never shown, and a resume is recognised
-		// ONLY by the marker — never by inferring an event sequence
-		// (decision 1).
+		// material: N identical lifecycle records aggregate. Their event text
+		// is never shown, and a resume is recognised ONLY by the marker —
+		// never by inferring an event sequence (decision 1).
 		if transfer.IsResumeMessage(ev.Text) {
 			r.resumed++
 			break
@@ -454,10 +441,10 @@ func (r *renderer) tick() {
 
 // buildVM derives the view model. Callers hold the mutex.
 //
-// The ETA is the wall-clock estimate for the whole task set (review UI1 v3
-// §5): remaining = pendingBytes + Σ(active total − sampled bytes), divided by
-// the aggregate rate — with remaining==0 taking priority over the rate==0
-// omission, so a finished run shows 0s rather than nothing.
+// The ETA is the wall-clock estimate for the whole task set: remaining =
+// pendingBytes + Σ(active total − sampled bytes), divided by the aggregate rate
+// — with remaining==0 taking priority over the rate==0 omission, so a finished
+// run shows 0s rather than nothing.
 func (r *renderer) buildVM(now time.Time) viewModel {
 	vm := viewModel{message: r.message, resumed: r.resumed}
 	var activeRemaining int64
@@ -473,7 +460,7 @@ func (r *renderer) buildVM(now time.Time) viewModel {
 		if v, ok := r.source.Total(path); ok {
 			total = v
 		}
-		// Display-layer defensive clamps (review UI1 v3 §5): the sampled
+		// Display-layer defensive clamps: the sampled
 		// counter never leaves [0, total].
 		if done < 0 {
 			done = 0
@@ -497,9 +484,9 @@ func (r *renderer) buildVM(now time.Time) viewModel {
 
 	// The pending side comes from the run's snapshot minus what this renderer
 	// has seen start; a subtract that would go negative is a state
-	// disagreement, not a number worth showing, so it clamps at zero
-	// (review S-ETA3). startedBytes was accumulated at TaskStart, so finished
-	// tasks leaving the active model do not corrupt it.
+	// disagreement, not a number worth showing, so it clamps at zero.
+	// startedBytes was accumulated at TaskStart, so finished tasks leaving the
+	// active model do not corrupt it.
 	vm.queued = 0
 	pendingBytes := int64(0)
 	if tasks, bytes, ok := r.source.Queue(); ok {
@@ -546,8 +533,8 @@ func (s *ttySink) finalize(reason stopReason, st runStats) {
 }
 
 // logSink is the non-TTY back end: append-only stable lines, no ANSI, no
-// cursor sequences, no progress frames (review UI1 v3 §6.C). Progress events
-// never become lines; only lifecycle and message events do.
+// cursor sequences, no progress frames. Progress events never become lines;
+// only lifecycle and message events do.
 type logSink struct {
 	out     io.Writer
 	errOut  io.Writer
@@ -569,8 +556,8 @@ func (s *logSink) taskFinish(i int, path string) {
 
 // tick emits the summary when the cadence asks for it: at least 10 seconds
 // since the last summary OR at least 10 finishes since it — whichever comes
-// first — and both thresholds reset on every emit (review UI1 v3 §6.C). The
-// 10-task count is a maximum increment, not a fixed rhythm.
+// first — and both thresholds reset on every emit. The 10-task count is a
+// maximum increment, not a fixed rhythm.
 func (s *logSink) tick(vm viewModel) {
 	now := s.now()
 	if now.Sub(s.lastSummary) < 10*time.Second && s.finishedSince < 10 {

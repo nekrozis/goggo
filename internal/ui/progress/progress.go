@@ -1,16 +1,13 @@
-// Package progress renders download progress bars, ported from
-// include/progressbar.h and src/progressbar.cpp of LGOGDownloader (WTFPL;
-// pinned reference under /reference).
+// Package progress renders download progress bars: an eighth-graded Unicode bar
+// and a plain ASCII fallback, each with an optional ANSI color.
 //
 // Bar.Create is a pure computation; Bar.Draw writes it to a caller-supplied
-// io.Writer (intentional API change: the C++ draw() writes to std::cout;
-// output content and the "no trailing newline" semantics are unchanged).
+// io.Writer and emits no trailing newline. With useColor set, Create produces
+// the ANSI-colored form; without it, no escape codes at all.
 //
-// Scope guard (approved): this package does NOT do TTY detection, NO_COLOR,
-// TERM handling, Windows ANSI setup or terminal-width queries — those belong
-// to their own responsibilities (terminal-width work is planned for the CLI
-// layer). color=true reproduces the exact C++ ANSI sequences; color=false
-// emits no escape codes at all.
+// The package does no terminal handling: no TTY detection, NO_COLOR, TERM
+// handling, Windows ANSI setup or terminal-width queries — those belong to the
+// front end.
 package progress
 
 import (
@@ -18,8 +15,7 @@ import (
 	"math"
 )
 
-// Block characters graded in eighths (index 0 is empty), matching the C++
-// m_bar_chars (progressbar.cpp:17-28). Package-private on purpose.
+// barChars holds the block characters graded in eighths; index 0 is empty.
 var barChars = [...]string{
 	" ",      // 0/8
 	"\u258F", // 1/8 left one-eighth block
@@ -40,21 +36,20 @@ const (
 	simpleEmptyFill    = " "
 	simpleBarChar      = "="
 
-	// ANSI colors (progressbar.cpp:35-38).
+	// ANSI colors.
 	ansiBarColor    = "\x1b[1;34m" // bold blue
 	ansiBorderColor = "\x1b[1;37m" // bold white
 	ansiReset       = "\x1b[0m"
 )
 
-// Bar draws an eighth-graded progress bar. C++ stores these settings once in
-// the constructor; Go keeps them as the Bar value.
+// Bar draws a progress bar with the settings fixed at construction.
 type Bar struct {
 	useUnicode bool
 	useColor   bool
 }
 
-// NewBar returns a Bar. useColor selects the exact ANSI coloring of the C++
-// version; no terminal feature detection is performed (see package doc).
+// NewBar returns a Bar. useColor selects ANSI coloring; no terminal feature
+// detection is performed (see the package doc).
 func NewBar(useUnicode, useColor bool) *Bar {
 	return &Bar{useUnicode: useUnicode, useColor: useColor}
 }
@@ -63,11 +58,9 @@ func NewBar(useUnicode, useColor bool) *Bar {
 // smaller in magnitude (or zero) is a zero/subnormal value.
 const minNormal = 2.2250738585072014e-308
 
-// isCxxNormal reports whether v satisfies the specific std::isnormal
-// semantics required by the original progressbar.cpp condition: finite,
-// non-zero and not subnormal. It is a compatibility predicate, NOT a general
-// floating-point helper for this codebase; keep it scoped to fraction
-// clamping.
+// isCxxNormal reports whether v is finite, non-zero and not subnormal — the
+// predicate the fraction validation needs. It is not a general floating-point
+// helper; keep it scoped to clampFraction.
 func isCxxNormal(v float64) bool {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return false
@@ -78,13 +71,13 @@ func isCxxNormal(v float64) bool {
 	return math.Abs(v) >= minNormal
 }
 
-// clampFraction reproduces the C++ validation (progressbar.cpp:57-58):
+// clampFraction maps a fraction outside [0, 1] to the nearest bound:
 //
-//	if (!isnormal(fraction) || fraction < 0) fraction = 0;
-//	else if (fraction > 1) fraction = 1;
+//	not normal (zero, subnormal, NaN, infinite) or negative → 0
+//	greater than 1 → 1
 //
-// Note that !isnormal also catches zero and subnormal values (both signs),
-// NaN and infinities — not only NaN/Inf.
+// Note that the normality test catches zero and subnormal values (both signs) as
+// well as NaN and infinities.
 func clampFraction(fraction float64) float64 {
 	if !isCxxNormal(fraction) || fraction < 0 {
 		return 0
@@ -96,16 +89,15 @@ func clampFraction(fraction float64) float64 {
 }
 
 // Create renders the bar of the given length. length must be >= 0; negative
-// values are treated as 0 (the C++ signature takes an unsigned int, so this
-// defensive behaviour guards the Go int API; see audit S07).
+// values are treated as 0.
 func (b *Bar) Create(length int, fraction float64) string {
 	if length < 0 {
 		length = 0
 	}
 	fraction = clampFraction(fraction)
 
-	// C++ layout (progressbar.cpp:60-64): fraction*length full steps, plus a
-	// partial character graded in eighths when the cursor is inside the bar.
+	// The layout: fraction*length full steps, plus a partial character graded in
+	// eighths when the cursor is inside the bar.
 	barPart := fraction * float64(length)
 	whole := int(math.Floor(barPart))
 	partialIndex := int(math.Floor((barPart - math.Floor(barPart)) * 8))
@@ -153,8 +145,7 @@ func (b *Bar) Create(length int, fraction float64) string {
 	return string(out)
 }
 
-// Draw writes the rendered bar to w without a trailing newline (mirrors
-// ProgressBar::draw, progressbar.cpp:48-51, but with an injected writer).
+// Draw writes the rendered bar to w without a trailing newline.
 func (b *Bar) Draw(w io.Writer, length int, fraction float64) error {
 	_, err := io.WriteString(w, b.Create(length, fraction))
 	return err

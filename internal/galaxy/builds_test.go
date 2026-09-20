@@ -9,8 +9,6 @@ import (
 )
 
 // TestProductBuildsRequest locks the URL construction against
-// galaxyapi.cpp:192, including the upstream default arguments of
-// galaxyapi.h:58 and the deliberate absence of URL encoding.
 func TestProductBuildsRequest(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -26,7 +24,7 @@ func TestProductBuildsRequest(t *testing.T) {
 			wantPath: "/products/1207659150/os/linux/builds", wantQuery: "generation=2",
 		},
 		{
-			name:      "empty values fall back to the upstream defaults",
+			name:      "empty values fall back to the defaults",
 			productID: "1207659150", platform: "", generation: "",
 			wantPath: "/products/1207659150/os/windows/builds", wantQuery: "generation=2",
 		},
@@ -61,7 +59,7 @@ func TestProductBuildsRequest(t *testing.T) {
 
 // TestProductBuildsReturnsRawDocument locks the return-type contract: the
 // document comes back navigable as decoded JSON, so the fields the download
-// path reads (downloader.cpp:4043-4076 uses items[].generation and
+// path reads ( items[].generation and
 // items[].link) are reachable without a schema imposed here.
 func TestProductBuildsReturnsRawDocument(t *testing.T) {
 	const body = `{"items":[{"generation":2,` +

@@ -27,7 +27,7 @@ func TestGalaxyPathPlaceholder(t *testing.T) {
 	}
 }
 
-// TestCdnURLTemplatesRanking locks galaxyapi.cpp:750-767 and the ordering of the
+// TestCdnURLTemplatesRanking locks
 // result: configured endpoints first, in priority order, then the unlisted ones.
 func TestCdnURLTemplatesRanking(t *testing.T) {
 	doc := linkDoc(t, `{"urls":[`+
@@ -60,8 +60,7 @@ func TestCdnURLTemplatesUnknownDocumentOrder(t *testing.T) {
 }
 
 // TestCdnURLTemplatesStableForDuplicateNames: two entries for the same endpoint
-// get the same score, and the stable sort keeps document order — the case
-// std::sort leaves undefined.
+// get the same score, and the stable sort keeps document order.
 func TestCdnURLTemplatesStableForDuplicateNames(t *testing.T) {
 	doc := linkDoc(t, `{"urls":[`+
 		`{"endpoint_name":"cdn","url_format":"first"},`+
@@ -80,7 +79,7 @@ func TestCdnURLTemplatesStableForDuplicateNames(t *testing.T) {
 
 // TestCdnURLTemplatesPlaceholders locks the replacement rule: every occurrence is
 // replaced, and the value of {path} gets the marker APPENDED rather than being
-// replaced by it (galaxyapi.cpp:781-784). No normalisation happens, so the double
+// replaced by it. No normalisation happens, so the double
 // slash stays.
 func TestCdnURLTemplatesPlaceholders(t *testing.T) {
 	doc := linkDoc(t, `{"urls":[{"endpoint_name":"cdn",`+
@@ -155,7 +154,7 @@ func TestCdnURLTemplatesShape(t *testing.T) {
 }
 
 // TestCdnURLTemplatesEmptyFormatKept: an empty template stays in the list. Whether
-// a URL is usable is the caller's decision, not this layer's (review ruling D12).
+// a URL is usable is the caller's decision, not this layer's (D12).
 func TestCdnURLTemplatesEmptyFormatKept(t *testing.T) {
 	doc := linkDoc(t, `{"urls":[{"url_format":""},{"endpoint_name":"cdn","url_format":"u"}]}`)
 
@@ -169,8 +168,7 @@ func TestCdnURLTemplatesEmptyFormatKept(t *testing.T) {
 	}
 }
 
-// TestCdnURLTemplatesCoercion: a numeric parameter value stringifies the way
-// jsoncpp's asString does.
+// TestCdnURLTemplatesCoercion: a numeric parameter value is stringified.
 func TestCdnURLTemplatesCoercion(t *testing.T) {
 	doc := linkDoc(t, `{"urls":[{"url_format":"x{path}","parameters":{"path":5}}]}`)
 
@@ -184,7 +182,7 @@ func TestCdnURLTemplatesCoercion(t *testing.T) {
 	}
 }
 
-// TestPathFromDownlinkURL locks the derivation of galaxyapi.cpp:676-739.
+// TestPathFromDownlinkURL locks the derivation of
 func TestPathFromDownlinkURL(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -236,8 +234,8 @@ func TestPathFromDownlinkURL(t *testing.T) {
 	}
 }
 
-// TestPathFromDownlinkURLIssue126 locks the workaround of issue #126: a "?" that
-// follows the last "/" means the format was unexpected, so the path is cut there.
+// TestPathFromDownlinkURLIssue126 locks the rule that a "?" following the last
+// "/" means the format was unexpected, so the path is cut there.
 func TestPathFromDownlinkURLIssue126(t *testing.T) {
 	cases := []struct {
 		name string
@@ -246,8 +244,8 @@ func TestPathFromDownlinkURLIssue126(t *testing.T) {
 	}{
 		{
 			// Both markers present: the cut happens at the earlier of the two,
-			// which leaves "?path=x" behind — and the workaround then removes it
-			// because that "?" follows the last "/".
+			// which leaves "?path=x" behind — and that "?" follows the last
+			// "/", so it is removed too.
 			name: "both token markers", url: "/game/f?path=x&token=T&access_token=A",
 			want: "/game/f",
 		},
@@ -269,8 +267,7 @@ func TestPathFromDownlinkURLIssue126(t *testing.T) {
 	}
 }
 
-// TestPathFromDownlinkURLEmpty locks the defined behaviour for an empty URL,
-// where the C++ source would read past the end of the string.
+// TestPathFromDownlinkURLEmpty locks the defined behaviour for an empty URL.
 func TestPathFromDownlinkURLEmpty(t *testing.T) {
 	for _, input := range []string{"", "/"} {
 		if got := PathFromDownlinkURL(input, "game"); got != "/game/" {

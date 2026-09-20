@@ -57,7 +57,7 @@ func detailsBlacklist(path string) *blacklist.Blacklist {
 	return bl
 }
 
-// TestRenderGameDetailsTextGolden locks the upstream wording down to the
+// TestRenderGameDetailsTextGolden locks the exact wording — down to the
 // trailing spaces, the DLC vector order, the blacklisted-file skip and the
 // verbose note on stderr.
 func TestRenderGameDetailsTextGolden(t *testing.T) {
@@ -74,8 +74,7 @@ func TestRenderGameDetailsTextGolden(t *testing.T) {
 		"installers: \n",
 		"\tid: en1installer0\n",
 		"\tupdated: True\n",
-		// OptionNameString answers with the DISPLAY name — the upstream
-		// getOptionNameString contract, "English" not "en".
+		// OptionNameString answers with the DISPLAY name — "English", not "en".
 		"\tlanguage: English\n",
 		"\tversion: 1.2\n",
 		"DLCs: \n",
@@ -87,8 +86,8 @@ func TestRenderGameDetailsTextGolden(t *testing.T) {
 		}
 	}
 	// Empty vectors print no header. A vector whose every file is blacklisted
-	// STILL prints its header — upstream tests emptiness of the vector, and
-	// the blacklist only skips the rows (downloader.cpp:6738-6766 vs 6809).
+	// STILL prints its header: the emptiness test is on the vector, and the
+	// blacklist only skips the rows.
 	for _, absent := range []string{"language packs: ", "patches: "} {
 		if strings.Contains(got, absent) {
 			t.Errorf("must not appear: %q in\n%s", absent, got)
@@ -107,8 +106,8 @@ func TestRenderGameDetailsTextGolden(t *testing.T) {
 }
 
 // TestSaveFlagAcceptance locks the three-leaf registration: download writes,
-// list details/json gate the display, and download file — whose upstream
-// chain has no save section — refuses the flags outright (D14).
+// list details/json gate the display, and download file refuses the flags
+// outright (D14).
 func TestSaveFlagAcceptance(t *testing.T) {
 	inv := mustParse(t, "download", "g", "--save-serials", "--save-product-json")
 	if !inv.cfg.DownloadConfig.SaveSerials || !inv.cfg.DownloadConfig.SaveProductJSON {
@@ -154,7 +153,7 @@ func TestInfoThreadsAcceptance(t *testing.T) {
 	}
 }
 
-// TestListDetailsArityAndHelp locks ruling 7 at the parse surface: zero
+// TestListDetailsArityAndHelp locks the arity at the parse surface: zero
 // arguments is legal (the whole account), arguments select, and the topic
 // says so.
 func TestListDetailsArityAndHelp(t *testing.T) {

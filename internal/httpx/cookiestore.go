@@ -10,19 +10,19 @@ import (
 )
 
 // cookieStore is the http.CookieJar handed to http.Client when cookie-file
-// persistence is configured (S10b). It has two independent responsibilities:
+// persistence is configured. It has two independent responsibilities:
 //
 //   - Request behaviour: s.jar, a standard cookiejar.Jar, is the single
 //     authority for cookie matching and sending. Cookies(u) delegates to it
 //     and never reads the persistence state.
 //   - Persistence: SetCookies additionally records each cookie event into
-//     s.persist so the state can be reconstructed across processes (S10b-2b
-//     Load/Save). persist records the cookie EVENT for reconstruction; it is
+//     s.persist so the state can be reconstructed across processes
+//     (LoadCookies/SaveCookies). persist records the cookie EVENT for reconstruction; it is
 //     NOT a copy of the jar's accepted state — cookies the jar rejects may
 //     still be recorded, and no acceptance probing or domain/path matching is
 //     implemented here. On reload the jar filters them again.
 //
-// Lock order (review lock, S10b-2a): s.mu serialises the WHOLE SetCookies
+// Lock order: s.mu serialises the WHOLE SetCookies
 // event so jar and persist advance together and persist never regresses to an
 // earlier event. Cookies takes the jar lock only (no mu), Save will take mu
 // only — there is no jar→mu path, hence no mutex inversion.
@@ -39,8 +39,7 @@ type cookieStore struct {
 // cookieKey identifies one persisted cookie. All canonicalisation lives in
 // keyFor: domain is lowercase with any leading dot removed (host-only cookies
 // use the request hostname), path carries the RFC default when the Set-Cookie
-// had none, name is exact. Fields ordered to minimise padding: the string
-// block (16B each) first, then the bool (1B).
+// had none, name is exact.
 type cookieKey struct {
 	domain   string
 	path     string
@@ -49,8 +48,7 @@ type cookieKey struct {
 }
 
 // cookieState is the persistable subset of a cookie event. expires is the
-// value to write into the Netscape file (zero = session cookie). Fields
-// ordered to minimise padding: time.Time (24B), string (16B), then bools.
+// value to write into the Netscape file (zero = session cookie).
 type cookieState struct {
 	expires  time.Time
 	value    string
@@ -73,14 +71,14 @@ func newCookieStore() *cookieStore {
 }
 
 // Cookies returns the cookies the jar would send to u. It never consults
-// persist and never takes s.mu (lock order: jar only).
+// persist and never takes s.mu.
 func (s *cookieStore) Cookies(u *url.URL) []*http.Cookie {
 	return s.jar.Cookies(u)
 }
 
 // SetCookies feeds u/cs to the authoritative jar and records the persistence
 // events. The whole sequence runs under s.mu so concurrent callers cannot
-// interleave jar and persist updates (lock order: mu -> jar). A single now is
+// interleave jar and persist updates. A single now is
 // used for the whole batch so one event has no intra-batch time drift.
 func (s *cookieStore) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	s.mu.Lock()
@@ -158,7 +156,7 @@ func persistExpiry(c *http.Cookie, now time.Time) time.Time {
 // defaultPath implements RFC 6265 section 5.1.4 (the default path of a cookie
 // whose Set-Cookie carried no Path attribute). It is an RFC helper written
 // independently (not copied from the standard library) and locked against the
-// current cookiejar behaviour by on-record tests. Input is u.EscapedPath():
+// current cookiejar behaviour by on-record tests. Input is u.EscapedPath:
 // the raw (undecoded) URI path representation, matching the request-target
 // semantics the RFC's uri-path refers to.
 //

@@ -5,10 +5,9 @@ import (
 	"io"
 )
 
-// Little-endian reader primitives over io.Reader (ziputil.cpp:97-131). A
-// single set exists; []byte callers wrap with bytes.NewReader. Reads are
-// bounds-checked through io.ReadFull, so truncated input returns an error
-// instead of panicking.
+// Little-endian reader primitives over io.Reader; []byte callers wrap with
+// bytes.NewReader. Reads are bounds-checked through io.ReadFull, so truncated
+// input returns an error instead of panicking.
 func readU8(r io.Reader) (uint8, error) {
 	var b [1]byte
 	if _, err := io.ReadFull(r, b[:]); err != nil {

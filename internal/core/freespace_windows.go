@@ -9,9 +9,7 @@ import (
 )
 
 // freeSpaceAvailable returns the bytes available to the caller on the volume
-// that contains path (GetDiskFreeSpaceExW's user-available counter, the one
-// boost::filesystem::space reports as available). The typed wrapper replaces
-// the NewLazyDLL/NewProc/unsafe pair this file used to carry by hand; the
+// that contains path, from GetDiskFreeSpaceExW's user-available counter. The
 // total-size and total-free out parameters are optional to the API, so nil
 // stands in for both.
 func freeSpaceAvailable(path string) (uint64, error) {

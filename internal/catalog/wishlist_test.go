@@ -107,7 +107,7 @@ func TestWishlistMapsFields(t *testing.T) {
 	}
 }
 
-// TestWishlistAmountShapes locks the isDouble() gate: integers take the
+// TestWishlistAmountShapes locks the isDouble gate: integers take the
 // six-decimal form, strings stay verbatim, null/missing become empty.
 func TestWishlistAmountShapes(t *testing.T) {
 	cases := []struct {
@@ -139,7 +139,7 @@ func TestWishlistAmountShapes(t *testing.T) {
 	}
 }
 
-// TestWishlistPercentShapes locks the separate isInt() gate.
+// TestWishlistPercentShapes locks the separate isInt gate.
 func TestWishlistPercentShapes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -223,7 +223,7 @@ func TestWishlistMoviesSkipPlatformDetection(t *testing.T) {
 	}
 }
 
-// TestWishlistReleaseDate covers website.cpp:744-769.
+// TestWishlistReleaseDate covers
 func TestWishlistReleaseDate(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -261,7 +261,7 @@ func TestWishlistReleaseDate(t *testing.T) {
 	}
 }
 
-// TestWishlistURLs covers website.cpp:777-784, including the pinned de-facto
+// TestWishlistURLs covers
 // behaviour for an empty URL.
 func TestWishlistURLs(t *testing.T) {
 	cases := []struct {
@@ -270,7 +270,7 @@ func TestWishlistURLs(t *testing.T) {
 	}{
 		{"https://example.com/x", "https://example.com/x"},
 		{"http://example.com/x", "http://example.com/x"},
-		{"httpfoo", "httpfoo"}, // HasPrefix("http") is what the C++ find()==0 tests
+		{"httpfoo", "httpfoo"}, // a plain "http" prefix is enough
 		{"/game/x", "https://www.gog.com/game/x"},
 		{"game/x", "https://www.gog.com/game/x"},
 		{"", "https://www.gog.com/"}, // front() on an empty string: pinned libstdc++ result
@@ -327,8 +327,8 @@ func TestWishlistFetcherError(t *testing.T) {
 	}
 }
 
-// TestWishlistMissingPriceObject: a price member that is not an object reads as
-// null in jsoncpp, so the fields degrade to their empty forms.
+// TestWishlistMissingPriceObject: a price member that is not an object leaves the
+// fields at their empty forms.
 func TestWishlistMissingPriceObject(t *testing.T) {
 	fw := &fakeWishlist{pages: []webapi.ProductPage{{Page: 1, TotalPages: 1, Products: []map[string]any{
 		{"title": "no price", "price": "oops"},

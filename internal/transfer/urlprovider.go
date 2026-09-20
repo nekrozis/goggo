@@ -11,9 +11,8 @@ import (
 // This is the seam that keeps transfer from depending on galaxy: the Galaxy
 // implementation (core) does hashToGalaxyPath -> secure/dependency link -> CDN
 // template -> URL, with per-product template caching for regular files and a
-// per-chunk re-fetch for dependencies (downloader.cpp:4626-4667). That logic
-// lives in core, not here — transfer only ever asks "where does this chunk
-// live".
+// per-chunk re-fetch for dependencies. That logic lives in core, not here —
+// transfer only ever asks "where does this chunk live".
 //
 // Concurrency: Run's worker goroutines call URL concurrently, so an
 // implementation must be safe for concurrent use. The Observer, by contrast,

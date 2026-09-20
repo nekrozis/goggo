@@ -8,9 +8,8 @@ import (
 	"github.com/nekrozis/goggo/internal/config"
 )
 
-// renderVersion prints the program's identity, then the upstream release this
-// port tracks: the compatibility baseline is metadata, never presented as our
-// version.
+// renderVersion prints the program's identity, then the compatibility baseline
+// of the release it tracks: that is metadata, never presented as our version.
 func renderVersion(w io.Writer) {
 	fmt.Fprintln(w, config.VersionString)
 	fmt.Fprintf(w, "%s compatibility: %s\n", config.UpstreamName, config.UpstreamCompatibilityVersion)
@@ -105,7 +104,7 @@ func commandUsage(node commandNode, path []string) string {
 
 	// A node that is both leaf and namespace ("download") shows its
 	// subcommands under its own usage, so the topic says everything the word
-	// can mean (GD4 ruling 9).
+	// can mean.
 	if len(node.children) != 0 {
 		b.WriteString("\nSubcommands:\n")
 		for _, child := range node.children {

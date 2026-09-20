@@ -13,8 +13,8 @@ import (
 
 // tokenRefresher serialises credential refreshes across a run's workers and
 // re-checks the expiry inside the lock, so a refresh another worker just
-// completed is not issued twice (review round 2, S18d1). The unlocked check
-// first keeps the lock off the hot path.
+// completed is not issued twice. The unlocked check first keeps the lock off
+// the hot path.
 type tokenRefresher struct {
 	mu      sync.Mutex
 	refresh func(context.Context) error
@@ -35,18 +35,16 @@ func (t *tokenRefresher) refreshIfExpired(ctx context.Context) error {
 }
 
 // checksumPolicy decides when the provider reads a downlink document's
-// "checksum" url. The two chains of GD4 have DIFFERENT upstream gates and
-// must not borrow each other's:
+// "checksum" url. The two chains have DIFFERENT gates and must not borrow each
+// other's:
 //
 //   - checksumGated is the batch worker's rule — installers and patches only,
-//     and only with remote XML enabled (downloader.cpp:3100). Extras carry a
-//     checksum url on the real API and are still not read (GD4 Gate 1
-//     ruling 3).
-//   - checksumAlways is the single-file rule of downloadFileWithId — any
-//     matched file whose document carries a non-empty checksum url is read,
-//     with no type gate and no remote-XML gate (downloader.cpp:2508-2513).
-//     A failed or empty fetch is not a failure: the download continues with
-//     no document, the way upstream only warns (2517-2522).
+//     and only with remote XML enabled. Extras carry a checksum url on the real
+//     API and are still not read.
+//   - checksumAlways is the single-file rule — any matched file whose document
+//     carries a non-empty checksum url is read, with no type gate and no
+//     remote-XML gate. A failed or empty fetch is not a failure: the download
+//     continues with no document.
 type checksumPolicy int
 
 const (
@@ -57,7 +55,7 @@ const (
 // websiteURLProvider resolves a website file's download url through the Galaxy
 // API: the downlink JSON document carries the "downlink" url and, for
 // installers and patches, a "checksum" url whose document holds the md5 the
-// version check compares against (downloader.cpp:3094-3129).
+// version check compares against.
 type websiteURLProvider struct {
 	galaxy    *galaxy.Client
 	remoteXML bool
@@ -89,9 +87,8 @@ func (p *websiteURLProvider) Resolve(ctx context.Context, task model.WebsiteTask
 		return "", "", fmt.Errorf("downlink: %w", err)
 	}
 
-	// The checksum document is read per the chain's policy: the batch gate
-	// is type and configuration (downloader.cpp:3100), the single-file gate
-	// is presence alone (downloader.cpp:2508-2513).
+	// The checksum document is read per the chain's policy: the batch gate is
+	// type and configuration, the single-file gate is presence alone.
 	checksumXML := ""
 	readChecksum := p.policy == checksumAlways || (p.remoteXML && task.Checksummed)
 	if readChecksum {
@@ -100,7 +97,7 @@ func (p *websiteURLProvider) Resolve(ctx context.Context, task model.WebsiteTask
 			if err != nil {
 				if p.policy == checksumAlways {
 					// The single-file chain never fails on the checksum
-					// document; it downloads without it (upstream warning).
+					// document; it downloads without it.
 					return downlink, "", nil
 				}
 				return "", "", fmt.Errorf("checksum: %w", err)

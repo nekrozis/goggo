@@ -8,8 +8,7 @@ import (
 	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
-// The product endpoints of galaxyapi.cpp:354-401. Both carry the same expand
-// list, spelled the way the C++ source spells it.
+// Both product endpoints carry the same expand list.
 const (
 	productExpand = "downloads,description,screenshots,videos,related_products,changelog"
 	// maxDLCBatchSize is max_ids: the largest ids= list one request carries.
@@ -19,21 +18,20 @@ const (
 	expandedDLCsKey = "expanded_dlcs"
 )
 
-// Product fetches a product document and expands its DLCs into it
-// (galaxyapi.cpp:354-401).
+// Product fetches a product document and expands its DLCs into it.
 //
 // The result is the RAW document — the one the API answered, plus the
 // expanded_dlcs member — and deliberately not a domain object. Assembling
-// GameDetails belongs to the conversion layer (GD1), and keeping acquisition
-// and conversion apart is what lets this function be tested against request
-// shapes alone.
+// GameDetails belongs to the conversion layer (internal/gamedetails), and
+// keeping acquisition and conversion apart is what lets this function be tested
+// against request shapes alone.
 //
 // Field reading follows the package's usual split: a member this function
 // reads is validated against the JSON type it must have, so an absent member is
 // the zero value and a present member of the wrong type is an error. Nothing is
 // coerced into something plausible.
 //
-// The DLC expansion has two branches (galaxyapi.cpp:360-399):
+// The DLC expansion has two branches:
 //
 //	dlcs.products holds at most 45 ids
 //	    → one request to dlcs.expanded_all_products_url, whose response is the
@@ -43,7 +41,7 @@ const (
 //	      products?ids=…, each response array appended in order
 //
 // Either way the collected array is stored under expanded_dlcs. A document
-// without DLCs gets no such member, exactly as upstream leaves it.
+// without DLCs gets no such member.
 func (c *Client) Product(ctx context.Context, productID string) (map[string]any, error) {
 	body, err := c.getResponse(ctx, c.ep.api+"/products/"+productID+"?expand="+productExpand)
 	if err != nil {
@@ -63,31 +61,22 @@ func (c *Client) Product(ctx context.Context, productID string) (map[string]any,
 
 // expandDLCs fetches the DLC documents of a product document and injects them.
 //
-// The dlcs member decides whether anything happens at all, through the guard
-// the C++ source applies (galaxyapi.cpp:360):
+// The dlcs member decides whether anything happens at all:
 //
-//	if (product_info["dlcs"].isObject()) { ...expand...; inject... }
-//
-// — the expansion block is entered for an object and skipped for everything
-// else, silently:
-//
-//	absent       → nothing to expand, nothing injected
-//	null         → same; a null is how an optional member is commonly spelled
-//	object       → expand (one request, or batches above maxDLCBatchSize)
-//	non-object   → skipped: no request, no expanded_dlcs, the document returned
+//	absent → nothing to expand, nothing injected
+//	null → same; a null is how an optional member is commonly spelled
+//	object → expand (one request, or batches above maxDLCBatchSize)
+//	non-object → skipped: no request, no expanded_dlcs, the document returned
 //
 // The live API really does send the non-object shapes — a majority of one
-// probed account's products carry "dlcs": [] (evidence:
-// dev/audit/evidence/D52-dlcs-census.txt, DEFECT-GD3-2). A string, number or
-// boolean here is data this port has never observed; the C++ guard gives them
-// the same treatment as an array, so they get it here too: an answer that
-// cannot be expanded is skipped, not reported.
+// probed account's products carry "dlcs": [] (D52, evidence in
+// dev/audit/evidence/D52-dlcs-census.txt). A string, number or boolean is data
+// this package has never observed, and an answer that cannot be expanded is
+// skipped, not reported.
 //
-// What the guard does NOT cover stays strict (residual divergence, registered
-// by ruling D52): inside an object, dlcs.products and
-// dlcs.expanded_all_products_url keep their field-shape gates — upstream's
-// size()/asString() leniency on those members has no observed sample to
-// justify widening GD2's gate for.
+// Inside an object the fields stay strict (D52): dlcs.products and
+// dlcs.expanded_all_products_url keep their field-shape gates, because a
+// lenient read has no observed sample to justify widening them.
 func (c *Client) expandDLCs(ctx context.Context, product map[string]any) error {
 	raw, present := product["dlcs"]
 	dlcs, isObject := raw.(map[string]any)
@@ -105,8 +94,8 @@ func (c *Client) expandDLCs(ctx context.Context, product map[string]any) error {
 }
 
 // dlcProducts reads dlcs.products. An absent or null member is the empty list,
-// which upstream sizes as 0 and therefore sends down the single-request branch
-// (galaxyapi.cpp:359); a present member that is not an array is an error.
+// which takes the single-request branch; a present member that is not an array
+// is an error.
 func dlcProducts(dlcs map[string]any) ([]any, error) {
 	raw, present := dlcs["products"]
 	if !present || raw == nil {
@@ -119,16 +108,14 @@ func dlcProducts(dlcs map[string]any) ([]any, error) {
 	return items, nil
 }
 
-// expandDLCsInOneRequest is the branch for at most maxDLCBatchSize DLCs
-// (galaxyapi.cpp:367-370).
+// expandDLCsInOneRequest is the branch for at most maxDLCBatchSize DLCs.
 func (c *Client) expandDLCsInOneRequest(ctx context.Context, product, dlcs map[string]any) error {
 	url, err := dlcExpandedURL(dlcs)
 	if err != nil {
 		return err
 	}
 	if url == "" {
-		// Upstream requests the empty url here, which is a case C++ leaves
-		// undefined; this port defines it as "no request, empty result".
+		// An empty url means "no request, empty result".
 		product[expandedDLCsKey] = []any{}
 		return nil
 	}
@@ -154,11 +141,11 @@ func dlcExpandedURL(dlcs map[string]any) (string, error) {
 	return url, nil
 }
 
-// expandDLCsInBatches is the branch above maxDLCBatchSize (galaxyapi.cpp:371-399).
+// expandDLCsInBatches is the branch above maxDLCBatchSize.
 //
-// A batch goes out when it is full OR when the list ends, which is the pair of
-// conditions in the original. The second one is what keeps a count that is an
-// exact multiple of maxDLCBatchSize from sending a trailing empty request.
+// A batch goes out when it is full OR when the list ends. The second condition
+// keeps a count that is an exact multiple of maxDLCBatchSize from sending a
+// trailing empty request.
 func (c *Client) expandDLCsInBatches(ctx context.Context, product map[string]any, products []any) error {
 	expanded := make([]any, 0, len(products))
 	ids := make([]string, 0, maxDLCBatchSize)
@@ -182,11 +169,10 @@ func (c *Client) expandDLCsInBatches(ctx context.Context, product map[string]any
 	return nil
 }
 
-// dlcID reads one dlcs.products entry's id. Upstream reads it with jsoncpp's
-// asString() (galaxyapi.cpp:384), so it is the identifier family, not a string
-// test: an absent or null member is the empty string, and a number — which is
-// what the live API actually sends here (DEFECT-GD3-1) — is stringified the
-// same way. Only a structured value is an error, where asString would crash.
+// dlcID reads one dlcs.products entry's id. It is the identifier family, not a
+// string test: an absent or null member is the empty string, and a number —
+// which is what the live API actually sends here — is stringified. Only a
+// structured value is an error.
 func dlcID(entry any, index int) (string, error) {
 	obj, err := jsonval.Object(entry)
 	if err != nil {
@@ -204,7 +190,7 @@ func dlcID(entry any, index int) (string, error) {
 }
 
 // fetchDLCBatch fetches one expansion response and requires it to be an array,
-// which is the shape both call sites read (galaxyapi.cpp:369,395).
+// which is the shape both call sites read.
 //
 // The failure names the member rather than the url: the url is part of the
 // document, and this package keeps urls out of error strings.

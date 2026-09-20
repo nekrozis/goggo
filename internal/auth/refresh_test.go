@@ -52,10 +52,10 @@ func newClientFor(t *testing.T, base string) *Client {
 	return c
 }
 
-// TestRefreshErrorHidesCredentials locks the R4a call site: the refresh request
-// URL carries client_secret and refresh_token, so a failing request must be
-// rendered without it (httpx.SafeError). Without this, a future edit that goes
-// back to %w would silently re-leak a ~30-day credential.
+// TestRefreshErrorHidesCredentials: the refresh request URL carries
+// client_secret and refresh_token, so a failing request must be rendered without
+// it (httpx.SafeError). Without this, a future edit that goes back to %w would
+// silently re-leak a ~30-day credential.
 func TestRefreshErrorHidesCredentials(t *testing.T) {
 	srv, cap := refreshServer(t, nil, http.StatusInternalServerError)
 	c := newClientFor(t, srv.URL)
@@ -121,7 +121,8 @@ func TestRefreshSuccess(t *testing.T) {
 }
 
 // TestRefreshEmptyRefreshTokenError: with no refresh token stored there is
-// nothing to refresh with; C++ would send an empty parameter, Go errors out.
+// nothing to refresh with, so Refresh errors out instead of sending an empty
+// parameter.
 func TestRefreshEmptyRefreshTokenError(t *testing.T) {
 	srv, _ := refreshServer(t, map[string]any{"access_token": "at"}, http.StatusOK)
 	c := newClientFor(t, srv.URL)
@@ -132,9 +133,8 @@ func TestRefreshEmptyRefreshTokenError(t *testing.T) {
 	}
 }
 
-// TestRefreshNonEmptyJSONWithoutAccessTokenSucceeds locks the C++ success
-// semantics: refreshLogin only tests that the response JSON is non-empty
-// (galaxyapi.cpp:67-70); no access_token completeness check is added.
+// TestRefreshNonEmptyJSONWithoutAccessTokenSucceeds: success only requires a
+// non-empty JSON object response; no access_token completeness check is added.
 func TestRefreshNonEmptyJSONWithoutAccessTokenSucceeds(t *testing.T) {
 	srv, _ := refreshServer(t, map[string]any{"weird": "but-nonempty"}, http.StatusOK)
 	c := newClientFor(t, srv.URL)

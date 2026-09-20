@@ -19,12 +19,12 @@ import (
 // Only known-safe renderings are used, walking the wrapping chain the way
 // errors.As walks it (the relation fmt.Errorf("%w") establishes):
 //
-//	*StatusError -> "HTTP <code>"      (the URL never appears)
-//	*url.Error   -> SafeError(cause)   (the URL lives in url.Error.URL)
-//	other        -> err.Error()
+//	*StatusError -> "HTTP <code>" (the URL never appears)
+//	*url.Error -> SafeError(cause) (the URL lives in url.Error.URL)
+//	other -> err.Error
 //
 // A *url.Error wrapping a *StatusError renders as the status code; a transport
-// cause nested in wrappers keeps its own text, so "dial tcp ...: connection
+// cause nested in wrappers keeps its own text, so "dial tcp...: connection
 // refused" stays diagnosable. Context added by a wrapper is NOT reproduced —
 // the caller supplies its own prefix instead
 // (e.g. fmt.Errorf("webapi: token exchange: %s", httpx.SafeError(err))).
@@ -34,7 +34,7 @@ import (
 // found anywhere wins over an enclosing *url.Error, whatever the nesting depth.
 // An outermost-only type switch would be weaker, not stricter: for
 // fmt.Errorf("token exchange: %w", statusError) it would fall through to
-// err.Error() and print the URL again. The chain is only ever consulted one
+// err.Error and print the URL again. The chain is only ever consulted one
 // level at a time for rendering (url.Error contributes nothing but its cause),
 // so no URL is rendered at any depth.
 //

@@ -12,8 +12,8 @@ import (
 	"github.com/nekrozis/goggo/internal/httpx"
 )
 
-// Production GOG hosts used by the C++ source. The endpoint fields are
-// overwritable so tests can point the flow at an httptest server.
+// Production GOG hosts. The endpoint fields are overwritable so tests can point
+// the flow at an httptest server.
 const (
 	DefaultAuthHost  = "https://auth.gog.com"
 	DefaultLoginHost = "https://login.gog.com"
@@ -34,9 +34,6 @@ func defaultEndpoints() endpoints {
 }
 
 // Client drives the GOG website login flow over an httpx transport.
-//
-// Fields are ordered to minimise padding: the endpoint block (4 strings,
-// 64B) first, then the pointers (8B each).
 type Client struct {
 	ep     endpoints
 	galaxy *config.GalaxyConfig
@@ -66,7 +63,7 @@ func New(hx *httpx.Client, galaxy *config.GalaxyConfig) (*Client, error) {
 	}, nil
 }
 
-// authURL builds the OAuth authorize URL (website.cpp:356).
+// authURL builds the OAuth authorize URL.
 func (c *Client) authURL() string {
 	q := url.Values{}
 	q.Set("client_id", c.galaxy.GetClientID())
@@ -77,9 +74,9 @@ func (c *Client) authURL() string {
 	return c.ep.auth + "/auth?" + q.Encode()
 }
 
-// IsLoggedIn probes www.gog.com/account the way IsloggedInSimple does
-// (website.cpp:655-695): a direct 200 means logged in; a 3xx redirect to the
-// exact embed account URL is followed once and its 200 confirms login.
+// IsLoggedIn probes www.gog.com/account: a direct 200 means logged in; a 3xx
+// redirect to the exact embed account URL is followed once and its 200 confirms
+// login.
 func (c *Client) IsLoggedIn(ctx context.Context) (bool, error) {
 	meta, err := c.noRedirectGet(ctx, c.ep.www+"/account")
 	if err != nil {
@@ -140,9 +137,8 @@ func (c *Client) noRedirectGet(ctx context.Context, target string) (responseMeta
 	return drainResponse(req.URL, resp), nil
 }
 
-// followGet issues a GET that follows redirects and drains the body,
-// mirroring the CURLOPT_FOLLOWLOCATION=1 requests used to consume a callback
-// or intermediate page.
+// followGet issues a GET that follows redirects and drains the body, used to
+// consume a callback or intermediate page.
 func (c *Client) followGet(ctx context.Context, target string) error {
 	resp, err := c.hx.Get(ctx, target)
 	if err != nil {
@@ -167,10 +163,8 @@ func (c *Client) resolveLocation(base *url.URL, location string) string {
 	return base.ResolveReference(ref).String()
 }
 
-// codeRE extracts the OAuth code from a URL. It is an equivalent rewrite of
-// the C++ regex ".*code=(.*?)([\?&].*|$)" (website.cpp:584): the value runs
-// until the next '&' or '?' or the end of the string. The rewrite is a
-// semantic-equivalent port, not a byte-for-byte copy of the expression.
+// codeRE extracts the OAuth code from a URL: the value runs until the next '&'
+// or '?' or the end of the string.
 var codeRE = regexp.MustCompile(`(?i)code=([^&?]*)`)
 
 // extractCode returns the auth code embedded in a URL, or "".

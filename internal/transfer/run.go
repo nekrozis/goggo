@@ -24,28 +24,25 @@ import (
 // Run executes the plan's tasks: the worker fan-out, the per-chunk fetch and
 // verification, and the event stream.
 //
-// Failure semantics are upstream's (review D65a): a task that fails — a URL
-// that cannot be resolved, a chunk that exhausts its retries — reports itself
-// as an EventMessageError and the remaining tasks continue; Run still returns
-// nil when every task has ended, even if some failed. Only a cancelled context
-// makes Run return an error.
+// A task that fails — a URL that cannot be resolved, a chunk that exhausts its
+// retries — reports itself as an EventMessageError and the remaining tasks
+// continue. Run returns nil once every task has ended, even if some failed;
+// only a cancelled context makes it return an error.
 //
-// The per-chunk fetch mirrors upstream's chunk-in-memory model: the buffer
-// accumulates across retries (a transport failure resumes from the bytes
-// already held, a hash mismatch empties it), the verified chunk is
-// decompressed and appended, and the server's Last-Modified moves onto the
-// file (review D72, D77).
+// Each chunk is buffered in memory while it is fetched and verified, then
+// decompressed and appended, and the server's Last-Modified moves onto the file
+// (D72, D77).
 //
 // The scheduling itself lives in schedule: worker fan-out, the single
 // deliverer and the cancellation handling are shared with the website path
-// (review D67).
+// (D67).
 func Run(ctx context.Context, tasks []model.FileTask, opts Options, deps RunDeps) error {
 	if deps.HTTP == nil || deps.URL == nil || deps.Observer == nil {
 		return errors.New("transfer: run needs an http client, a url provider and an observer")
 	}
 	// The queue snapshot is a run-level fact, published once before any task is
 	// dispatched: readers derive what is still pending from the tasks they have
-	// seen start (review S-ETA3). An empty run publishes too, so "no snapshot"
+	// seen start. An empty run publishes too, so "no snapshot"
 	// and "empty queue" stay distinguishable.
 	deps.Progress.setQueue(len(tasks), queuedBytes(tasks))
 	return schedule(ctx, tasks, opts.Workers,
@@ -56,7 +53,7 @@ func Run(ctx context.Context, tasks []model.FileTask, opts Options, deps RunDeps
 }
 
 // queuedBytes sums the compressed size of every task in the run — the same
-// basis the per-task totals and the progress events use (review S-ETA3).
+// basis the per-task totals and the progress events use.
 func queuedBytes(tasks []model.FileTask) int64 {
 	var sum int64
 	for _, task := range tasks {
@@ -66,17 +63,16 @@ func queuedBytes(tasks []model.FileTask) int64 {
 }
 
 // runChunkTask downloads one task: the parent directories, then every chunk in
-// order, each fetched, verified and appended (downloader.cpp:4450-4790). A
+// order, each fetched, verified and appended. A
 // failure ends this task and is returned; other tasks continue. The failure is
 // also emitted as an error event, so the caller's non-nil return only matters
 // for a cancelled context.
 func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps RunDeps, emit func(Event)) error {
-	// The sampling slot lives exactly as long as the task, and it runs through
-	// the deferred finish on every exit path — success, failure and
-	// cancellation alike — so the registry never keeps a count that has stopped
-	// moving (review S-ETA2). The slot is published before the start event, so
-	// a reader that sees the task start can already read its total (review
-	// S-ETA3).
+	// The sampling slot lives exactly as long as the task and runs through the
+	// deferred finish on every exit path — success, failure and cancellation
+	// alike — so the registry never keeps a count that has stopped moving. The
+	// slot is published before the start event, so a reader that sees the task
+	// start can already read its total.
 	slot := deps.Progress.start(task.Destination, int64(task.Item.TotalCompressedSize))
 	defer deps.Progress.finish(task.Destination)
 
@@ -95,15 +91,15 @@ func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps R
 	// The authoritative reconcile: the plan's classification is advisory, the
 	// destination's actual state decides what this task must do — including
 	// skipping a file that was complete when the plan was built but changed
-	// before the run reached it (review RES1 v2 §4, decisions D13/D18/D42).
+	// before the run reached it (D13, D18, D42).
 	decision, startChunk, err := reconcile.ReconcileExistingFile(task.Item, task.Destination)
 	if err != nil {
 		return fail("Failed to inspect " + task.Destination + ": " + err.Error())
 	}
 	switch decision {
 	case reconcile.DecisionSkip:
-		// The explicit skip marker (review UI1-R2): the front end aggregates
-		// dynamic skips on this text, never on an inferred event sequence.
+		// The explicit skip marker: the front end counts dynamic skips by this
+		// text, never by an inferred event sequence.
 		emit(Event{Path: task.Destination, Text: SkipMessage(task.Destination), Kind: EventMessageSuccess})
 		emit(Event{Path: task.Destination, Kind: EventTaskFinish})
 		return nil
@@ -114,12 +110,12 @@ func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps R
 		}
 		startChunk = 0
 	case reconcile.DecisionResume:
-		// The explicit resume marker (review UI1-R2, decision 1): the ONLY
-		// signal the front end counts resumed tasks by — see observer.go.
+		// The explicit resume marker: the only signal the front end counts
+		// resumed tasks by — see observer.go.
 		emit(Event{Path: task.Destination, Text: ResumeMessage(startChunk, task.Destination), Kind: EventMessageInfo})
 	}
 
-	// An item without chunks is an empty file (downloader.cpp:4644-4650).
+	// An item without chunks is an empty file.
 	if len(task.Item.Chunks) == 0 {
 		f, err := os.Create(task.Destination)
 		if err != nil {
@@ -154,15 +150,13 @@ func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps R
 }
 
 // downloadChunk fetches one chunk into memory, verifies its compressed md5 and
-// appends the decompressed bytes to the task's file (downloader.cpp:4673-4744).
-// The URL is resolved once per chunk; a retry re-performs the same URL.
+// appends the decompressed bytes to the task's file. The URL is resolved once
+// per chunk; a retry re-performs the same URL.
 //
-// The chunk lives in memory the way upstream's ChunkMemoryStruct does, and the
-// two retry causes never mix (review D72): a transport failure resumes the
-// next attempt from the bytes already in memory (Range from the prefix
-// length, the CURLOPT_RESUME_FROM_LARGE equivalent), while a hash mismatch
-// empties the buffer so the retry starts the chunk from scratch — a corrupt
-// prefix must not take part in the next hash.
+// The two retry causes never mix (D72): a transport failure resumes the next
+// attempt from the bytes already in memory, with a Range header from the prefix
+// length, while a hash mismatch empties the buffer so the retry starts the
+// chunk from scratch — a corrupt prefix must not take part in the next hash.
 func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk model.GalaxyDepotItemChunk, opts Options, deps RunDeps, slot *progressSlot, emit func(Event)) error {
 	label := fmt.Sprintf("%s (chunk %d/%d)", task.Destination, index+1, len(task.Item.Chunks))
 
@@ -175,8 +169,7 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 	reason := ""
 	lastModified := time.Time{}
 	for attempt := 0; ; attempt++ {
-		// The delay precedes every attempt, including the first
-		// (downloader.cpp:4682-4684).
+		// The delay precedes every attempt, including the first.
 		if opts.Wait > 0 {
 			select {
 			case <-ctx.Done():
@@ -195,8 +188,7 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 		// whatever a previous attempt already buffered, bounded by the chunk's
 		// own end. Publishing the start is also what turns a hash-mismatch
 		// retry into a decrease — the buffer is empty again, so the value drops
-		// back to the chunk's offset and the consumer restarts its window there
-		// (review S-ETA2).
+		// back to the chunk's offset and the consumer restarts its window there.
 		base := int64(chunk.CompressedOffset) + int64(len(body))
 		slot.store(base)
 		data, lm, code, err := fetchChunkBody(ctx, deps.HTTP, url, resume, len(body),
@@ -209,10 +201,9 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 		}
 
 		if err != nil {
-			// A transport break mid-body keeps whatever arrived: the bytes
-			// are the memory prefix the next attempt resumes from, the way
-			// curl's write callback left them in chunk.memory. Status errors
-			// carry no body to keep.
+			// A transport break mid-body keeps whatever arrived: those bytes
+			// are the prefix the next attempt resumes from. Status errors carry
+			// no body to keep.
 			var status *httpx.StatusError
 			if !errors.As(err, &status) && len(data) > 0 {
 				body = append(body, data...)
@@ -221,7 +212,7 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 			// A server that ignores Range answers 200 with the whole body
 			// again: folding it back to the suffix keeps the resume semantics.
 			// The guard fires only for an attempt that actually asked for a
-			// range past its first byte and got 200 back (review D72) — a
+			// range past its first byte and got 200 back (D72) — a
 			// first attempt and a 206 never take this path.
 			if resume && code == http.StatusOK && len(data) >= len(body) {
 				data = data[len(body):]
@@ -230,11 +221,9 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 		}
 
 		// A 416 keeps the buffer for the hash check below: the server has
-		// nothing past the requested offset, so the bytes already in memory
-		// may be the whole chunk (upstream runs the hash check on
-		// chunk.memory for exactly this reason, 4706-4726). With an empty
-		// buffer a 416 fails the task outright — a hash check over nothing
-		// can never succeed (review D65/S19; Δ — upstream would retry it).
+		// nothing past the requested offset, so the bytes already in memory may
+		// be the whole chunk. With an empty buffer a 416 fails the task
+		// outright — a hash check over nothing can never succeed (D65).
 		var rangeNotSatisfiable bool
 		if err != nil {
 			var status *httpx.StatusError
@@ -246,15 +235,13 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 			}
 		}
 
-		// The hash check runs on the whole buffer, the way the C++ source
-		// hashes chunk.memory (downloader.cpp:4721-4726) — after a complete
-		// response, or after a 416 with the chunk already complete in memory.
+		// The hash check runs on the whole buffer — after a complete response,
+		// or after a 416 with the chunk already complete in memory.
 		if err == nil || rangeNotSatisfiable {
 			sum := md5.Sum(body)
 			if hex.EncodeToString(sum[:]) != chunk.CompressedMD5 {
 				// The corrupt prefix must not join the next hash: empty the
-				// buffer so the retry starts from zero
-				// (downloader.cpp:4728-4732).
+				// buffer so the retry starts from zero.
 				body = nil
 				err = errors.New("chunk failed hash check")
 			}
@@ -265,11 +252,9 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 				return err
 			}
 			if !lastModified.IsZero() {
-				// The server's timestamp moves onto the file; a failure to
-				// set it is a warning, not a failed chunk (review D77; the
-				// per-chunk setting is Δ — upstream sets it once per file
-				// from the last successful response, the final value is the
-				// same).
+				// The server's timestamp moves onto the file; a failure to set
+				// it is a warning, not a failed chunk (D77). It is set per
+				// chunk, so the value left behind is the last response's.
 				if cerr := os.Chtimes(task.Destination, lastModified, lastModified); cerr != nil {
 					emit(Event{Path: task.Destination, Text: cerr.Error(), Kind: EventMessageWarning})
 				}
@@ -277,8 +262,8 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 			return nil
 		}
 
-		// Retry classification (downloader.cpp:4706-4744): transport errors,
-		// statuses other than 416, and hash mismatches all retry.
+		// Retry classification: transport errors, statuses other than 416, and
+		// hash mismatches all retry.
 		if attempt >= opts.Retries {
 			return err
 		}
@@ -287,15 +272,13 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 }
 
 // fetchChunkBody performs one GET and returns the response body, the response
-// code and the Last-Modified timestamp. It uses the non-retrying Do on
-// purpose: the retry loop above owns the retry policy, the way
-// curl_easy_perform does upstream. When resumeLen is positive the request
-// carries a Range header from that offset; the code is returned so the caller
-// can fold a 200 answer to a ranged request.
+// code and the Last-Modified timestamp. It uses the non-retrying Do on purpose:
+// the retry loop above owns the retry policy. When resumeLen is positive the
+// request carries a Range header from that offset; the code is returned so the
+// caller can fold a 200 answer to a ranged request.
 //
-// sink is where the bytes report themselves as they arrive, the equivalent of
-// curl's progress callback publishing dlnow during the transfer; its zero
-// value reports nothing, which is what a run without a Progress uses.
+// sink reports the bytes as they arrive; its zero value reports nothing, which
+// is what a run without a Progress uses.
 func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bool, resumeLen int, sink progressSink) ([]byte, time.Time, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -314,10 +297,9 @@ func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bo
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		return nil, lm, resp.StatusCode, &httpx.StatusError{Method: http.MethodGet, URL: url, Code: resp.StatusCode}
 	}
-	// The body streams into the buffer instead of ReadAll: a break
-	// mid-transfer leaves the bytes already received in the buffer, which is
-	// what the caller resumes from — the chunk.memory model
-	// (downloader.cpp:4677-4680).
+	// The body streams into the buffer instead of ReadAll: a break mid-transfer
+	// leaves the bytes already received in the buffer, which is what the caller
+	// resumes from.
 	var src io.Reader = resp.Body
 	if sink.slot != nil {
 		src = &progressReader{r: resp.Body, slot: sink.slot, base: sink.base, end: sink.end}
@@ -329,8 +311,8 @@ func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bo
 
 // appendChunk decompresses the zlib stream, verifies the decompressed content
 // against the chunk's uncompressed md5, and only then appends the whole chunk
-// to the task's file (downloader.cpp:4756-4775). The file handle has a single
-// owner: the Close whose error is returned is the only one.
+// to the task's file. The file handle has a single owner: the Close whose error
+// is returned is the only one.
 //
 // The verification-before-write order is the chunk transaction invariant
 // (decisions D16/D24): the destination is never touched by a partial or
@@ -338,7 +320,7 @@ func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bo
 // chunk — which is what makes the next run's boundary reconcile reliable. An
 // uncompressed md5 mismatch is not retried: the compressed bytes already
 // passed their hash, so re-fetching the same chunk would produce the same
-// result (review RES1 decision D1).
+// result (D1).
 func appendChunk(ctx context.Context, destination string, compressed []byte, wantMD5 string) error {
 	zr, err := zlib.NewReader(bytes.NewReader(compressed))
 	if err != nil {

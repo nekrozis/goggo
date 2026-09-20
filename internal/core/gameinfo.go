@@ -15,10 +15,10 @@ import (
 	"github.com/nekrozis/goggo/internal/util"
 )
 
-// defaultInfoThreads is the default of the info-threads setting
-// (main.cpp:312). The option is not registered yet (review GD3 §11.1 — D14
-// keeps the command tree to the surface that is actually supported), so the
-// value has no front end to live in and sits with its only consumer.
+// defaultInfoThreads is the default of the info-threads setting. The option is
+// not registered yet (D14 keeps the command tree to the surface that is
+// actually supported), so the value has no front end to live in and sits with
+// its only consumer.
 const defaultInfoThreads = 4
 
 // GameDetailsRequest is one acquisition run's input.
@@ -32,39 +32,32 @@ type GameDetailsRequest struct {
 
 	// InfoThreads is how many fetches run at once; zero means the run's
 	// setting. It is NOT --threads — that one is the download concurrency, and
-	// D46's eight does not carry over (review GD3 ruling F).
+	// D46's eight does not carry over.
 	InfoThreads int
 
-	// Include overrides the run's type mask for this acquisition when set.
-	// Its only producer is GD4's download file chain, which forces "all"
-	// the way upstream's downloadFileWithId does (downloader.cpp:2394) — a
-	// file looked up by id must be findable whatever the mask says.
+	// Include overrides the run's type mask for this acquisition when set. Its
+	// only producer is the download file chain, which forces "all" — a file
+	// looked up by id must be findable whatever the mask says.
 	Include *uint32
 }
 
-// GameDetails fetches and converts the download face of every requested product
-// (Downloader::getGameDetails and Downloader::getGameDetailsThread,
-// downloader.cpp:390-503 and 3652-3790).
+// GameDetails fetches and converts the download face of every requested
+// product.
 //
-// The chain per product is the one GD1 and GD2 put in place: refresh the
-// credentials when they have expired, read the product document (which expands
-// its DLCs), convert it through the injected downlink resolver, then apply the
-// priority and the type filter. Upstream continues into makeFilepaths and the
-// --save-* artifacts; none of that belongs here. This is the acquisition
-// engine: it writes nothing to disk and reports no progress, because the
-// display belongs to whoever consumes the result (review GD3 §6 and the
-// progress ruling).
+// The chain per product: refresh the credentials when they have expired, read
+// the product document (which expands its DLCs), convert it through the
+// injected downlink resolver, then apply the priority and the type filter.
+// This is the acquisition engine: it writes nothing to disk and reports no
+// progress, because the display belongs to whoever consumes the result.
 //
 // The answer is COMPLETE OR NOTHING. A failure anywhere — a name that matches
 // no product, a request, the conversion — cancels the remaining workers and
 // returns an error with no results, rather than a shorter list a caller could
-// mistake for "this product has no files" (review GD3 §3). Upstream pushes an
-// empty entry and carries on (plan divergence 2).
+// mistake for "this product has no files".
 //
 // The result is ordered by gamename, so it does not depend on how the workers
-// were scheduled — upstream sorts after the join for the same reason
-// (downloader.cpp:499). An entry that is legitimately empty stays in the
-// result: it says "this product has no matching files", which is an answer.
+// were scheduled. An entry that is legitimately empty stays in the result: it
+// says "this product has no matching files", which is an answer.
 func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([]gamedetails.GameDetails, error) {
 	if len(req.Products) == 0 {
 		return nil, errors.New("galaxy: no products requested")
@@ -77,9 +70,8 @@ func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([
 			return nil, err
 		}
 		if id == "" || notice.Text != "" {
-			// The C++ helper prints its message and leaves the work list
-			// short. A short list is the partial answer this function refuses
-			// to hand back, so the message becomes the reason instead.
+			// A short work list would be the partial answer this function
+			// refuses to hand back, so the message becomes the reason instead.
 			text := notice.Text
 			if text == "" {
 				text = msgNoProducts
@@ -98,7 +90,7 @@ func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([
 	workers := min(d.infoThreadCount(req.InfoThreads), len(ids))
 
 	// One resolver for the whole run: it carries the credential refresh the
-	// per-file resolution needs (GD2), and since it is shared, the pre-request
+	// per-file resolution needs, and since it is shared, the pre-request
 	// refresh below goes through the same one — a second refresher would be a
 	// second lock and a second chance to refresh side by side. The owned set is
 	// read-only once built, so the workers share it without a lock.
@@ -117,8 +109,7 @@ func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([
 	// Standard library only: no x/sync (unaudited, and this is a worker pool
 	// plus a first-error latch). A worker takes the next index and writes its
 	// own slot, so results need no lock; the first failure records itself and
-	// cancels the rest. Upstream only breaks out of its own consumer loop and
-	// keeps the other threads going (downloader.cpp:3737).
+	// cancels the rest.
 	for range workers {
 		wg.Add(1)
 		go func() {
@@ -156,19 +147,17 @@ func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([
 }
 
 // ListGameDetails acquires the download face for `list details` / `list json`.
-// An empty products list means the WHOLE account — the read-only upstream
-// behaviour (the listGames details branch runs getGameDetails over every
-// game, downloader.cpp:580-593; GD5 ruling 7). Unlike GD4's download there
-// is no transfer behind it, so the implicit enumeration is allowed here and
-// only here: acquisition reads, it never writes and never downloads.
+// An empty products list means the WHOLE account. Unlike a download there is no
+// transfer behind it, so the implicit enumeration is allowed here and only
+// here: acquisition reads, it never writes and never downloads.
 func (d *Downloader) ListGameDetails(ctx context.Context, products []string) ([]gamedetails.GameDetails, error) {
 	games, err := d.acquireForList(ctx, products)
 	if err != nil {
 		return nil, err
 	}
-	// Upstream's acquisition thread derives the filepaths before answering
-	// (downloader.cpp:3795) — the text format's blacklist filter compares
-	// against those destinations, so they must exist at display time.
+	// The filepaths are derived before answering: the text format's blacklist
+	// filter compares against those destinations, so they must exist at display
+	// time.
 	for i := range games {
 		games[i].MakeFilepaths(d.cfg.Directories)
 	}
@@ -211,11 +200,10 @@ func (d *Downloader) infoThreadCount(requested int) int {
 // for DLC content, and returns nil otherwise — an empty set means no filtering
 // at all in the conversion (gamedetails.ProductInfoToGameDetails).
 //
-// Difference (recorded, plan divergence 3): the C++ source filters DLCs against
-// the global list getGameList left behind, so a run that never listed, or one
-// that answered from its cache, filters nothing by accident. The set is fetched
-// explicitly here, and a failure to read it fails the run rather than reporting
-// an account that owns nothing.
+// The owned set is fetched explicitly rather than read from whatever a previous
+// listing left behind, so the filter behaves the same whether or not the run
+// listed first. A failure to read it fails the run rather than reporting an
+// account that owns nothing.
 func (d *Downloader) ownedGameIDs(ctx context.Context, include uint32) (map[string]bool, error) {
 	if include&config.GFDLC == 0 {
 		return nil, nil
@@ -231,13 +219,12 @@ func (d *Downloader) ownedGameIDs(ctx context.Context, include uint32) (map[stri
 	return owned, nil
 }
 
-// gameDetailsFor is one worker's pass over one product — the body of
-// getGameDetailsThread (downloader.cpp:3731-3781) without its display.
+// gameDetailsFor is one worker's pass over one product.
 //
-// The refresh is the C++ source's own pre-request step (3732-3739): it is
-// idempotent, so a worker that arrives after another has refreshed pays
-// nothing. A resolver failure is NOT a failure here: GD1's contract skips that
-// one file and keeps converting (gamedetails.DownlinkResolver).
+// The refresh is idempotent, so a worker that arrives after another has
+// refreshed pays nothing. A resolver failure is NOT a failure here: the
+// resolver skips that one file and keeps converting
+// (gamedetails.DownlinkResolver).
 func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[string]bool, resolver *gamedetailsResolver, include uint32) (gamedetails.GameDetails, error) {
 	if err := resolver.refresh.refreshIfExpired(ctx); err != nil {
 		return gamedetails.GameDetails{}, fmt.Errorf("galaxy: refresh login: %w", err)
@@ -255,13 +242,11 @@ func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[st
 	gd.FilterWithPriorities(cfg.PlatformPriority, cfg.LanguagePriority)
 	gd.FilterWithType(cfg.Include)
 
-	// The save-* acquisition gate (downloader.cpp:3773-3792): the per-game
-	// details document is fetched ONCE when any of its three consumers is
-	// asked for and still empty, and never otherwise — with all flags off
-	// this whole branch issues no request, which is GD3's zero-extra-request
-	// regression contract (GD5 test C6). A failed fetch is recorded, not
-	// swallowed (GD5 Gate 2: MetadataDiag); the acquisition itself continues,
-	// the way upstream's empty-document fallback does.
+	// The save-* acquisition gate: the per-game details document is fetched
+	// ONCE when any of its three consumers is asked for and still empty, and
+	// never otherwise — with all flags off this whole branch issues no request,
+	// which is the zero-extra-request regression contract. A failed fetch is
+	// recorded, not swallowed; the acquisition itself continues.
 	if (cfg.SaveSerials && gd.Serials == "") ||
 		(cfg.SaveChangelogs && gd.Changelog == "") ||
 		(cfg.SaveGameDetailsJSON && gd.GameDetailsJson == "") {
@@ -294,10 +279,9 @@ func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[st
 	return gd, nil
 }
 
-// serialsFromDetails reads the cdKey member the way getSerialsFromJSON's
-// caller does — a missing or null member is no serials, a wrong shape is a
-// diagnostic — and hands the text to the extraction (ruling 1's fail-closed
-// travels as the second return value).
+// serialsFromDetails reads the cdKey member — a missing or null member is no
+// serials, a wrong shape is a diagnostic — and hands the text to the
+// extraction, whose fail-closed result travels as the second return value.
 func serialsFromDetails(details map[string]any) (text, diag string) {
 	raw, ok := details["cdKey"]
 	if !ok || raw == nil {
@@ -309,14 +293,13 @@ func serialsFromDetails(details map[string]any) (text, diag string) {
 	}
 	text, unsupported := gamedetails.SerialsFromCDKey(cdKey)
 	if unsupported {
-		return "", "cdKey carries <span> markup this build does not parse (GD5 ruling 1): serials not written"
+		return "", "cdKey carries <span> markup this build does not parse: serials not written"
 	}
 	return text, ""
 }
 
 // effectiveInclude is the type mask an acquisition run consumes: the request's
-// override when it carries one (GD4's download file forces "all"), and the
-// run's configured mask otherwise.
+// override when it carries one, and the run's configured mask otherwise.
 func (d *Downloader) effectiveInclude(req GameDetailsRequest) uint32 {
 	if req.Include != nil {
 		return *req.Include

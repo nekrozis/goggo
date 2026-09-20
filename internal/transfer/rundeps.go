@@ -14,8 +14,8 @@ type RunDeps struct {
 	Observer Observer
 
 	// Progress, when non-nil, receives the running byte counts of the tasks in
-	// flight (review S-ETA2). A nil registry is skipped entirely: the run
-	// builds no wrapper around the response bodies, so a transfer without one
-	// behaves exactly as it did before the surface existed.
+	// flight. A nil registry is skipped entirely: the run builds no wrapper
+	// around the response bodies, so a transfer without one behaves exactly as
+	// it did before the surface existed.
 	Progress *Progress
 }

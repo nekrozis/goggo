@@ -1,14 +1,17 @@
-// Package cli is the command-line front end: it parses the supported options
-// into a config.Config, drives the orchestration in internal/core and renders
-// the supported outputs.
+// Package cli is the command-line front end: it parses a command line into a
+// config.Config, drives the orchestration in internal/core and renders the
+// output. All input and output goes through the io.Reader/Writer pair passed to
+// Run, so nothing touches the real terminal and tests can drive the whole front
+// end.
 //
-// Layering (review lock, S12; S17 moved the orchestration out): this package
-// owns flag parsing, the console and rendering. Everything else lives where it
-// belongs — orchestration and command execution in internal/core, protocol work
-// in internal/webapi, credential persistence in internal/auth, transport in
-// internal/httpx and listing assembly in internal/catalog. All input and output
-// goes through the io.Reader/Writer pair passed to Run, so nothing touches the
-// real terminal and tests can drive the whole front end.
+// The command tree in command.go is the product surface — only commands this
+// build supports appear there. The option parser is table-driven, so acceptance,
+// help and diagnostics come from the same tables. Every leaf declares what it
+// needs from the session and whether it may create one, and the dispatcher
+// applies that declaration rather than deciding for itself.
+//
+// Exit codes: 0 success, 1 operational failure, 2 usage failure, 130
+// interrupted (run.go owns the mapping).
 package cli
 
 import (
@@ -32,7 +35,6 @@ import (
 //
 // rawIn is the reader exactly as it was handed in: the password prompt needs it
 // to ask whether the input is a real terminal, which the buffered reader hides.
-// All four fields are interface values, so their order does not affect the size.
 type console struct {
 	in       *bufio.Reader
 	rawIn    io.Reader
@@ -48,13 +50,11 @@ func newConsole(in io.Reader, out, errOut io.Writer) *console {
 
 // Out and ErrOut expose the two streams; see core.Console for the stream policy.
 //
-// During an install's TTY lifetime both route through the terminal
-// coordinator, so every core write — plan notices, deletions, SFC extraction —
-// lands as a coordinator transaction and can never interleave with the live
-// frame (review UI1 v3 §6.C: the coordinator is the install lifetime's single
-// terminal-visible writer, and the console is the only seam core writes
-// through). Outside that lifetime — login prompts, list/builds output,
-// usage — the streams are handed out directly.
+// During an install's TTY lifetime both route through the terminal coordinator,
+// so every core write — plan notices, deletions, SFC extraction — lands as a
+// coordinator transaction and can never interleave with the live frame. Outside
+// that lifetime — login prompts, list/builds output, usage — the streams are
+// handed out directly.
 func (c *console) Out() io.Writer {
 	if c.coord != nil {
 		return c.coord.writer(false)
@@ -69,14 +69,13 @@ func (c *console) ErrOut() io.Writer {
 	return c.errOut
 }
 
-// attachInstallUI wires the install's rendering: the sink is chosen by the
-// OUTPUT side — stdout is a terminal ⇒ live TTY frames through a coordinator;
-// otherwise the append-only log sink (review UI1 v3 §6.C, D8). The width and
-// height come from the stdout descriptor, the side actually being drawn on —
-// not stdin, which stays reserved for the prompts (review UI1 v3 §6.B).
-// attachInstallUI builds the renderer for one transferring run. The subject
-// names the command for the closing line ("Installation", "Download"): the
-// frame must not misname what it just ran (GD4).
+// attachInstallUI builds the renderer for one transferring run. The sink is
+// chosen by the OUTPUT side — stdout is a terminal ⇒ live TTY frames through a
+// coordinator; otherwise the append-only log sink (D8). The width and height
+// come from the stdout descriptor, the side actually being drawn on — not
+// stdin, which stays reserved for the prompts. subject names the command for
+// the closing line ("Installation", "Download"), so the frame cannot misname
+// what it just ran.
 func (c *console) attachInstallUI(cfg config.Config, source progressSource, subject string) {
 	bar := progress.NewBar(cfg.Unicode, cfg.Color)
 	interval := time.Duration(cfg.ProgressInterval) * time.Millisecond
@@ -122,19 +121,18 @@ func (c *console) attachInstallUI(cfg config.Config, source progressSource, subj
 // by renderer.Stop first, so afterwards both streams are plain again.
 func (c *console) endInstallScope() { c.coord = nil }
 
-// OnEvent hands the transfer event stream to the renderer. The method exists
-// so core's optional-ability assertion finds the console capable (review
-// D75): core knows no renderer type, only this behaviour.
+// OnEvent hands the transfer event stream to the renderer. The method exists so
+// core's optional-ability assertion finds the console capable (D75): core knows
+// no renderer type, only this behaviour.
 func (c *console) OnEvent(ev transfer.Event) {
 	if c.renderer != nil {
 		c.renderer.OnEvent(ev)
 	}
 }
 
-// SetInstallRoot is core's UI1-R2 seam: the install run reports the plan's
-// semantic install root right after BuildPlan, and the renderer displays task
-// rows relative to it. A console without a live renderer ignores it — the
-// root only matters to the progress display.
+// SetInstallRoot reports the plan's semantic install root; the renderer
+// displays task rows relative to it. A console without a live renderer ignores
+// it — the root only matters to the progress display.
 func (c *console) SetInstallRoot(path string) {
 	if c.renderer != nil {
 		c.renderer.SetInstallRoot(path)
@@ -160,9 +158,7 @@ func (c *console) terminalFd() (int, bool) {
 	return fd, true
 }
 
-// IsTerminal reports whether prompts can be answered on this input. It maps the
-// C++ isatty(STDIN_FILENO) test that selects between prompting and the headless
-// login branch (downloader.cpp:256).
+// IsTerminal reports whether prompts can be answered on this input.
 func (c *console) IsTerminal() bool {
 	_, ok := c.terminalFd()
 	return ok
@@ -180,15 +176,12 @@ func (c *console) readLine() (string, error) {
 	return line, nil
 }
 
-// SelectProduct prints the numbered product list and asks for an index
-// (downloader.cpp:3865-3886).
+// SelectProduct prints the numbered product list and asks for an index.
 //
-// The order is the C++ one: the list goes to stdout FIRST, and only then is the
-// terminal checked, so a non-interactive run still sees the candidates it could
-// not choose from. The prompt and the retry message go to stderr.
-//
-// Difference (recorded): where the C++ source prints the std::stoi exception
-// text ("stoi") on an unparsable answer, this port says what to type.
+// The list goes to stdout FIRST, and only then is the terminal checked, so a
+// non-interactive run still sees the candidates it could not choose from. The
+// prompt and the retry message go to stderr, and an unparsable answer is
+// answered with what to type rather than an error code.
 func (c *console) SelectProduct(items []string) (int, error) {
 	fmt.Fprintln(c.out, "Select product:")
 	for i, name := range items {

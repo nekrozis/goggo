@@ -18,23 +18,23 @@ import (
 
 // ExtractSmallFilesContainers unpacks the plan's small-files containers: each
 // member file is cut out of its container by offset and size, and the container
-// is removed afterwards (downloader.cpp:4265-4311). It runs after the transfer
-// has completed successfully — review D73 — because the containers are
-// downloaded by transfer.Run as ordinary tasks.
+// is removed afterwards. It runs after the transfer has completed successfully
+// (D73), because the containers are downloaded by transfer.Run as ordinary
+// tasks.
 //
 // Every member that declares a hash is checked against the bytes its region
-// actually holds, BEFORE anything is written (review D49). A member whose region
+// actually holds, BEFORE anything is written (D49). A member whose region
 // does not hold its content is not written at all and comes back to the caller
 // as a task to download directly: the manifest's sfcRef cannot describe such a
 // member, so the container path would leave bytes in the installation that do
 // not match what the manifest declares — and a clean install has to reach the
 // manifest state on its first run (D4, D48).
 //
-// A container that is not on disk is still passed over silently, the way the
-// exists check does upstream; its members are then simply absent, which is a
-// convergence gap of its own (registered, not fixed here). That exemption covers
-// "not there" only: a container that IS there and cannot be opened is an
-// observation failure like a failed read, and fails the run (D43, D49).
+// A container that is not on disk is passed over silently; its members are then
+// simply absent, which is a convergence gap of its own (registered, not fixed
+// here). That exemption covers "not there" only: a container that IS there and
+// cannot be opened is an observation failure like a failed read, and fails the
+// run (D43, D49).
 func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanResult) ([]model.FileTask, error) {
 	var pending []model.FileTask
 	for _, group := range res.Plan.SFC {
@@ -59,10 +59,8 @@ func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanRe
 			return pending, fmt.Errorf("%s: %w", container, err)
 		}
 
-		// One write with the newline inside the format string: the same line,
-		// without the intermediate formatted string (staticcheck S1038). The
-		// count is the number of members actually written; a member held back
-		// for a direct download is reported on its own line instead.
+		// The count is the number of members actually written; a member held
+		// back for a direct download is reported on its own line instead.
 		fmt.Fprintf(d.ui.Out(), "Extracting small files container %s (%d files)\n", container, extracted)
 
 		fmt.Fprintln(d.ui.Out(), "Deleting small files container "+container)
@@ -80,10 +78,10 @@ func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanRe
 // ascending offset order and the buffer keeps only the tail the next region can
 // still share. That is what keeps a container from costing one read per member —
 // the Terraria container carries 14,088 members in 13,475 distinct regions, and
-// 463 regions are claimed by several members at once (review D49).
+// 463 regions are claimed by several members at once (D49).
 func (d *Downloader) extractContainer(ctx context.Context, src io.Reader, group model.SFCGroup, installPath string) (int, []model.FileTask, error) {
 	// The verbose listing keeps the plan's order, as it did before the members
-	// were grouped by region (UI1-R2 §6.C: one line per member, no progress).
+	// were grouped by region.
 	for _, item := range group.Items {
 		if item.ProductID != group.Container.ProductID {
 			continue
@@ -123,8 +121,8 @@ func (d *Downloader) extractContainer(ctx context.Context, src io.Reader, group 
 			}
 			if err := writeSFCMember(member.destination, data); err != nil {
 				// A destination that cannot be created skips the member; the
-				// container is still deleted by the caller, the way the C++
-				// source does. The gap (the file stays absent) is registered.
+				// container is still deleted by the caller. The gap (the file
+				// stays absent) is registered.
 				fmt.Fprintln(d.ui.ErrOut(), "Failed to extract "+member.destination+": "+err.Error())
 				continue
 			}
@@ -137,7 +135,7 @@ func (d *Downloader) extractContainer(ctx context.Context, src io.Reader, group 
 // sfcMember is one member waiting to be cut out of its container. The whole item
 // travels with it: a member held back for a direct download is handed to the
 // transfer as a task, and that download must use the member's own chunks, hash
-// and size rather than anything derived again from the manifest (review D49).
+// and size rather than anything derived again from the manifest (D49).
 type sfcMember struct {
 	item        model.GalaxyDepotItem
 	destination string
@@ -154,8 +152,8 @@ type sfcRegion struct {
 
 // declaresHash reports whether any member of the region carries a hash to check
 // against. A region no member declares a hash for is still cut out, unverified —
-// the behaviour D80 described, kept for members the manifest gives no hash
-// (D49): no hash means "not verifiable", never "verified".
+// kept for members the manifest gives no hash (D49): no hash means "not
+// verifiable", never "verified".
 func (r sfcRegion) declaresHash() bool {
 	for _, member := range r.members {
 		if member.item.MD5 != "" {
@@ -166,8 +164,8 @@ func (r sfcRegion) declaresHash() bool {
 }
 
 // sfcRegions groups a group's members by the range they claim, in ascending
-// offset order. Members of another product do not live in this container
-// (downloader.cpp:4279-4281) and are left out.
+// offset order. Members of another product do not live in this container and are
+// left out.
 func sfcRegions(group model.SFCGroup, installPath string) []sfcRegion {
 	byRange := map[[2]uint64][]sfcMember{}
 	for _, item := range group.Items {
@@ -211,10 +209,9 @@ type containerStream struct {
 func newContainerStream(src io.Reader) *containerStream { return &containerStream{src: src} }
 
 // bytes returns the region [offset, offset+size). A region that runs past the
-// end of the container comes back short, the way the section reader the
-// extraction used before behaved: what the container does not hold cannot be cut
-// out of it, and whether that is a problem is the hash check's answer, not this
-// reader's.
+// end of the container comes back short: what the container does not hold cannot
+// be cut out of it, and whether that is a problem is the hash check's answer, not
+// this reader's.
 func (s *containerStream) bytes(offset, size uint64) ([]byte, error) {
 	if offset < s.bufStart {
 		return nil, fmt.Errorf("region at %d is behind the read position %d", offset, s.bufStart)
@@ -268,7 +265,7 @@ func (s *containerStream) short(size uint64) []byte {
 }
 
 // writeSFCMember writes one extracted member: its directories first, then the
-// region in a single write (the C++ source writes one buffer too).
+// region in a single write.
 func writeSFCMember(target string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
@@ -283,8 +280,7 @@ func sfcMD5Hex(data []byte) string {
 }
 
 // planSFCMemberPaths lists the relative paths of every small-files member in
-// the plan: the orphan check counts them as present-installed files
-// (downloader.cpp:4303-4306 adds them back to the items vector).
+// the plan: the orphan check counts them as present-installed files.
 func planSFCMemberPaths(plan model.DownloadPlan) []string {
 	var paths []string
 	for _, group := range plan.SFC {

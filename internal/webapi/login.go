@@ -59,10 +59,9 @@ func (k ChallengeKind) String() string {
 
 // LoginOptions are the per-call policy knobs for Login.
 type LoginOptions struct {
-	// ForceBrowser mirrors bForceBrowserLogin (--browser-login): it skips
-	// the curl-based form login and goes straight to the browser challenge.
-	// This is a CLI/config policy, so it lives here rather than inside the
-	// Client.
+	// ForceBrowser skips the form login and goes straight to the browser
+	// challenge (the CLI's --browser-login). This is a CLI/config policy, so
+	// it lives here rather than inside the Client.
 	ForceBrowser bool
 }
 
@@ -88,12 +87,8 @@ var (
 // call returns ErrChallengeConsumed. It is not serialisable and must not be
 // used concurrently.
 //
-// It deliberately has no String()/fmt.Stringer method: the state holds an
+// It deliberately has no String/fmt.Stringer method: the state holds an
 // authentication CSRF token that must never leak into logs.
-//
-// Fields are ordered to minimise padding: the state block (strings + int)
-// first, then the exposed strings/int, the pointer, the atomic bool and the
-// kind byte.
 type LoginChallenge struct {
 	// state is the opaque continuation state owned by Client.
 	state challengeState
@@ -103,7 +98,7 @@ type LoginChallenge struct {
 	BrowserURL string
 
 	// CodeLength is the expected one-time code length for a
-	// ChallengeTwoFactor challenge (4 or 6, website.cpp:515-525).
+	// ChallengeTwoFactor challenge (4 or 6).
 	CodeLength int
 
 	// client is the Client that produced this challenge.
@@ -125,11 +120,10 @@ type challengeState struct {
 	submit string
 }
 
-// recaptchaMarker is the login-form fragment that indicates a captcha
-// (website.cpp:365).
+// recaptchaMarker is the login-form fragment that indicates a captcha.
 const recaptchaMarker = `class="g-recaptcha form__recaptcha"`
 
-// Form token input names and code lengths (website.cpp:388-393,475-493).
+// Form token input names and code lengths.
 const (
 	loginFormToken = "login[_token]"
 	twoStepToken   = "second_step_authentication[_token]"
@@ -148,18 +142,18 @@ type loginStep struct {
 	challenge *LoginChallenge
 }
 
-// Login performs the website OAuth login (website.cpp:306-380) up to the
-// first interaction it needs. It resets the client credentials, fetches the
-// login form, tries the curl-based form login unless ForceBrowser is set, and
-// then either completes the token exchange or returns a LoginChallenge:
+// Login performs the website OAuth login up to the first interaction it needs.
+// It resets the client credentials, fetches the login form, tries the form login
+// unless ForceBrowser is set, and then either completes the token exchange or
+// returns a LoginChallenge:
 //
 //   - nil challenge, nil error: login completed; tokens are in the
 //     GalaxyConfig passed at construction.
 //   - challenge, nil error: user interaction is required; call ContinueLogin.
 //   - nil challenge, error: login failed.
 //
-// Cookie persistence (the C++ COOKIELIST FLUSH) is deferred to S10; the
-// session cookie jar already lives inside the httpx Client.
+// The session cookie jar lives inside the httpx Client; persisting it is the
+// caller's job (see httpx.Client.SaveCookies).
 func (c *Client) Login(ctx context.Context, email, password string, opts LoginOptions) (*LoginChallenge, error) {
 	c.galaxy.ResetClient()
 
@@ -182,8 +176,7 @@ func (c *Client) Login(ctx context.Context, email, password string, opts LoginOp
 			return nil, nil
 		}
 		// No code: either the form failed or the server wants a captcha.
-		// The C++ source falls back to the browser only when reCAPTCHA was
-		// detected (website.cpp:376).
+		// Fall back to the browser only when reCAPTCHA was detected.
 		if !bRecaptcha {
 			if formErr != nil {
 				return nil, formErr
@@ -217,8 +210,6 @@ func (c *Client) ContinueLogin(ctx context.Context, challenge *LoginChallenge, r
 	switch challenge.Kind {
 	case ChallengeTwoFactor:
 		if len(response) != challenge.CodeLength {
-			// The C++ source exits here (website.cpp:528-532); Go reports
-			// the invalid length instead of terminating the process.
 			return fmt.Errorf("webapi: security code must be %d characters long", challenge.CodeLength)
 		}
 	case ChallengeBrowser:
@@ -244,9 +235,8 @@ func (c *Client) ContinueLogin(ctx context.Context, challenge *LoginChallenge, r
 		}
 		return c.finishWithCode(ctx, authCode)
 	case ChallengeBrowser:
-		// Consume the callback URL once with redirects enabled
-		// (website.cpp:627-635). Errors there are printed but do not discard
-		// the code in the C++ source, so they are ignored here too.
+		// Consume the callback URL once with redirects enabled. A failure there
+		// is ignored: the code has already been extracted.
 		_ = c.followGet(ctx, response)
 		return c.finishWithCode(ctx, code)
 	}
@@ -262,8 +252,8 @@ func (c *Client) newBrowserChallenge(authURL string) *LoginChallenge {
 	}
 }
 
-// formLogin runs the non-interactive part of the curl-based login
-// (website.cpp:382-607). It returns a loginStep carrying either an auth code
+// formLogin runs the non-interactive part of the login flow. It returns a
+// loginStep carrying either an auth code
 // (flow completed without a challenge) or a LoginChallenge when two-step/TOTP
 // verification is required (the challenge page token is fetched here so
 // ContinueLogin only submits).
@@ -277,8 +267,7 @@ func (c *Client) formLogin(ctx context.Context, formHTML, email, password string
 	}
 
 	// POST order is irrelevant to the server (fields are matched by name);
-	// url.Values.Encode sorts keys, which only changes the byte order the
-	// C++ source produced with its hand-built string.
+	// url.Values.Encode sorts the keys.
 	post := url.Values{}
 	post.Set("login[username]", email)
 	post.Set("login[password]", password)
@@ -291,7 +280,7 @@ func (c *Client) formLogin(ctx context.Context, formHTML, email, password string
 	}
 	redirectURL := c.resolveLocation(meta.URL, meta.Location)
 
-	// Two step authorization (website.cpp:446-569): fetch the challenge page
+	// Two step authorization: fetch the challenge page
 	// and surface a ChallengeTwoFactor carrying its token.
 	challenge, err := c.maybeChallenge(ctx, redirectURL)
 	if err != nil {
@@ -349,8 +338,7 @@ func (c *Client) maybeChallenge(ctx context.Context, redirectURL string) (*Login
 }
 
 // submitSecurityCode POSTs the one-time code for the challenge held in state
-// and returns the auth code extracted from the resulting redirect chain
-// (website.cpp:534-569,571-593).
+// and returns the auth code extracted from the resulting redirect chain.
 func (c *Client) submitSecurityCode(ctx context.Context, state challengeState, code string) (string, error) {
 	post := url.Values{}
 	switch state.kind {
@@ -391,12 +379,12 @@ func (c *Client) submitSecurityCode(ctx context.Context, state challengeState, c
 }
 
 // finishWithCode exchanges an authorization code at the token endpoint and
-// stores the result in galaxy (website.cpp:316-337).
+// stores the result in galaxy.
 func (c *Client) finishWithCode(ctx context.Context, code string) error {
 	return c.exchangeCode(ctx, code)
 }
 
-// exchangeCode performs the token exchange (website.cpp:318-337).
+// exchangeCode performs the token exchange.
 //
 // Deliberately separate from auth.Client.Refresh: this is the
 // authorization_code grant, while Refresh performs the refresh_token grant.
@@ -425,13 +413,12 @@ func (c *Client) exchangeCode(ctx context.Context, code string) error {
 }
 
 // walkRedirectChain follows 3xx redirects manually and extracts the auth code
-// from the callback URL (website.cpp:571-593). Each step performs a GET
+// from the callback URL. Each step performs a GET
 // without auto-redirect. When the response is 3xx the chain continues with
 // the new Location; the code is checked on the current URL after each step.
-// consumeURL is the final URL for the trailing consume-GET the C++ source
-// performs. A 3xx without a Location, a non-3xx without a code, and a
-// self-referential redirect all end the walk (the last is the only cycle
-// guard; the C++ source has no hop limit and none is added here).
+// consumeURL is the final URL for the trailing consume-GET. A 3xx without a
+// Location, a non-3xx without a code, and a self-referential redirect all end
+// the walk (the last is the only cycle guard; no hop limit is imposed).
 func (c *Client) walkRedirectChain(ctx context.Context, redirectURL string) (code, consumeURL string, err error) {
 	cur := redirectURL
 	for cur != "" {

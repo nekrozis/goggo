@@ -7,17 +7,14 @@ import (
 	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
-// GameDetailsJSON fetches the per-game details document (website.cpp:83-89).
-// The C++ version returns whatever Json::Value came back and lets the caller
-// treat an empty value as "no details"; here a response that is not a JSON
-// object is an error and the caller decides what to do with it.
+// GameDetailsJSON fetches the per-game details document. A response that is not
+// a JSON object is an error; the caller decides what to do with it.
 func (c *Client) GameDetailsJSON(ctx context.Context, gameID string) (map[string]any, error) {
 	return c.getResponseJSON(ctx, c.ep.www+"/account/gameDetails/"+gameID+".json")
 }
 
-// OwnedGameIDs fetches the ids of all owned products (website.cpp:846-858).
-// The C++ source stores them in the process-wide Globals::vOwnedGamesIds; the
-// Go port returns them so the caller owns the state (review lock, D2).
+// OwnedGameIDs fetches the ids of all owned products. It returns them rather
+// than storing them, so the caller owns the state (D2).
 func (c *Client) OwnedGameIDs(ctx context.Context) ([]string, error) {
 	root, err := c.getResponseJSON(ctx, c.ep.www+"/user/data/games")
 	if err != nil {
@@ -26,8 +23,7 @@ func (c *Client) OwnedGameIDs(ctx context.Context) ([]string, error) {
 	ids := []string{}
 	owned, ok := root["owned"].([]any)
 	if !ok {
-		// Missing or not an array: jsoncpp iterates a scalar value as an empty
-		// range, so the original yields no ids and no error either.
+		// Missing or not an array: no ids and no error.
 		return ids, nil
 	}
 	for i, el := range owned {
@@ -40,14 +36,12 @@ func (c *Client) OwnedGameIDs(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-// Tags fetches the account tag table (website.cpp:799-844).
+// Tags fetches the account tag table.
 //
-// The C++ source exits the process when the response is not JSON, printing a
-// hint that the cookies have most likely expired; here that case is
-// ErrNotJSON so the CLI can render the hint (review lock: library layers never
-// exit). The tags value is iterated the way jsoncpp ranges over it — array
-// elements in order, or object member values — because the original does not
-// assert the container kind.
+// A response that is not JSON is ErrNotJSON, so the CLI can render the "cookies
+// have most likely expired" hint; library layers never exit. The tags value is
+// iterated as array elements in order, or as object member values: the container
+// kind is not asserted.
 func (c *Client) Tags(ctx context.Context) (map[string]string, error) {
 	root, err := c.getResponseJSON(ctx, c.ep.www+"/account/getFilteredProducts?mediaType=1&sortBy=title&system=&page=1")
 	if err != nil {
@@ -67,8 +61,7 @@ func (c *Client) Tags(ctx context.Context) (map[string]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("webapi: tags[%d]: %w", i, err)
 		}
-		// A missing id/name member reads as null in jsoncpp and stringifies to
-		// "", so both are read loosely.
+		// A missing id/name member reads as "".
 		id, err := jsonval.Str(node["id"])
 		if err != nil {
 			return nil, fmt.Errorf("webapi: tags[%d].id: %w", i, err)

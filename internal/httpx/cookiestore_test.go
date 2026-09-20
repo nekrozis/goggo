@@ -60,7 +60,7 @@ func TestSetCookiesPersistsNewCookie(t *testing.T) {
 	}
 }
 
-// TestKeyCanonicalisation locks host-only domain derivation: u.Hostname()
+// TestKeyCanonicalisation locks host-only domain derivation: u.Hostname
 // (never u.Host, so ports are stripped and IPv6 brackets removed) and the
 // domain-cookie form (lowercase, leading dot removed).
 func TestKeyCanonicalisation(t *testing.T) {
@@ -128,7 +128,7 @@ func TestDeleteRemovesOnlyExactKey(t *testing.T) {
 		&http.Cookie{Name: "SID", Value: "v", Path: "/foo"},
 		&http.Cookie{Name: "SID", Value: "w", Path: "/bar"},
 	})
-	// Delete /foo only (v4 lock: never scan same-name under other paths).
+	// Delete /foo only.
 	del := &http.Cookie{Name: "SID", Value: "", MaxAge: -1, Path: "/foo"}
 	s.SetCookies(u, []*http.Cookie{del})
 

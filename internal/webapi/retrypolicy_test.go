@@ -5,9 +5,9 @@ import (
 	"time"
 )
 
-// TestRetryPolicyFor locks the website retry rule at its new home: the C++
-// getResponse uses min(3, iRetries) additional attempts (website.cpp:33), the
-// wait is forwarded unchanged and the retry predicate is left to httpx.
+// TestRetryPolicyFor locks the website retry rule: at most min(3, retries)
+// additional attempts, the wait forwarded unchanged, and the retry predicate
+// left to httpx.
 func TestRetryPolicyFor(t *testing.T) {
 	cases := []struct {
 		name    string

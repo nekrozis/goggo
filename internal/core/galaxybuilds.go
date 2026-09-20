@@ -236,10 +236,17 @@ func (d *Downloader) showBuildsFor(ctx context.Context, productID, buildID strin
 // asks — by slug equality, or by the unanchored expression --regex selects —
 // with an interactive selection when more than one product matches.
 //
-// A resolved id is always accompanied by an empty Notice, and a failure to
-// resolve always carries one: callers may treat a non-empty Notice as the
-// whole outcome. The returned error is reserved for a real failure of the
-// product list itself.
+// The outcome is one of three, and the two kinds of failure are kept apart:
+//
+//	an id            + an empty Notice + no error   — resolved
+//	nothing to name  + a Notice      + no error     — "there is no such product"
+//	nothing to name  + an empty Notice + an error   — the command could not finish
+//
+// The split matters because a Notice is not a failure: a caller that only shows
+// something treats "there is nothing to show" as its answer. A reference that
+// matched several products and could not be chosen is not that — the objects
+// exist and the selection failed — so it travels as an error and every caller
+// reports a failed run.
 func (d *Downloader) selectProductID(ctx context.Context, ref string, mode ProductRefMode) (string, Notice, error) {
 	if numericIDRE.MatchString(ref) {
 		return ref, Notice{}, nil
@@ -274,9 +281,12 @@ func (d *Downloader) selectProductID(ctx context.Context, ref string, mode Produ
 	}
 	index, err := d.ui.SelectProduct(names)
 	if err != nil || index < 0 || index >= len(names) {
-		// An unanswerable prompt and a console that hands back an unusable
-		// index are one outcome here: no selection was made.
-		return "", Notice{Text: msgNoSelection, Err: true}, nil
+		// An unanswerable prompt and a console that hands back an unusable index
+		// are one outcome: no selection was made. The products are there, so this
+		// is a failed command rather than an empty answer — returning it as a
+		// notice would let a show command report success over a choice it never
+		// made.
+		return "", Notice{}, errors.New(msgNoSelection)
 	}
 	return res.Games[index].ID, Notice{}, nil
 }

@@ -96,12 +96,15 @@ func newReferenceFixture(t *testing.T) core.Dependencies {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/www/account":
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/builds"):
+			fmt.Fprint(w, `{"items":[{"build_id":"b-one","version_name":"1.0.0",`+
+				`"date_published":"2024-01-01","generation":2}]}`)
+		case r.URL.Path == "/www/account":
 			fmt.Fprint(w, "account")
-		case "/www/user/data/games":
+		case r.URL.Path == "/www/user/data/games":
 			fmt.Fprint(w, `{"owned":["555","556"]}`)
-		case "/www/account/getFilteredProducts":
+		case r.URL.Path == "/www/account/getFilteredProducts":
 			fmt.Fprint(w, `{"page":1,"totalPages":1,"products":[`+
 				`{"id":"555","slug":"Some Game A"},{"id":"556","slug":"Some Game B"}]}`)
 		default:
@@ -200,6 +203,50 @@ func TestZeroMatchExitCodes(t *testing.T) {
 				t.Errorf("exit = %d, want %d:\n%s", code, c.want, errOut)
 			}
 		})
+	}
+}
+
+// TestSelectionFailureExitCodes locks the other half of the show contract: a
+// reference that matches several products and cannot be chosen is a FAILED
+// command, so it exits 1. It is deliberately paired with TestZeroMatchExitCodes,
+// which asserts exit 0 for a reference that matches nothing — the two together
+// are what keep "nothing to show" and "could not choose" from collapsing back
+// into one answer.
+func TestSelectionFailureExitCodes(t *testing.T) {
+	// The fixture holds two products whose slugs share the word "Game", so an
+	// expression matching both cannot be resolved without a terminal.
+	for _, args := range [][]string{
+		{"show", "builds", "Game", "--regex"},
+		{"show", "manifest", "Game", "--regex"},
+		{"show", "cdns", "Game", "--regex"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			deps := newReferenceFixture(t)
+			code, _, errOut := runReference(t, deps, args...)
+			if code != 1 {
+				t.Errorf("exit = %d, want 1 when several products match and none can be chosen:\n%s", code, errOut)
+			}
+			// The wording is a secondary anchor — the exit code is the contract —
+			// and it pins WHICH failure produced the code.
+			if want := "Unable to read selection"; !strings.Contains(errOut, want) {
+				t.Errorf("stderr = %q, want it to report %q", errOut, want)
+			}
+		})
+	}
+}
+
+// TestShowExactNameResolvesAndExitsZero is this round's behaviour guard: only the
+// selection FAILURE moved to exit 1, so an unambiguous name must still resolve,
+// list and succeed.
+func TestShowExactNameResolvesAndExitsZero(t *testing.T) {
+	deps := newReferenceFixture(t)
+
+	code, out, errOut := runReference(t, deps, "show", "builds", "Some Game A")
+	if code != 0 {
+		t.Errorf("exit = %d, want 0 for a name the account holds:\n%s", code, errOut)
+	}
+	if !strings.Contains(out, "b-one") {
+		t.Errorf("stdout = %q, want the build listing of the resolved product", out)
 	}
 }
 

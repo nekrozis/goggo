@@ -548,8 +548,67 @@ func TestSelectProductIDInteractive(t *testing.T) {
 	}
 }
 
+// TestSelectProductIDOutcomeContract locks the three-way outcome every caller
+// branches on: an id, or "there is no such product", or a failure. The one shape
+// that must never occur is an empty id with NO reason — a caller would then carry
+// on with nothing to act on, which is what made the show commands report success
+// over a selection they never made.
+func TestSelectProductIDOutcomeContract(t *testing.T) {
+	cases := []struct {
+		name      string
+		ref       string
+		mode      ProductRefMode
+		ui        *fakeConsole
+		wantID    bool
+		wantError bool
+	}{
+		{name: "numeric id", ref: "456", mode: ProductRefExact, wantID: true},
+		{name: "one exact match", ref: "Some Game A", mode: ProductRefExact, wantID: true},
+		{name: "no match", ref: "Nothing", mode: ProductRefExact},
+		{name: "several matches, unanswerable", ref: "Some", mode: ProductRefRegex, wantError: true,
+			ui: &fakeConsole{interactive: false, selectionErr: errors.New("no terminal")}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := newFixtureServer(t)
+			srv.setProducts(fixtureProductsTwo)
+			ui := c.ui
+			if ui == nil {
+				ui = newFakeConsole()
+			}
+			d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "score"), ui)
+
+			id, notice, err := d.selectProductID(context.Background(), c.ref, c.mode)
+			if c.wantID {
+				if id == "" || notice.Text != "" || err != nil {
+					t.Fatalf("id, notice, err = %q, %+v, %v; want a resolved id", id, notice, err)
+				}
+				return
+			}
+			if id != "" {
+				t.Fatalf("id = %q, want none", id)
+			}
+			if id == "" && notice.Text == "" && err == nil {
+				t.Fatal("an empty id came back with no notice and no error: the caller has nothing to report")
+			}
+			if c.wantError {
+				if err == nil || notice.Text != "" {
+					t.Errorf("notice, err = %+v, %v; want the failure as an error", notice, err)
+				}
+				return
+			}
+			if notice.Text == "" || err != nil {
+				t.Errorf("notice, err = %+v, %v; want a notice and no error", notice, err)
+			}
+		})
+	}
+}
+
 // TestSelectProductIDUnanswerable covers the two ways a selection can fail to
-// happen: no console to ask, and an index the console should never return.
+// happen: no console to ask, and an index the console should never return. Both
+// mean the products exist and could not be chosen, so they are failures of the
+// command rather than an empty answer: the error carries the reason and the
+// notice stays empty, which is what makes the show commands exit non-zero.
 func TestSelectProductIDUnanswerable(t *testing.T) {
 	cases := []struct {
 		name string
@@ -565,11 +624,14 @@ func TestSelectProductIDUnanswerable(t *testing.T) {
 			d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "score"), c.ui)
 
 			res, err := d.ShowBuilds(context.Background(), "Some", "", ProductRefRegex)
-			if err != nil {
-				t.Fatalf("ShowBuilds: %v", err)
+			if err == nil {
+				t.Fatalf("ShowBuilds = %+v, want a failure when no selection can be made", res)
 			}
-			if res.Notice.Text != msgNoSelection || !res.Notice.Err {
-				t.Errorf("notice = %+v, want the stderr no-selection message", res.Notice)
+			if !strings.Contains(err.Error(), msgNoSelection) {
+				t.Errorf("error = %v, want it to report %q", err, msgNoSelection)
+			}
+			if res.Notice.Text != "" {
+				t.Errorf("notice = %+v, want none: the failure is the error, not a notice", res.Notice)
 			}
 			if got := srv.seen("/builds"); got != 0 {
 				t.Errorf("build requests = %d, want none", got)

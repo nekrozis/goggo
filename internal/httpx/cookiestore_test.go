@@ -226,7 +226,8 @@ func TestCookiesDelegatesToBareJar(t *testing.T) {
 	}
 	for _, p := range probes {
 		pu := mustParse(t, p)
-		if !equalCookies(s.Cookies(pu), bare.Cookies(pu)) {
+		got, want := s.Cookies(pu), bare.Cookies(pu)
+		if !equalCookies(got, want) {
 			t.Errorf("Cookies(%q) diverged from bare jar:\nwrapper=%+v\nbare   =%+v",
 				p, s.Cookies(pu), bare.Cookies(pu))
 		}

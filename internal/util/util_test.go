@@ -356,7 +356,7 @@ func TestConfigHomeSemantics(t *testing.T) {
 	if usesStdlibRoots() {
 		t.Skip("XDG semantics apply to the Unix branch only (see TestConfigHomeUsesPlatformRoots)")
 	}
-	g := clearEnv(t, "HOME")
+	clearEnv(t, "HOME")
 	clearEnv(t, "XDG_CONFIG_HOME")
 	t.Setenv("HOME", "/tmp/testhome")
 
@@ -365,7 +365,6 @@ func TestConfigHomeSemantics(t *testing.T) {
 	if err != nil || got != filepath.Join("/tmp/testhome", ".config") {
 		t.Errorf("ConfigHome unset = %q, %v", got, err)
 	}
-	_ = g
 
 	// XDG set -> value.
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/config")

@@ -233,8 +233,8 @@ func TestLoadPreservesHttpOnlyRoundTrip(t *testing.T) {
 	if _, err := c.SaveCookies(); err != nil {
 		t.Fatalf("SaveCookies: %v", err)
 	}
-	if !strings.Contains(string(mustRead(t, path)), "#HttpOnly_example.com") {
-		t.Errorf("saved file lost the #HttpOnly_ prefix:\n%s", mustRead(t, path))
+	if body := string(mustRead(t, path)); !strings.Contains(body, "#HttpOnly_example.com") {
+		t.Errorf("saved file lost the #HttpOnly_ prefix:\n%s", body)
 	}
 }
 

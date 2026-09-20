@@ -82,6 +82,7 @@ func TestViewModelReadsProgressOnly(t *testing.T) {
 	src.set("/a.bin", 600, 1000)
 	now := time.Unix(1_000_000, 0)
 	r, s := newTestRenderer(src, &now)
+	_ = s // the sink is not inspected here; this test reads the view model
 
 	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
 	// The event claims 100 bytes; Progress says 600. Progress wins.
@@ -97,7 +98,6 @@ func TestViewModelReadsProgressOnly(t *testing.T) {
 	if vm.active != 1 {
 		t.Errorf("active = %d, want 1", vm.active)
 	}
-	_ = s
 }
 
 // TestViewModelClamps locks the display-layer defensive clamps: a negative

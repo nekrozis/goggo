@@ -36,7 +36,9 @@ func cursorUpRows(s string) int {
 
 // eraseToEndAt returns the index of the escape sequence that clears from the
 // cursor to the end of the screen, or -1 if s has none: the frame that was on
-// screen is gone, whatever the sequence's spelling.
+// screen is gone, whatever the sequence's spelling. Only the parameter-less
+// form ("\033[J") and the explicit 0 ("\033[0J") mean "to the end"; "\033[1J"
+// and "\033[2J" erase other regions and do not satisfy the contract.
 func eraseToEndAt(s string) int {
 	for i := 0; i+1 < len(s); i++ {
 		if s[i] != '\033' || s[i+1] != '[' {
@@ -46,7 +48,10 @@ func eraseToEndAt(s string) int {
 		for j < len(s) && s[j] >= '0' && s[j] <= '9' {
 			j++
 		}
-		if j < len(s) && s[j] == 'J' {
+		if j >= len(s) || s[j] != 'J' {
+			continue
+		}
+		if param := s[i+2 : j]; param == "" || param == "0" {
 			return i
 		}
 	}

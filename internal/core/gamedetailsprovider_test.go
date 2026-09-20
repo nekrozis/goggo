@@ -61,8 +61,8 @@ func TestGamedetailsResolverResolve(t *testing.T) {
 	if want := galaxy.PathFromDownlinkURL(downlink, "gamename"); got.Path != want {
 		t.Errorf("Path = %q, want %q", got.Path, want)
 	}
-	if refreshes.Load() != 1 {
-		t.Errorf("refreshes = %d, want the expired credentials refreshed once before the fetch", refreshes.Load())
+	if got := refreshes.Load(); got != 1 {
+		t.Errorf("refreshes = %d, want the expired credentials refreshed once before the fetch", got)
 	}
 	if f.hitCount("/dlc") != 1 {
 		t.Errorf("downlink document fetched %d times, want once", f.hitCount("/dlc"))

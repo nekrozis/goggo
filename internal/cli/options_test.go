@@ -118,8 +118,8 @@ func TestParseListResources(t *testing.T) {
 		{"wishlist", cmdListWishlist, config.ListFormatWishlist},
 	} {
 		inv := parseOpts(t, "list", tc.resource)
-		if inv.cmd != tc.cmd || listFormat(inv.cmd) != tc.format {
-			t.Errorf("list %s = cmd %d format %#x", tc.resource, inv.cmd, listFormat(inv.cmd))
+		if got := listFormat(inv.cmd); inv.cmd != tc.cmd || got != tc.format {
+			t.Errorf("list %s = cmd %d format %#x", tc.resource, inv.cmd, got)
 		}
 	}
 	// The removed option that used to carry this is unknown, with a hint.

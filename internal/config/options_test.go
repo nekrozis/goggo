@@ -79,9 +79,6 @@ func TestPlatformTableOrder(t *testing.T) {
 }
 
 func TestIncludeOptionsCompositeMasks(t *testing.T) {
-	if len(IncludeOptions) != 14 {
-		t.Fatalf("len(IncludeOptions) = %d, want 14", len(IncludeOptions))
-	}
 	wantCodeID := map[string]uint32{
 		"bi": GFBaseInstaller,
 		"be": GFBaseExtra,
@@ -102,6 +99,11 @@ func TestIncludeOptionsCompositeMasks(t *testing.T) {
 		if want, ok := wantCodeID[o.Code]; !ok || o.ID != want {
 			t.Errorf("IncludeOptions code %q ID = 0x%x, want 0x%x", o.Code, o.ID, want)
 		}
+	}
+	// Every documented entry must be in the table: the pair of loops pins the
+	// set both ways without locking its size to a literal.
+	if len(IncludeOptions) != len(wantCodeID) {
+		t.Errorf("IncludeOptions has %d entries, want the %d documented above", len(IncludeOptions), len(wantCodeID))
 	}
 	// Composite masks must equal the union of their parts.
 	if GFBase != GFBaseInstaller|GFBaseExtra|GFBasePatch|GFBaseLangPack|GFCustomBase {

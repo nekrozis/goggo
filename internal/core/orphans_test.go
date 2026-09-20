@@ -112,8 +112,8 @@ func TestCheckOrphanedFilesIgnorelist(t *testing.T) {
 	if !strings.Contains(out, "\t0 orphaned files") {
 		t.Errorf("output = %q, want 0 orphans after the ignorelist skip", out)
 	}
-	if !strings.Contains(consoleErrText(t, d), "skipped ignorelisted file") {
-		t.Errorf("stderr = %q, want the verbose skip notice", consoleErrText(t, d))
+	if errText := consoleErrText(t, d); !strings.Contains(errText, "skipped ignorelisted file") {
+		t.Errorf("stderr = %q, want the verbose skip notice", errText)
 	}
 }
 
@@ -166,8 +166,8 @@ func TestCheckOrphanedFilesExpectedLedger(t *testing.T) {
 	}
 	assertFileContent(t, owned, "x")
 	assertFileAbsent(t, filepath.Join(f.root, "leftover.bin"))
-	if !strings.Contains(consoleText(t, d), "\t1 orphaned files") {
-		t.Errorf("output = %q, want only the true leftover counted", consoleText(t, d))
+	if out := consoleText(t, d); !strings.Contains(out, "\t1 orphaned files") {
+		t.Errorf("output = %q, want only the true leftover counted", out)
 	}
 }
 

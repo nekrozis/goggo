@@ -68,9 +68,8 @@ func TestGameFileMarshalJSONKeysAndTypes(t *testing.T) {
 	if v, ok := obj["platform"].(float64); !ok || v != 1 {
 		t.Errorf("platform wrong: %#v", obj["platform"])
 	}
-	if len(obj) != 14 {
-		t.Errorf("JSON key count = %d, want 14: %s", len(obj), raw)
-	}
+	// The explicit key list above and the must-not-contain list are the
+	// contract; a count would break on any legitimate new field.
 }
 
 func TestGameFileMarshalJSONVersionOnlyWhenSet(t *testing.T) {

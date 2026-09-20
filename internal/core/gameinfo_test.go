@@ -529,8 +529,8 @@ func TestGameDetailsIsIndependentOfThreadCount(t *testing.T) {
 	}
 
 	one := run(1)
-	if f.count("/products/") != 4 {
-		t.Fatalf("product requests after the single-worker run = %d, want 4", f.count("/products/"))
+	if got := f.count("/products/"); got != 4 {
+		t.Fatalf("product requests after the single-worker run = %d, want 4", got)
 	}
 	four := run(4)
 

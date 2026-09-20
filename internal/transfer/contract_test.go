@@ -2,7 +2,6 @@ package transfer
 
 import (
 	"context"
-	"testing"
 
 	"github.com/nekrozis/goggo/internal/model"
 )
@@ -30,23 +29,7 @@ var (
 	_ URLProvider = fakeURLProvider{}
 )
 
-// TestEventShape locks that an event can express both halves of the contract: a
-// progress point inside a chunk loop and a bare message.
-func TestEventShape(t *testing.T) {
-	progress := Event{
-		Path: "/install/game/data.bin", Current: 1024, Total: 4096,
-		ChunkIndex: 2, ChunkCount: 8, Kind: EventProgress,
-	}
-	if progress.Kind != EventProgress || progress.ChunkIndex != 2 || progress.ChunkCount != 8 {
-		t.Errorf("progress event = %+v", progress)
-	}
-	if progress.Text != "" {
-		t.Error("a progress event carries no text")
-	}
-
-	// File-level messages use -1: there is no chunk to point at.
-	message := Event{Path: "/install/game/data.bin", Text: "File already exists", Kind: EventMessageInfo, ChunkIndex: -1}
-	if message.ChunkIndex != -1 || message.Text == "" {
-		t.Errorf("message event = %+v", message)
-	}
-}
+// The -1 ChunkIndex convention for file-level events, and the "a progress
+// event carries no text" rule, are properties of how CONSUMERS build events;
+// the renderer and observer tests exercise them where they are used. A test
+// here would only read back a struct literal.

@@ -346,7 +346,6 @@ func TestRunWaitDelaysAttempts(t *testing.T) {
 	if elapsed := time.Since(start); elapsed < 140*time.Millisecond {
 		t.Errorf("elapsed = %v, want at least the three 50ms waits", elapsed)
 	}
-	_ = obs
 }
 
 // TestRunContextCancel locks that a cancelled context comes back as the run's

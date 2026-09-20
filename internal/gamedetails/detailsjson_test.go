@@ -52,7 +52,14 @@ func TestGetDetailsAsJson(t *testing.T) {
 	if _, has := got["languagepacks"]; has {
 		t.Error("empty languagepacks must be absent")
 	}
-	dlc := got["dlcs"].([]any)[0].(map[string]any)
+	dlcs, ok := got["dlcs"].([]any)
+	if !ok || len(dlcs) == 0 {
+		t.Fatalf("dlcs = %#v, want a non-empty array", got["dlcs"])
+	}
+	dlc, ok := dlcs[0].(map[string]any)
+	if !ok {
+		t.Fatalf("dlcs[0] = %#v, want an object", dlcs[0])
+	}
 	if _, has := dlc["extras"]; has {
 		t.Error("the DLC's empty vectors must be absent too")
 	}

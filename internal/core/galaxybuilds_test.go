@@ -185,8 +185,8 @@ func TestShowBuildsListsBuildsWhenNoneSelected(t *testing.T) {
 					t.Errorf("row %d = %+v, want %+v", i, res.Builds[i], want)
 				}
 			}
-			if srv.seen("/os/windows/builds") != 1 {
-				t.Errorf("the build list must be fetched once, got %d", srv.seen("/os/windows/builds"))
+			if got := srv.seen("/os/windows/builds"); got != 1 {
+				t.Errorf("the build list must be fetched once, got %d", got)
 			}
 		})
 	}
@@ -313,7 +313,8 @@ func TestSortProductBuildsLeavesUnknownOrdersAlone(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildItems: %v", err)
 		}
-		if len(items) != 2 || items[0].(map[string]any)["build_id"] != "a" {
+		first, ok := items[0].(map[string]any)
+		if len(items) != 2 || !ok || first["build_id"] != "a" {
 			t.Errorf("order %q reordered the list: %v", order, items)
 		}
 	}

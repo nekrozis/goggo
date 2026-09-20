@@ -15,6 +15,7 @@ import (
 	"github.com/nekrozis/goggo/internal/blacklist"
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/galaxy"
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/reconcile"
 	"github.com/nekrozis/goggo/internal/util"
@@ -173,11 +174,11 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 	}
 	generation := 0
 	if index < len(items) {
-		entry, err := memberObject(items[index])
+		entry, err := jsonread.Object(items[index])
 		if err != nil {
 			return res, fmt.Errorf("galaxy: builds items[%d]: %w", index, err)
 		}
-		gen, err := memberInt(entry["generation"])
+		gen, err := jsonread.Int(entry["generation"])
 		if err != nil {
 			return res, fmt.Errorf("galaxy: builds items[%d].generation: %w", index, err)
 		}
@@ -519,7 +520,7 @@ func buildsItems(builds map[string]jsontext.Value) ([]jsontext.Value, error) {
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	items, err := memberArray(raw)
+	items, err := jsonread.Array(raw)
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: builds items: %w", err)
 	}
@@ -531,11 +532,11 @@ func buildLink(items []jsontext.Value, index int) (string, error) {
 	if index < 0 || index >= len(items) {
 		return "", fmt.Errorf("galaxy: builds items[%d]: out of range", index)
 	}
-	entry, err := memberObject(items[index])
+	entry, err := jsonread.Object(items[index])
 	if err != nil {
 		return "", fmt.Errorf("galaxy: builds items[%d]: %w", index, err)
 	}
-	link, err := memberText(entry["link"])
+	link, err := jsonread.Text(entry["link"])
 	if err != nil {
 		return "", fmt.Errorf("galaxy: builds items[%d].link: %w", index, err)
 	}
@@ -549,15 +550,15 @@ func manifestProductName(manifest map[string]jsontext.Value) string {
 	if !ok || raw == nil {
 		return ""
 	}
-	products, err := memberArray(raw)
+	products, err := jsonread.Array(raw)
 	if err != nil || len(products) == 0 {
 		return ""
 	}
-	entry, err := memberObject(products[0])
+	entry, err := jsonread.Object(products[0])
 	if err != nil {
 		return ""
 	}
-	name, err := memberText(entry["name"])
+	name, err := jsonread.Text(entry["name"])
 	if err != nil {
 		return ""
 	}
@@ -571,7 +572,7 @@ func manifestArray(manifest map[string]jsontext.Value, key string) ([]jsontext.V
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	v, err := memberArray(raw)
+	v, err := jsonread.Array(raw)
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: manifest %s: %w", key, err)
 	}
@@ -597,7 +598,7 @@ func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]
 	}
 	var items []model.GalaxyDepotItem
 	for i, raw := range depots {
-		depot, err := memberObject(raw)
+		depot, err := jsonread.Object(raw)
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: manifest depots[%d]: %w", i, err)
 		}
@@ -629,7 +630,9 @@ func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]
 		}
 		var wanted []string
 		for i, raw := range ids {
-			id, err := memberText(raw)
+			// A dependency id is an identifier, so a number is a value and not a
+			// broken document.
+			id, err := jsonread.Scalar(raw)
 			if err != nil {
 				return nil, fmt.Errorf("galaxy: manifest dependencies[%d]: %w", i, err)
 			}
@@ -643,16 +646,16 @@ func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]
 			// An empty document, or one without "depots", adds nothing.
 			raw, ok := depDoc["depots"]
 			if ok && raw != nil {
-				depotDocs, err := memberArray(raw)
+				depotDocs, err := jsonread.Array(raw)
 				if err != nil {
 					return nil, fmt.Errorf("galaxy: dependency repository depots: %w", err)
 				}
 				for i, raw := range depotDocs {
-					depot, err := memberObject(raw)
+					depot, err := jsonread.Object(raw)
 					if err != nil {
 						return nil, fmt.Errorf("galaxy: dependency repository depots[%d]: %w", i, err)
 					}
-					depID, err := memberText(depot["dependencyId"])
+					depID, err := jsonread.Scalar(depot["dependencyId"])
 					if err != nil {
 						return nil, fmt.Errorf("galaxy: dependency repository depots[%d].dependencyId: %w", i, err)
 					}
@@ -746,5 +749,7 @@ func readInfoBuildID(path string) (string, error) {
 	if doc == nil {
 		return "", nil
 	}
-	return memberText(doc["buildId"])
+	// buildId is an identifier: the info file a GOG installer writes spells it
+	// the way the builds document does, and a number is a value.
+	return jsonread.Scalar(doc["buildId"])
 }

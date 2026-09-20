@@ -8,6 +8,7 @@ import (
 
 	"github.com/nekrozis/goggo/internal/galaxy"
 	"github.com/nekrozis/goggo/internal/gamedetails"
+	"github.com/nekrozis/goggo/internal/jsonread"
 )
 
 // The three ways a downlink document can fail to name a source. They are this
@@ -70,9 +71,9 @@ func (r *gamedetailsResolver) Resolve(ctx context.Context, gamename, downlinkURL
 	// Shape before value: the lenient reader would happily stringify a number
 	// or an object, which is exactly what must not decide what this field is.
 	if raw.Kind() != jsontext.KindString {
-		return gamedetails.ResolvedFile{}, fmt.Errorf("%w: got %s", errDownlinkNotString, jsonKind(raw))
+		return gamedetails.ResolvedFile{}, fmt.Errorf("%w: got %s", errDownlinkNotString, jsonread.Kind(raw))
 	}
-	downlink, err := stringOnly(raw)
+	downlink, err := jsonread.Text(raw)
 	if err != nil {
 		return gamedetails.ResolvedFile{}, fmt.Errorf("%w: %w", errDownlinkNotString, err)
 	}

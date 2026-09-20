@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"encoding/json/jsontext"
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -104,7 +105,10 @@ func ResolveInstallSubdir(template string, manifest, product map[string]jsontext
 // matches the other document readers in this package, and it serves both the
 // manifest and the product document the install directory is derived from.
 func documentString(doc map[string]jsontext.Value, key string) (string, error) {
-	v, err := memberText(doc[key])
+	// Any scalar is rendered as its own text: a path template must not be the
+	// place a document gets rejected, and baseProductId really is an id that the
+	// API may spell as a number.
+	v, err := jsonread.Scalar(doc[key])
 	if err != nil {
 		return "", fmt.Errorf("galaxy: document %s: %w", key, err)
 	}

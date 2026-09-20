@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -284,7 +285,7 @@ func serialsFromDetails(details map[string]jsontext.Value) (text, diag string) {
 	if !ok || raw == nil {
 		return "", ""
 	}
-	cdKey, err := memberText(raw)
+	cdKey, err := jsonread.Text(raw)
 	if err != nil {
 		return "", "game details: cdKey: " + err.Error()
 	}

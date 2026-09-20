@@ -12,6 +12,7 @@ import (
 	"encoding/json/jsontext"
 	"github.com/nekrozis/goggo/internal/catalog"
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"github.com/nekrozis/goggo/internal/model"
 )
 
@@ -189,7 +190,7 @@ func (d *Downloader) showBuildsFor(ctx context.Context, productID, buildID strin
 	if index < 0 {
 		rows := make([]BuildRow, 0, len(items))
 		for i, raw := range items {
-			item, err := memberObject(raw)
+			item, err := jsonread.Object(raw)
 			if err != nil {
 				return BuildsResult{}, fmt.Errorf("galaxy: builds items[%d]: %w", i, err)
 			}
@@ -358,15 +359,15 @@ func (d *Downloader) sortProductBuilds(doc map[string]jsontext.Value) (map[strin
 	// passes consistent.
 	builds := make([]buildEntryDoc, len(items))
 	for i, raw := range items {
-		item, err := memberObject(raw)
+		item, err := jsonread.Object(raw)
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: builds items[%d]: %w", i, err)
 		}
-		date, err := memberText(item["date_published"])
+		date, err := jsonread.Text(item["date_published"])
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: builds items[%d].date_published: %w", i, err)
 		}
-		branch, err := memberText(item["branch"])
+		branch, err := jsonread.Text(item["branch"])
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: builds items[%d].branch: %w", i, err)
 		}
@@ -375,7 +376,7 @@ func (d *Downloader) sortProductBuilds(doc map[string]jsontext.Value) (map[strin
 	sort.SliceStable(builds, func(i, j int) bool { return builds[i].date > builds[j].date })
 
 	if order == "date" {
-		doc["items"] = rawArray(documentsOf(builds))
+		doc["items"] = jsonread.RawArray(documentsOf(builds))
 		return doc, nil
 	}
 
@@ -401,7 +402,7 @@ func (d *Downloader) sortProductBuilds(doc map[string]jsontext.Value) (map[strin
 	for i, pos := range positions {
 		byScore[i] = builds[pos].item
 	}
-	doc["items"] = rawArray(byScore)
+	doc["items"] = jsonread.RawArray(byScore)
 	return doc, nil
 }
 
@@ -427,7 +428,7 @@ func documentsOf(builds []buildEntryDoc) []jsontext.Value {
 // The tier is the one the depot step established: absent means empty, the wrong
 // shape means error.
 func buildItems(doc map[string]jsontext.Value) ([]jsontext.Value, error) {
-	items, err := memberArray(doc["items"])
+	items, err := jsonread.Array(doc["items"])
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: builds items: %w", err)
 	}
@@ -440,11 +441,11 @@ func buildItems(doc map[string]jsontext.Value) ([]jsontext.Value, error) {
 // the command print the listing.
 func buildIndexFor(items []jsontext.Value, buildID string) (int, error) {
 	for i, raw := range items {
-		item, err := memberObject(raw)
+		item, err := jsonread.Object(raw)
 		if err != nil {
 			return 0, fmt.Errorf("galaxy: builds items[%d]: %w", i, err)
 		}
-		id, err := memberText(item["build_id"])
+		id, err := jsonread.Scalar(item["build_id"])
 		if err != nil {
 			return 0, fmt.Errorf("galaxy: builds items[%d].build_id: %w", i, err)
 		}
@@ -463,16 +464,16 @@ func buildIndexFor(items []jsontext.Value, buildID string) (int, error) {
 func buildRow(index int, item map[string]jsontext.Value) (BuildRow, error) {
 	var row BuildRow
 	var err error
-	if row.VersionName, err = memberText(item["version_name"]); err != nil {
+	if row.VersionName, err = jsonread.Text(item["version_name"]); err != nil {
 		return BuildRow{}, fmt.Errorf("galaxy: builds items[%d].version_name: %w", index, err)
 	}
-	if row.DatePublished, err = memberText(item["date_published"]); err != nil {
+	if row.DatePublished, err = jsonread.Text(item["date_published"]); err != nil {
 		return BuildRow{}, fmt.Errorf("galaxy: builds items[%d].date_published: %w", index, err)
 	}
-	if row.BuildID, err = memberText(item["build_id"]); err != nil {
+	if row.BuildID, err = jsonread.Scalar(item["build_id"]); err != nil {
 		return BuildRow{}, fmt.Errorf("galaxy: builds items[%d].build_id: %w", index, err)
 	}
-	generation, err := memberInt(item["generation"])
+	generation, err := jsonread.Int(item["generation"])
 	if err != nil {
 		return BuildRow{}, fmt.Errorf("galaxy: builds items[%d].generation: %w", index, err)
 	}
@@ -488,15 +489,15 @@ func buildEntry(items []jsontext.Value, index int) (generation int, link string,
 	if index < 0 || index >= len(items) {
 		return 0, "", nil
 	}
-	item, err := memberObject(items[index])
+	item, err := jsonread.Object(items[index])
 	if err != nil {
 		return 0, "", fmt.Errorf("galaxy: builds items[%d]: %w", index, err)
 	}
-	gen, err := memberInt(item["generation"])
+	gen, err := jsonread.Int(item["generation"])
 	if err != nil {
 		return 0, "", fmt.Errorf("galaxy: builds items[%d].generation: %w", index, err)
 	}
-	if link, err = memberText(item["link"]); err != nil {
+	if link, err = jsonread.Text(item["link"]); err != nil {
 		return 0, "", fmt.Errorf("galaxy: builds items[%d].link: %w", index, err)
 	}
 	return int(gen), link, nil
@@ -509,17 +510,19 @@ func endpointNames(doc map[string]jsontext.Value) ([]string, error) {
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	urls, err := memberArray(raw)
+	urls, err := jsonread.Array(raw)
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: secure link urls: %w", err)
 	}
 	var names []string
 	for i, rawEntry := range urls {
-		entry, err := memberObject(rawEntry)
+		entry, err := jsonread.Object(rawEntry)
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: secure link urls[%d]: %w", i, err)
 		}
-		name, err := memberText(entry["endpoint_name"])
+		// The same member the CDN reader takes wide: an endpoint name is read with
+		// the upstream asString() rule.
+		name, err := jsonread.Scalar(entry["endpoint_name"])
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: secure link urls[%d].endpoint_name: %w", i, err)
 		}

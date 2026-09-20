@@ -2,10 +2,12 @@ package core
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"fmt"
 	"sync"
 
 	"github.com/nekrozis/goggo/internal/galaxy"
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/transfer"
 )
@@ -75,10 +77,13 @@ func (p *websiteURLProvider) Resolve(ctx context.Context, task model.WebsiteTask
 		return "", "", fmt.Errorf("galaxy: %w", transfer.ErrEmptyDownlink)
 	}
 	raw, ok := doc["downlink"]
-	if !ok || raw == nil {
+	if !ok || raw.Kind() == jsontext.KindInvalid || raw.Kind() == jsontext.KindNull {
 		return "", "", fmt.Errorf("galaxy: %w", transfer.ErrNoDownlink)
 	}
-	downlink, err := memberText(raw)
+	// The website chain keeps the wide read on this member: its contract has
+	// always been "a scalar, whatever the spelling", and the download continues
+	// rather than failing over a document that is merely odd.
+	downlink, err := jsonread.Scalar(raw)
 	if err != nil {
 		return "", "", fmt.Errorf("downlink: %w", err)
 	}
@@ -88,8 +93,8 @@ func (p *websiteURLProvider) Resolve(ctx context.Context, task model.WebsiteTask
 	checksumXML := ""
 	readChecksum := p.policy == checksumAlways || (p.remoteXML && task.Checksummed)
 	if readChecksum {
-		if raw, ok := doc["checksum"]; ok && raw != nil {
-			checksumURL, err := memberText(raw)
+		if raw, ok := doc["checksum"]; ok && raw.Kind() != jsontext.KindInvalid && raw.Kind() != jsontext.KindNull {
+			checksumURL, err := jsonread.Scalar(raw)
 			if err != nil {
 				if p.policy == checksumAlways {
 					// The single-file chain never fails on the checksum

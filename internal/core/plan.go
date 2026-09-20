@@ -21,8 +21,7 @@ import (
 )
 
 // msgLevelVerbose is the message level that turns on the verbose gates of the
-// plan builder. A local constant keeps this package free of a ui/log import for
-// one value.
+// plan builder.
 const msgLevelVerbose = 1
 
 // PlanResult is one plan-building run's outcome: the plan plus every display

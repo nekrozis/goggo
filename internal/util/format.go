@@ -30,15 +30,6 @@ func EtaString(seconds int64) string {
 	}
 }
 
-// EtaFromRate renders the time remaining for bytesRemaining at rate (bytes per
-// second) as bytesRemaining / rate. A non-positive rate yields "0s".
-func EtaFromRate(bytesRemaining uint64, rate float64) string {
-	if rate <= 0 {
-		return EtaString(0)
-	}
-	return EtaString(int64(float64(bytesRemaining) / rate))
-}
-
 // sizeUnits returns the unit names and the base divisor for one unit format.
 func sizeUnits(format uint32) (units []string, divisor float64) {
 	if format == config.UnitFormatSI {

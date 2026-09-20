@@ -4,14 +4,13 @@ import (
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/config"
-	"github.com/nekrozis/goggo/internal/model"
 )
 
 // TestGameFileGetAsJson locks the file field table of the details-json
 // contract: every key present, version only when non-empty. The key set is
-// shared with the model package's serializer test (model.GameFileJSONKeys) —
-// two implementations of one wire format — while the assertions stay separate,
-// because the two methods may render values differently.
+// written out HERE rather than read from a production table: an independent
+// statement of the wire format fails when the serializer drops a key, whereas a
+// table the serializer itself owns would agree with whatever it does.
 func TestGameFileGetAsJson(t *testing.T) {
 	gf := GameFile{Updated: 1, ID: "en1installer0", Name: "Installer", Path: "/setup.exe",
 		Size: "10", Platform: config.PlatformWindows, Language: config.LangEN, Silent: 0,
@@ -21,7 +20,11 @@ func TestGameFileGetAsJson(t *testing.T) {
 	if _, has := got["version"]; has {
 		t.Error("version present while empty, want it absent (the conditional member)")
 	}
-	for _, key := range model.GameFileJSONKeys {
+	for _, key := range []string{
+		"updated", "id", "name", "path", "size", "platform", "language",
+		"silent", "gamename", "title", "gamename_basegame", "title_basegame",
+		"type", "galaxy_downlink_json_url",
+	} {
 		if _, has := got[key]; !has {
 			t.Errorf("field %s missing from the file json", key)
 		}

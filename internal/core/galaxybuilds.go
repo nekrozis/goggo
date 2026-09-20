@@ -99,10 +99,6 @@ func (d *Downloader) ShowBuilds(ctx context.Context, productID, buildID string, 
 	if notice.Text != "" {
 		return BuildsResult{Notice: notice}, nil
 	}
-	if id == "" {
-		// An empty resolved id means there is no work to do.
-		return BuildsResult{}, nil
-	}
 	return d.showBuildsFor(ctx, id, buildID)
 }
 
@@ -115,9 +111,6 @@ func (d *Downloader) ListCDNs(ctx context.Context, productID, buildID string, mo
 	}
 	if notice.Text != "" {
 		return CDNsResult{Notice: notice}, nil
-	}
-	if id == "" {
-		return CDNsResult{}, nil
 	}
 
 	platform := platformName(d.cfg.DownloadConfig.GalaxyPlatform)

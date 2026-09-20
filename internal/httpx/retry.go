@@ -22,21 +22,6 @@ type RetryPolicy struct {
 	ShouldRetry ShouldRetry
 }
 
-// DefaultPolicy returns a policy that retries transport errors (except context
-// cancellation) and HTTP statuses >= 400, but stops immediately on 403 and 404.
-// maxAttempts is the total number of attempts, so a caller that counts retries
-// after the first attempt passes retries+1.
-func DefaultPolicy(maxAttempts int, wait time.Duration) RetryPolicy {
-	if maxAttempts < 1 {
-		maxAttempts = 1
-	}
-	return RetryPolicy{
-		MaxAttempts: maxAttempts,
-		Wait:        wait,
-		ShouldRetry: DefaultShouldRetry,
-	}
-}
-
 // DefaultShouldRetry retries transport-level errors, retries HTTP errors except
 // 403/404, and never retries a canceled or deadline-exceeded context.
 //

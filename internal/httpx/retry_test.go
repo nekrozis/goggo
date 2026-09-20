@@ -34,6 +34,12 @@ func sequenceServer(t *testing.T, statuses ...int) (*httptest.Server, *int32) {
 	return srv, &calls
 }
 
+// retryPolicy builds the policy the retry tests need: up to maxAttempts
+// attempts, waiting wait between them, with the production rule for which
+// failures are retried.
+func retryPolicy(maxAttempts int, wait time.Duration) RetryPolicy {
+	return RetryPolicy{MaxAttempts: maxAttempts, Wait: wait, ShouldRetry: DefaultShouldRetry}
+}
 func TestDoWithRetrySuccessAfterFailures(t *testing.T) {
 	srv, calls := sequenceServer(t,
 		http.StatusInternalServerError,
@@ -41,7 +47,7 @@ func TestDoWithRetrySuccessAfterFailures(t *testing.T) {
 		http.StatusOK,
 	)
 	c, _ := New(testConfig())
-	policy := DefaultPolicy(3, time.Millisecond)
+	policy := retryPolicy(3, time.Millisecond)
 	resp, err := DoWithRetry(context.Background(), policy, func(ctx context.Context) (*http.Response, error) {
 		return c.Get(ctx, srv.URL)
 	})
@@ -64,7 +70,7 @@ func TestDoWithRetryExhaustedReturnsFinalResponse(t *testing.T) {
 		http.StatusInternalServerError,
 	)
 	c, _ := New(testConfig())
-	policy := DefaultPolicy(3, time.Millisecond)
+	policy := retryPolicy(3, time.Millisecond)
 	resp, err := DoWithRetry(context.Background(), policy, func(ctx context.Context) (*http.Response, error) {
 		return c.Get(ctx, srv.URL)
 	})
@@ -83,11 +89,12 @@ func TestDoWithRetryExhaustedReturnsFinalResponse(t *testing.T) {
 func TestGetBytesWithRetry404SingleAttempt(t *testing.T) {
 	srv, calls := sequenceServer(t, http.StatusNotFound)
 	cfg := testConfig()
-	cfg.RetryPolicy = DefaultPolicy(5, 0)
+	cfg.RetryPolicy = retryPolicy(5, 0)
 	c, _ := New(cfg)
 	_, err := c.GetBytesWithRetry(context.Background(), srv.URL)
-	if !IsNotFound(err) {
-		t.Errorf("err = %v, want IsNotFound", err)
+	var se *StatusError
+	if !errors.As(err, &se) || se.Code != http.StatusNotFound {
+		t.Errorf("err = %v, want a 404 *StatusError", err)
 	}
 	if got := atomic.LoadInt32(calls); got != 1 {
 		t.Errorf("attempts = %d, want 1", got)
@@ -101,7 +108,7 @@ func TestGetBytesWithRetryStatusErrorAfterExhaustion(t *testing.T) {
 		http.StatusBadGateway,
 	)
 	cfg := testConfig()
-	cfg.RetryPolicy = DefaultPolicy(3, time.Millisecond)
+	cfg.RetryPolicy = retryPolicy(3, time.Millisecond)
 	c, _ := New(cfg)
 	_, err := c.GetBytesWithRetry(context.Background(), srv.URL)
 	if err == nil {
@@ -123,7 +130,7 @@ func TestDoWithRetryTransportErrors(t *testing.T) {
 	defer okSrv.Close()
 
 	var attempts int32
-	policy := DefaultPolicy(3, time.Millisecond)
+	policy := retryPolicy(3, time.Millisecond)
 	resp, err := DoWithRetry(context.Background(), policy, func(ctx context.Context) (*http.Response, error) {
 		if atomic.AddInt32(&attempts, 1) < 3 {
 			return nil, errors.New("boom")
@@ -174,7 +181,7 @@ func TestDefaultShouldRetryMatrix(t *testing.T) {
 
 func TestDoWithRetryContextCancelDuringWait(t *testing.T) {
 	var attempts int32
-	policy := DefaultPolicy(10, 50*time.Millisecond)
+	policy := retryPolicy(10, 50*time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	_, err := DoWithRetry(ctx, policy, func(ctx context.Context) (*http.Response, error) {

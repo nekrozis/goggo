@@ -23,7 +23,7 @@ func newTestClient(t *testing.T, srv *httptest.Server, token map[string]any) *Cl
 	t.Helper()
 	hx, err := httpx.New(httpx.Config{
 		UserAgent:   "goggo-test/1.0",
-		RetryPolicy: httpx.DefaultPolicy(1, 0),
+		RetryPolicy: httpx.RetryPolicy{MaxAttempts: 1, ShouldRetry: httpx.DefaultShouldRetry},
 	})
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
@@ -113,7 +113,7 @@ func TestGetResponseHonoursTransportPolicy(t *testing.T) {
 
 	hx, err := httpx.New(httpx.Config{
 		UserAgent:   "goggo-test/1.0",
-		RetryPolicy: httpx.DefaultPolicy(3, 0),
+		RetryPolicy: httpx.RetryPolicy{MaxAttempts: 3, ShouldRetry: httpx.DefaultShouldRetry},
 	})
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)

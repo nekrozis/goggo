@@ -46,9 +46,6 @@ type downloadError struct {
 	retryable bool
 }
 
-func (e *downloadError) Error() string { return e.err.Error() }
-func (e *downloadError) Unwrap() error { return e.err }
-
 // WebsiteURLProvider resolves a website task's download url through the Galaxy
 // API: the downlink JSON document carries the "downlink" url and, for
 // installers and patches, a "checksum" url whose document holds the md5 the

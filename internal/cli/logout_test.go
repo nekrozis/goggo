@@ -65,10 +65,8 @@ func TestLogoutClearsAuthenticationStateOnly(t *testing.T) {
 	// Everything that is not authentication state, including the cache root and
 	// the XML file inside it.
 	kept := []string{
-		cfg.ConfigFilePath,
 		cfg.BlacklistFilePath,
 		cfg.IgnorelistFilePath,
-		cfg.TransformConfigFilePath,
 		filepath.Join(cfg.XMLDirectory, "game.xml"),
 	}
 	for _, p := range kept {

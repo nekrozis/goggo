@@ -169,7 +169,7 @@ func newChainFixture(t *testing.T, opts ...func(*chainFixture)) *chainFixture {
 		UserAgent: "goggo-test/1.0",
 		// The client is injected, so the package keeps building production URLs.
 		HTTPClient:  f.plainHTTP,
-		RetryPolicy: httpx.DefaultPolicy(1, 0),
+		RetryPolicy: httpx.RetryPolicy{MaxAttempts: 1, ShouldRetry: httpx.DefaultShouldRetry},
 	})
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)

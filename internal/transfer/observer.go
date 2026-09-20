@@ -6,7 +6,7 @@ import (
 )
 
 // EventKind tells the front end what kind of thing happened: one kind drives
-// the progress bar, the other four map onto ui/log's message types.
+// the progress bar, the other four carry a message with a severity.
 type EventKind int
 
 const (
@@ -20,7 +20,7 @@ const (
 )
 
 // Event is the only thing transfer emits. The front end turns it into a
-// ui/log.Message or a ui/progress.Bar fraction; transfer knows neither, and it
+// rendered line or a progress-bar fraction; transfer knows neither, and it
 // carries no verbosity level — filtering by level is the front end's decision.
 //
 // ChunkIndex is -1 for file-level events (a run starting or finishing) and 0-based

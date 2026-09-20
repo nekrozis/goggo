@@ -69,16 +69,6 @@ var SubdirOptions = []SubdirOption{
 	},
 }
 
-// SubdirOptionByName finds one domain by its option suffix.
-func SubdirOptionByName(name string) (SubdirOption, bool) {
-	for _, opt := range SubdirOptions {
-		if opt.Name == name {
-			return opt, true
-		}
-	}
-	return SubdirOption{}, false
-}
-
 // SubdirValueAccepted reports whether value is legal for one domain: any
 // literal without a placeholder passes; a value carrying '%' must be one of
 // the domain's whole allowed values.

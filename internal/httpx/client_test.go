@@ -47,7 +47,7 @@ func TestDoBytesWithRetrySendsCallerRequestEveryAttempt(t *testing.T) {
 	defer srv.Close()
 
 	cfg := testConfig()
-	cfg.RetryPolicy = DefaultPolicy(3, time.Millisecond)
+	cfg.RetryPolicy = retryPolicy(3, time.Millisecond)
 	c, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -83,7 +83,7 @@ func TestDoBytesWithRetryExhaustedStatus(t *testing.T) {
 	srv, calls := sequenceServer(t, http.StatusInternalServerError)
 
 	cfg := testConfig()
-	cfg.RetryPolicy = DefaultPolicy(2, time.Millisecond)
+	cfg.RetryPolicy = retryPolicy(2, time.Millisecond)
 	c, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -264,7 +264,10 @@ func TestGetBytesStatusError(t *testing.T) {
 	}
 }
 
-func TestStatusError404Probes(t *testing.T) {
+// TestGetBytesStatusError404 locks that a 404 surfaces as a *StatusError whose
+// Code is the response's: the same mechanism the transfer layer reads to decide
+// that a missing range must not be retried.
+func TestGetBytesStatusError404(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
@@ -272,11 +275,12 @@ func TestStatusError404Probes(t *testing.T) {
 
 	c, _ := New(testConfig())
 	_, err := c.GetBytes(context.Background(), srv.URL)
-	if !IsNotFound(err) {
-		t.Errorf("IsNotFound(%v) = false", err)
+	se, ok := err.(*StatusError)
+	if !ok {
+		t.Fatalf("error = %T, want *StatusError", err)
 	}
-	if IsForbidden(err) {
-		t.Errorf("IsForbidden(%v) = true", err)
+	if se.Code != http.StatusNotFound {
+		t.Errorf("code = %d, want 404", se.Code)
 	}
 }
 

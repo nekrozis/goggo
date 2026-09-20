@@ -15,7 +15,6 @@ func NewConfig(configHome, cacheHome string) Config {
 	var cfg Config
 
 	cfg.VersionString = VersionString
-	cfg.VersionNumber = Version
 	cfg.Curl.UserAgent = DefaultUserAgent()
 
 	// Directories. Paths are concatenated with "/", so a root that is set but
@@ -24,10 +23,8 @@ func NewConfig(configHome, cacheHome string) Config {
 	cfg.XMLDirectory = cfg.CacheDirectory + "/xml"
 	cfg.ConfigDirectory = configHome + "/" + ProgramName
 	cfg.Curl.CookiePath = cfg.ConfigDirectory + "/cookies.txt"
-	cfg.ConfigFilePath = cfg.ConfigDirectory + "/config.cfg"
 	cfg.BlacklistFilePath = cfg.ConfigDirectory + "/blacklist.txt"
 	cfg.IgnorelistFilePath = cfg.ConfigDirectory + "/ignorelist.txt"
-	cfg.TransformConfigFilePath = cfg.ConfigDirectory + "/transformations.json"
 
 	// Option defaults. The CLI option table supplies the fields not set here.
 	cfg.Directories.Directory = "."

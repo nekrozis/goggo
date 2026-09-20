@@ -261,15 +261,3 @@ func sfcMD5Hex(data []byte) string {
 	sum := md5.Sum(data)
 	return hex.EncodeToString(sum[:])
 }
-
-// planSFCMemberPaths lists the relative paths of every small-files member in
-// the plan: the orphan check counts them as present-installed files.
-func planSFCMemberPaths(plan model.DownloadPlan) []string {
-	var paths []string
-	for _, group := range plan.SFC {
-		for _, item := range group.Items {
-			paths = append(paths, item.Path)
-		}
-	}
-	return paths
-}

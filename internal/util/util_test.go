@@ -462,21 +462,6 @@ func TestCacheHomeUsesPlatformRoots(t *testing.T) {
 	}
 }
 
-func TestReplaceOnce(t *testing.T) {
-	out, ok := ReplaceOnce("abcabc", "bc", "X")
-	if !ok || out != "aXabc" {
-		t.Errorf("ReplaceOnce = %q, %v", out, ok)
-	}
-	out, ok = ReplaceOnce("abc", "zz", "X")
-	if ok || out != "abc" {
-		t.Errorf("ReplaceOnce miss = %q, %v", out, ok)
-	}
-	out, ok = ReplaceOnce("abc", "", "X")
-	if ok || out != "abc" {
-		t.Errorf("ReplaceOnce empty old = %q, %v (guard)", out, ok)
-	}
-}
-
 func TestReplaceAll(t *testing.T) {
 	out, ok := ReplaceAll("abcabc", "bc", "X")
 	if !ok || out != "aXaX" {

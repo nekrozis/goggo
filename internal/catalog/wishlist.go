@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"encoding/json/jsontext"
+
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/webapi"
 )
@@ -66,7 +68,7 @@ func Wishlist(ctx context.Context, wx WishlistFetcher, opts WishlistOptions) ([]
 func mapWishlistItem(p map[string]jsontext.Value, opts WishlistOptions) (model.WishlistItem, bool, error) {
 	var item model.WishlistItem
 
-	isMovie, err := memberBool(p["isMovie"])
+	isMovie, err := jsonread.Bool(p["isMovie"])
 	if err != nil {
 		return item, false, fmt.Errorf("catalog: isMovie: %w", err)
 	}
@@ -82,11 +84,11 @@ func mapWishlistItem(p map[string]jsontext.Value, opts WishlistOptions) (model.W
 		}
 	}
 
-	comingSoon, err := memberBool(p["isComingSoon"])
+	comingSoon, err := jsonread.Bool(p["isComingSoon"])
 	if err != nil {
 		return item, false, fmt.Errorf("catalog: isComingSoon: %w", err)
 	}
-	discounted, err := memberBool(p["isDiscounted"])
+	discounted, err := jsonread.Bool(p["isDiscounted"])
 	if err != nil {
 		return item, false, fmt.Errorf("catalog: isDiscounted: %w", err)
 	}
@@ -143,7 +145,7 @@ func mapWishlistItem(p map[string]jsontext.Value, opts WishlistOptions) (model.W
 // wishlistPlatformBits derives the worksOn mask without the "no platform means
 // all platforms" fallback the product listing applies.
 func wishlistPlatformBits(worksOn jsontext.Value) (uint32, error) {
-	obj, err := memberObject(worksOn)
+	obj, err := jsonread.Object(worksOn)
 	if err != nil || obj == nil {
 		return 0, nil
 	}
@@ -162,12 +164,12 @@ func wishlistReleaseDate(p map[string]jsontext.Value, comingSoon bool) (int64, e
 		return 0, nil
 	}
 	if v.Kind() == jsontext.KindNumber {
-		if n, err := memberInt(v); err == nil {
+		if n, err := jsonread.Int(v); err == nil {
 			return n, nil
 		}
-		// A non-integral number takes the string path.
+		// A non-integral number takes the literal path.
 	}
-	s, err := memberText(v)
+	s, err := jsonread.Scalar(v)
 	if err != nil {
 		return 0, fmt.Errorf("catalog: releaseDate: %w", err)
 	}
@@ -183,10 +185,10 @@ func isEmptyJSON(v jsontext.Value) bool {
 	case jsontext.KindInvalid, jsontext.KindNull:
 		return true
 	case jsontext.KindBeginArray:
-		arr, err := memberArray(v)
+		arr, err := jsonread.Array(v)
 		return err == nil && len(arr) == 0
 	case jsontext.KindBeginObject:
-		obj, err := memberObject(v)
+		obj, err := jsonread.Object(v)
 		return err == nil && len(obj) == 0
 	default:
 		return false
@@ -199,7 +201,7 @@ func isEmptyJSON(v jsontext.Value) bool {
 //
 // An empty URL reaches the last branch.
 func wishlistURL(v jsontext.Value) (string, error) {
-	raw, err := memberText(v)
+	raw, err := jsonread.Text(v)
 	if err != nil {
 		return "", fmt.Errorf("catalog: url: %w", err)
 	}
@@ -216,7 +218,7 @@ func wishlistURL(v jsontext.Value) (string, error) {
 // asObject returns v as a map, or nil when it is absent or not an object.
 // Indexing a nil map yields the zero value.
 func asObject(v jsontext.Value) map[string]jsontext.Value {
-	obj, err := memberObject(v)
+	obj, err := jsonread.Object(v)
 	if err != nil {
 		return nil
 	}
@@ -225,7 +227,7 @@ func asObject(v jsontext.Value) map[string]jsontext.Value {
 
 // stringField reads a string-valued member, reporting context on error.
 func stringField(obj map[string]jsontext.Value, key, field string) (string, error) {
-	s, err := memberText(obj[key])
+	s, err := jsonread.Text(obj[key])
 	if err != nil {
 		return "", fmt.Errorf("catalog: %s: %w", field, err)
 	}
@@ -234,7 +236,7 @@ func stringField(obj map[string]jsontext.Value, key, field string) (string, erro
 
 // boolField reads a boolean-valued member, reporting context on error.
 func boolField(obj map[string]jsontext.Value, key string) (bool, error) {
-	b, err := memberBool(obj[key])
+	b, err := jsonread.Bool(obj[key])
 	if err != nil {
 		return false, fmt.Errorf("catalog: %s: %w", key, err)
 	}
@@ -264,12 +266,13 @@ func percentField(obj map[string]jsontext.Value, key string) (string, error) {
 // amount becomes "0.000000" rather than "0".
 func amountString(v jsontext.Value) (string, error) {
 	if v.Kind() == jsontext.KindNumber {
-		f, err := memberFloat(v)
+		f, err := jsonread.Float(v)
 		if err != nil {
 			return "", err
 		}
 		// Six fixed decimals, never an exponent.
 		return strconv.FormatFloat(f, 'f', 6, 64), nil
 	}
-	return memberText(v)
+	// Anything else is taken as its literal form, which is the upstream rule.
+	return jsonread.Scalar(v)
 }

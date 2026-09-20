@@ -16,6 +16,7 @@ import (
 
 	"encoding/json/jsontext"
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/util"
 	"github.com/nekrozis/goggo/internal/webapi"
@@ -171,7 +172,7 @@ func fetchProducts(ctx context.Context, wx ProductFetcher, opts ListOptions) ([]
 // A failing details request is skipped: the game stays listed without DLC
 // information. No failure counter is kept, because no consumer needs one.
 func enrichDLC(ctx context.Context, wx ProductFetcher, product map[string]jsontext.Value, filters Filters, item *model.GameItem) error {
-	dlcCount, err := memberInt(product["dlcCount"])
+	dlcCount, err := jsonread.Int(product["dlcCount"])
 	if err != nil {
 		return fmt.Errorf("catalog: dlcCount: %w", err)
 	}
@@ -197,7 +198,7 @@ func enrichDLC(ctx context.Context, wx ProductFetcher, product map[string]jsonte
 
 // mapProduct turns one raw product into a GameItem plus its platform mask.
 func mapProduct(p map[string]jsontext.Value) (model.GameItem, uint32, error) {
-	name, err := memberText(p["slug"])
+	name, err := jsonread.Text(p["slug"])
 	if err != nil {
 		return model.GameItem{}, 0, fmt.Errorf("catalog: slug: %w", err)
 	}
@@ -205,7 +206,7 @@ func mapProduct(p map[string]jsontext.Value) (model.GameItem, uint32, error) {
 	if err != nil {
 		return model.GameItem{}, 0, fmt.Errorf("catalog: id: %w", err)
 	}
-	isNew, err := memberBool(p["isNew"])
+	isNew, err := jsonread.Bool(p["isNew"])
 	if err != nil {
 		return model.GameItem{}, 0, fmt.Errorf("catalog: isNew: %w", err)
 	}
@@ -229,17 +230,17 @@ func productID(v jsontext.Value) (string, error) {
 // intShapedString renders a value with the `isInt ? to_string(asInt): asString` rule
 // used for product ids and for the wishlist discount percentage.
 //
-// Only a NUMBER enters the integer branch: a boolean, a string or null must
-// stringify instead. Do not widen this gate — memberInt alone would coerce true
-// to "1".
+// Only a NUMBER enters the integer branch: a boolean, a string or null take the
+// literal form instead, which is what the upstream rule asks for and what keeps
+// a boolean from becoming the number 1.
 func intShapedString(v jsontext.Value) (string, error) {
 	if v.Kind() == jsontext.KindNumber {
-		if n, err := memberInt(v); err == nil {
+		if n, err := jsonread.Int(v); err == nil {
 			return strconv.FormatInt(n, 10), nil
 		}
-		// A non-integral number falls through to the string form below.
+		// A non-integral number falls through to the literal form below.
 	}
-	return memberText(v)
+	return jsonread.Scalar(v)
 }
 
 // productUpdates reads the update count: an absent or null member leaves it at
@@ -251,7 +252,9 @@ func productUpdates(v jsontext.Value) (int, error) {
 	if v.Kind() == jsontext.KindInvalid || v.Kind() == jsontext.KindNull {
 		return 0, nil
 	}
-	s, err := memberText(v)
+	// The upstream rule reads this field's literal form and parses its integer
+	// prefix, so a number and a text are both expected here.
+	s, err := jsonread.Scalar(v)
 	if err != nil {
 		return 0, fmt.Errorf("catalog: updates: %w", err)
 	}
@@ -287,7 +290,7 @@ func atoiPrefix(s string) int {
 // productPlatform derives the platform mask from worksOn. When the product
 // reports no platform at all, the mask becomes all platforms.
 func productPlatform(worksOn jsontext.Value) (uint32, error) {
-	obj, err := memberObject(worksOn)
+	obj, err := jsonread.Object(worksOn)
 	if err != nil || obj == nil {
 		// A missing (or non-object) worksOn reports no platform.
 		return util.OptionValue("all", config.Platforms, false), nil
@@ -314,7 +317,7 @@ func platformBits(worksOn map[string]jsontext.Value) (uint32, error) {
 		{"Mac", config.PlatformMac},
 		{"Linux", config.PlatformLinux},
 	} {
-		on, err := memberBool(worksOn[entry.key])
+		on, err := jsonread.Bool(worksOn[entry.key])
 		if err != nil {
 			return 0, fmt.Errorf("catalog: worksOn.%s: %w", entry.key, err)
 		}

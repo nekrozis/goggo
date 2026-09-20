@@ -3,8 +3,6 @@ package core
 import (
 	"strings"
 	"testing"
-
-	"github.com/nekrozis/goggo/internal/util"
 )
 
 // installManifest is a manifest shaped like the one a build returns, with a
@@ -44,10 +42,10 @@ func TestInstallSubdirTemplateTable(t *testing.T) {
 	}{
 		{"%install_dir%", "The Witcher 3: Wild Hunt - GOTY", false},
 		{"%product_id%", "1495134320", false},
-		{"%install_dir_stripped%", util.StrippedString("The Witcher 3: Wild Hunt - GOTY"), false},
+		{"%install_dir_stripped%", "The Witcher 3 Wild Hunt - GOTY", false},
 		{"%gamename%", "the_witcher_3_wild_hunt", true},
 		{"%title%", "The Witcher 3: Wild Hunt", true},
-		{"%title_stripped%", util.StrippedString("The Witcher 3: Wild Hunt"), true},
+		{"%title_stripped%", "The Witcher 3 Wild Hunt", true},
 	}
 	values := make(map[string]string, len(documented))
 	for _, d := range documented {
@@ -137,7 +135,7 @@ func TestResolveInstallSubdir(t *testing.T) {
 		{
 			name:     "install_dir_stripped",
 			template: "%install_dir_stripped%",
-			want:     util.StrippedString("The Witcher 3: Wild Hunt - GOTY"),
+			want:     "The Witcher 3 Wild Hunt - GOTY",
 		},
 		{name: "gamename is the slug", template: "%gamename%", product: installProduct(), want: "the_witcher_3_wild_hunt"},
 		{name: "title", template: "%title%", product: installProduct(), want: "The Witcher 3: Wild Hunt"},
@@ -145,7 +143,7 @@ func TestResolveInstallSubdir(t *testing.T) {
 			name:     "title_stripped comes from title",
 			template: "%title_stripped%",
 			product:  installProduct(),
-			want:     util.StrippedString("The Witcher 3: Wild Hunt"),
+			want:     "The Witcher 3 Wild Hunt",
 		},
 		{name: "plain path is untouched", template: "games", want: "games"},
 		{name: "empty stays empty", template: "", want: ""},
@@ -209,14 +207,14 @@ func TestResolveInstallSubdirEmptyProductInfo(t *testing.T) {
 			product:       map[string]any{"slug": "", "title": "A Title"},
 			gamename:      "%gamename%",
 			title:         "A Title",
-			titleStripped: util.StrippedString("A Title"),
+			titleStripped: "A Title",
 		},
 		{
 			name:          "null slug",
 			product:       map[string]any{"slug": nil, "title": "A Title"},
 			gamename:      "%gamename%",
 			title:         "A Title",
-			titleStripped: util.StrippedString("A Title"),
+			titleStripped: "A Title",
 		},
 		{
 			name:          "empty title",

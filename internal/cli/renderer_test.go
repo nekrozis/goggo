@@ -606,13 +606,10 @@ func TestZeroTransferEmitsNothing(t *testing.T) {
 	if len(s.reasons) != 1 {
 		t.Fatalf("finalize calls = %d, want the sink told once", len(s.reasons))
 	}
-	// The stats carry the empty truth; the sink's finalLines suppress the
-	// count line for a zero completed run.
+	// The stats carry the empty truth; the zero-transfer closing rule itself is
+	// TestFinalLines' subject.
 	if s.stats[0].completed != 0 {
 		t.Errorf("completed = %d, want 0", s.stats[0].completed)
-	}
-	if got := finalLines(stopCompleted, s.stats[0], ""); got != nil {
-		t.Errorf("finalLines = %q, want none for a zero-transfer run", got)
 	}
 }
 

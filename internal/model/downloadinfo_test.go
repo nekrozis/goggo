@@ -35,6 +35,11 @@ func TestDownloadInfoAccessors(t *testing.T) {
 	}
 }
 
+// TestDownloadInfoConcurrentAccess is a smoke test for the lock discipline, not
+// an accessor test: it hammers one value from nine goroutines and asserts the
+// final status. With the race detector unavailable in this build (no cgo) it can
+// only catch a panic or a deadlock; the accessor contracts live in the tests
+// above.
 func TestDownloadInfoConcurrentAccess(t *testing.T) {
 	d := NewDownloadInfo()
 	d.SetFilename("start")

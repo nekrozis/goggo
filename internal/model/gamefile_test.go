@@ -44,11 +44,7 @@ func TestGameFileMarshalJSONKeysAndTypes(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 
-	for _, k := range []string{
-		"updated", "id", "name", "path", "size", "platform", "language",
-		"silent", "gamename", "title", "gamename_basegame", "title_basegame",
-		"type", "galaxy_downlink_json_url",
-	} {
+	for _, k := range GameFileJSONKeys {
 		if _, ok := obj[k]; !ok {
 			t.Errorf("JSON missing key %q in %s", k, raw)
 		}

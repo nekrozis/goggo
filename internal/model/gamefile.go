@@ -42,6 +42,18 @@ func NewGameFile() GameFile {
 	}
 }
 
+// GameFileJSONKeys is the wire key set a GameFile serializes to. It is
+// exported because two packages implement that one wire format —
+// model.GameFile.MarshalJSON and gamedetails.GameFile.GetAsJson — and both
+// tests must assert against the same list, or a key added to one serializer
+// and forgotten in the other goes unnoticed. The order here is not the
+// contract; the membership is.
+var GameFileJSONKeys = []string{
+	"updated", "id", "name", "path", "size", "platform", "language",
+	"silent", "gamename", "title", "gamename_basegame", "title_basegame",
+	"type", "galaxy_downlink_json_url",
+}
+
 // MarshalJSON emits the version key only when non-empty; score and filepath are
 // never emitted.
 func (f GameFile) MarshalJSON() ([]byte, error) {

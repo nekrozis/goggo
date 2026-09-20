@@ -485,9 +485,19 @@ func TestLoginStreamsAndStatus(t *testing.T) {
 			d := newOfflineDownloader(t, srv, cfg, ui)
 
 			err := d.Login(context.Background())
-			if !errors.Is(err, httpx.ErrCookieFileNotConfigured) {
-				t.Fatalf("login err = %v, want the cookie-persistence limitation of the double "+
-					"(reaching it means the login itself succeeded)", err)
+			// The login itself must have completed: core's own evidence is the
+			// resolved challenge and the status lines. The sentinel below is
+			// httpx's policy for a caller-supplied HTTPClient (pinned in
+			// httpx/cookiefile_test.go) and is asserted only to keep the failure
+			// mode explicit if it changes.
+			if len(ui.challenges) != 1 {
+				t.Fatalf("challenges = %d, want exactly one resolved challenge (the login ran)", len(ui.challenges))
+			}
+			if !strings.Contains(ui.errOut.String(), "Login successful") {
+				t.Errorf("stderr = %q, want the login status lines", ui.errOut.String())
+			}
+			if err != nil && !errors.Is(err, httpx.ErrCookieFileNotConfigured) {
+				t.Fatalf("login err = %v, want nil or the double's cookie limitation", err)
 			}
 			if ui.out.Len() != 0 {
 				t.Errorf("stdout = %q, want empty: status lines belong on stderr", ui.out.String())
@@ -1050,7 +1060,9 @@ func TestRetryWaitIsMilliseconds(t *testing.T) {
 // that fails once and then answers makes one retry happen; with --wait 200 the
 // elapsed time is ~200ms, while the old microsecond reading elapsed ~0.
 func TestSessionRetryWaitReachesTheWire(t *testing.T) {
-	// The construction point itself: the policy core hands to httpx.
+	// The construction point itself: the policy core hands to httpx. Core owns
+	// the mapping from cfg.Wait; the attempt formula (min(retries,3)+1) belongs
+	// to webapi.RetryPolicyFor and is pinned in webapi/retrypolicy_test.go.
 	cfg := config.Config{}
 	cfg.Wait = 200
 	cfg.Retries = 3
@@ -1058,8 +1070,8 @@ func TestSessionRetryWaitReachesTheWire(t *testing.T) {
 	if built.RetryPolicy.Wait != 200*time.Millisecond {
 		t.Fatalf("httpxCfg policy wait = %v, want 200ms", built.RetryPolicy.Wait)
 	}
-	if built.RetryPolicy.MaxAttempts != 4 {
-		t.Errorf("httpxCfg attempts = %d, want min(3,retries)+1 = 4", built.RetryPolicy.MaxAttempts)
+	if built.RetryPolicy.MaxAttempts != cfg.Retries+1 {
+		t.Errorf("httpxCfg attempts = %d, want the retries plus the first attempt", built.RetryPolicy.MaxAttempts)
 	}
 
 	var mu sync.Mutex

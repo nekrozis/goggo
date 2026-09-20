@@ -303,6 +303,11 @@ func TestUnixModeAndSymlink(t *testing.T) {
 	}
 }
 
+// TestMalformedInputNeverPanics is a panic guard, not a behaviour test: its
+// loops discard every result on purpose. The one behavioural claim is at the
+// end (the valid archive still parses). Keep it in that role - it exists to
+// catch an index out of range on hostile input, which the table-driven tests
+// above cannot enumerate.
 func TestMalformedInputNeverPanics(t *testing.T) {
 	valid := makeZipWithComment(t, []string{"a.txt", "b.txt"}, "c")
 

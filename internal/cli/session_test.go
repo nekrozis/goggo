@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/auth"
 	"github.com/nekrozis/goggo/internal/core"
 	"github.com/nekrozis/goggo/internal/httpx"
 	"github.com/nekrozis/goggo/internal/webapi"
@@ -82,7 +82,11 @@ func TestResolveChallengeWording(t *testing.T) {
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
-	web, err := webapi.New(hx, config.NewGalaxyConfig())
+	store, err := auth.Open("")
+	if err != nil {
+		t.Fatalf("auth.Open: %v", err)
+	}
+	web, err := webapi.New(hx, store)
 	if err != nil {
 		t.Fatalf("webapi.New: %v", err)
 	}

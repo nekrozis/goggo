@@ -30,7 +30,7 @@ type Downloader struct {
 	// nil means the run reports no samples.
 	progress *transfer.Progress
 
-	token *config.GalaxyConfig
+	token *auth.Store
 
 	loggedIn bool
 }
@@ -60,7 +60,7 @@ var errNoToken = errors.New("galaxy: no valid access token and the refresh faile
 // The refresh is a safety net rather than the main path: Init runs after the
 // login phase, where the token is normally fresh already.
 func (d *Downloader) Init(ctx context.Context) error {
-	if d.token.IsExpired() {
+	if d.token.Expired() {
 		if err := d.refreshAndSave(ctx); err != nil {
 			return fmt.Errorf("%w: %v", errNoToken, err)
 		}
@@ -69,7 +69,7 @@ func (d *Downloader) Init(ctx context.Context) error {
 	// A stored payload that is still expired gets one more refresh, and a
 	// failure there is silent. The branch above leaves the token fresh, so this
 	// is unreachable in practice.
-	if len(d.token.GetJSON()) != 0 && d.token.IsExpired() {
+	if !d.token.Empty() && d.token.Expired() {
 		_ = d.refreshAndSave(ctx)
 	}
 	return nil
@@ -77,8 +77,8 @@ func (d *Downloader) Init(ctx context.Context) error {
 
 // refreshAndSave refreshes the Galaxy token and persists it.
 func (d *Downloader) refreshAndSave(ctx context.Context) error {
-	if err := auth.NewClient(d.http).Refresh(ctx, d.token); err != nil {
+	if err := d.token.Refresh(ctx, auth.NewClient(d.http)); err != nil {
 		return err
 	}
-	return auth.SaveTokenFile(d.token, d.token.GetFilepath())
+	return d.token.Save()
 }

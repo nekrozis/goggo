@@ -43,7 +43,7 @@ var _ gamedetails.DownlinkResolver = (*gamedetailsResolver)(nil).Resolve
 func (d *Downloader) gamedetailsResolver() *gamedetailsResolver {
 	return &gamedetailsResolver{
 		galaxy:  d.galaxy,
-		refresh: tokenRefresher{refresh: d.refreshAndSave, expired: func() bool { return d.token.IsExpired() }},
+		refresh: tokenRefresher{refresh: d.refreshAndSave, expired: func() bool { return d.token.Expired() }},
 	}
 }
 

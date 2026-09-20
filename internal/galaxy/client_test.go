@@ -12,9 +12,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/auth"
 	"github.com/nekrozis/goggo/internal/httpx"
 )
+
+// newEmptyStore returns an empty credential store: these tests exercise the
+// request the client builds, not the credentials behind it.
+func newEmptyStore(t *testing.T) *auth.Store {
+	t.Helper()
+	s, err := auth.Open("")
+	if err != nil {
+		t.Fatalf("auth.Open: %v", err)
+	}
+	return s
+}
 
 // newTestClient wires a Client to srv with the token state the test needs.
 // Overriding the unexported endpoints block is the same technique the webapi
@@ -28,11 +39,11 @@ func newTestClient(t *testing.T, srv *httptest.Server, token map[string]any) *Cl
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
-	galaxy := config.NewGalaxyConfig()
+	store := newEmptyStore(t)
 	if token != nil {
-		galaxy.SetJSON(token)
+		store.StoreLoginResponse(token)
 	}
-	cl, err := New(hx, galaxy)
+	cl, err := New(hx, store)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -48,11 +59,11 @@ func TestNewRejectsNilArguments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
-	if _, err := New(nil, config.NewGalaxyConfig()); err == nil {
+	if _, err := New(nil, newEmptyStore(t)); err == nil {
 		t.Error("a nil http client must be an error")
 	}
 	if _, err := New(hx, nil); err == nil {
-		t.Error("a nil galaxy config must be an error")
+		t.Error("a nil credential source must be an error")
 	}
 }
 
@@ -118,7 +129,7 @@ func TestGetResponseHonoursTransportPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
-	cl, err := New(hx, config.NewGalaxyConfig())
+	cl, err := New(hx, newEmptyStore(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

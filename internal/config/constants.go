@@ -28,6 +28,19 @@ const (
 	UnitStringMSI  = "MB"
 )
 
+// Galaxy OAuth client identity and redirect URI: protocol/client credentials —
+// goggo's Galaxy client identity to the OAuth server; not a user authentication
+// secret. They are the same for every user, they are not derived from anyone's
+// account, and they are the fallback whenever the stored token JSON carries no
+// client_id/client_secret override. The user authentication secrets — the access
+// token, the refresh token, the cookies, the password — are a different class and
+// are not part of this table.
+const (
+	DefaultClientID     = "46899977096215655"
+	DefaultClientSecret = "9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9"
+	DefaultRedirectURI  = "https://embed.gog.com/on_login_success?origin=client"
+)
+
 // ProgramName is this implementation's identity: the binary name, the CLI name and
 // the User-Agent product token. Version is this implementation's own version, and
 // UpstreamCompatibilityVersion is the LGOGDownloader release whose behaviour this

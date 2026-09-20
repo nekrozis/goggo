@@ -387,7 +387,7 @@ func TestDownloadWebsiteRefreshFailureIsNotSwallowed(t *testing.T) {
 	d := newGameInfoDownloader(t, f, cfg)
 	// Expire the token and break the refresh endpoint: the run cannot even
 	// acquire, and the reason must travel.
-	d.token.SetJSON(map[string]any{"access_token": "a", "expires_at": 1})
+	d.token.StoreLoginResponse(map[string]any{"access_token": "a", "expires_at": 1})
 	f.setFailure("/token", 500)
 
 	_, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)

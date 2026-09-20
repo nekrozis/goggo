@@ -313,7 +313,7 @@ func gameInfoConfigIn(t *testing.T, dir string) config.Config {
 func newGameInfoDownloader(t *testing.T, f *gameInfoFixture, cfg config.Config) *Downloader {
 	t.Helper()
 	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
-	d.token.SetJSON(map[string]any{"access_token": "a", "refresh_token": "r", "expires_in": 3600})
+	d.token.StoreLoginResponse(map[string]any{"access_token": "a", "refresh_token": "r", "expires_in": 3600})
 	return d
 }
 
@@ -785,7 +785,7 @@ func TestGameDetailsRefreshesBeforeTheFirstRequest(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
-	d.token.SetJSON(map[string]any{"access_token": "old", "refresh_token": "r", "expires_in": -1})
+	d.token.StoreLoginResponse(map[string]any{"access_token": "old", "refresh_token": "r", "expires_in": -1})
 
 	res, err := d.GameDetails(context.Background(), GameDetailsRequest{
 		Products: []string{"100", "200", "300"},

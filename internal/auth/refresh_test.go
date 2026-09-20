@@ -3,8 +3,11 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -52,6 +55,14 @@ func newClientFor(t *testing.T, base string) *Client {
 	return c
 }
 
+// testStore returns a store holding one login response.
+func testStore(t *testing.T, token map[string]any) *Store {
+	t.Helper()
+	s := newTestStore(t)
+	s.StoreLoginResponse(token)
+	return s
+}
+
 // TestRefreshErrorHidesCredentials: the refresh request URL carries
 // client_secret and refresh_token, so a failing request must be rendered without
 // it (httpx.SafeError). Without this, a future edit that goes back to %w would
@@ -59,9 +70,9 @@ func newClientFor(t *testing.T, base string) *Client {
 func TestRefreshErrorHidesCredentials(t *testing.T) {
 	srv, cap := refreshServer(t, nil, http.StatusInternalServerError)
 	c := newClientFor(t, srv.URL)
-	g := testGalaxy(t, tokenMap(map[string]any{"refresh_token": "rt-secret"}))
+	s := testStore(t, tokenResponse(map[string]any{"refresh_token": "rt-secret"}))
 
-	err := c.Refresh(context.Background(), g)
+	err := s.Refresh(context.Background(), c)
 	if err == nil {
 		t.Fatal("Refresh must fail on a 500 response")
 	}
@@ -86,11 +97,16 @@ func TestRefreshSuccess(t *testing.T) {
 		"refresh_token": "rt-2",
 		"expires_in":    3600,
 		"user_id":       "u7",
+		// A response carrying its own client identity: the store's must win,
+		// which is what the injection before storing is for.
+		"client_id":     "server-id",
+		"client_secret": "server-secret",
 	}, http.StatusOK)
 	c := newClientFor(t, srv.URL)
-	g := testGalaxy(t, tokenMap(map[string]any{"refresh_token": "rt-1"}))
+	s, path := newBoundStore(t)
+	s.StoreLoginResponse(tokenResponse(map[string]any{"refresh_token": "rt-1"}))
 
-	if err := c.Refresh(context.Background(), g); err != nil {
+	if err := s.Refresh(context.Background(), c); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
 	if !cap.has("grant_type", "refresh_token") {
@@ -105,18 +121,20 @@ func TestRefreshSuccess(t *testing.T) {
 	if cap.has("without_new_session", "1") {
 		t.Errorf("query %q: newSession=true must NOT send without_new_session", cap.rawQuery)
 	}
-	if got := g.GetAccessToken(); got != "at-2" {
-		t.Errorf("access token = %q, want at-2", got)
+	if got := s.AuthorizationValue(); got != "Bearer at-2" {
+		t.Errorf("AuthorizationValue() = %q, want the refreshed token", got)
 	}
-	if got := g.GetJSON()["client_id"]; got != config.DefaultClientID {
-		t.Errorf("stored client_id = %v, want injected default", got)
+	if got := s.ClientID(); got != config.DefaultClientID {
+		t.Errorf("ClientID() = %q, want the store's identity to survive the response's", got)
 	}
-	if got := g.GetJSON()["client_secret"]; got != config.DefaultClientSecret {
-		t.Errorf("stored client_secret = %v, want injected default", got)
+	if got := s.ClientSecret(); got != config.DefaultClientSecret {
+		t.Errorf("ClientSecret() = %q, want the store's identity to survive the response's", got)
 	}
-	// Refresh must not persist anything implicitly.
-	if got := g.GetFilepath(); got != "" {
-		t.Errorf("unexpected filepath set: %q", got)
+	// Refresh must not persist anything implicitly: the caller decides when to
+	// save, because a refresh that succeeds in memory and then fails to write is
+	// a different outcome from one that never happened.
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("Refresh wrote %q, want no implicit save", path)
 	}
 }
 
@@ -126,9 +144,8 @@ func TestRefreshSuccess(t *testing.T) {
 func TestRefreshEmptyRefreshTokenError(t *testing.T) {
 	srv, _ := refreshServer(t, map[string]any{"access_token": "at"}, http.StatusOK)
 	c := newClientFor(t, srv.URL)
-	g := config.NewGalaxyConfig() // empty store
 
-	if err := c.Refresh(context.Background(), g); err == nil {
+	if err := newTestStore(t).Refresh(context.Background(), c); err == nil {
 		t.Fatal("Refresh: want error for missing refresh token")
 	}
 }
@@ -138,22 +155,21 @@ func TestRefreshEmptyRefreshTokenError(t *testing.T) {
 func TestRefreshNonEmptyJSONWithoutAccessTokenSucceeds(t *testing.T) {
 	srv, _ := refreshServer(t, map[string]any{"weird": "but-nonempty"}, http.StatusOK)
 	c := newClientFor(t, srv.URL)
-	g := testGalaxy(t, tokenMap())
+	s := testStore(t, tokenResponse())
 
-	if err := c.Refresh(context.Background(), g); err != nil {
+	if err := s.Refresh(context.Background(), c); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
-	if got := g.GetJSON()["weird"]; got != "but-nonempty" {
-		t.Errorf("stored weird field = %v", got)
+	if s.Empty() {
+		t.Error("Empty() = true, want the response to have been stored")
 	}
 }
 
 func TestRefreshHTTPError(t *testing.T) {
 	srv, _ := refreshServer(t, nil, http.StatusInternalServerError)
 	c := newClientFor(t, srv.URL)
-	g := testGalaxy(t, tokenMap())
 
-	if err := c.Refresh(context.Background(), g); err == nil {
+	if err := testStore(t, tokenResponse()).Refresh(context.Background(), c); err == nil {
 		t.Fatal("Refresh: want error on HTTP 500")
 	}
 }
@@ -165,9 +181,8 @@ func TestRefreshNonObjectBodyError(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := newClientFor(t, srv.URL)
-	g := testGalaxy(t, tokenMap())
 
-	if err := c.Refresh(context.Background(), g); err == nil {
+	if err := testStore(t, tokenResponse()).Refresh(context.Background(), c); err == nil {
 		t.Fatal("Refresh: want error for non-object response")
 	}
 }
@@ -177,10 +192,10 @@ func TestRefreshNonObjectBodyError(t *testing.T) {
 func TestRefreshWithoutNewSessionVariant(t *testing.T) {
 	srv, cap := refreshServer(t, map[string]any{"access_token": "at-2", "refresh_token": "rt-2"}, http.StatusOK)
 	c := newClientFor(t, srv.URL)
-	g := testGalaxy(t, tokenMap())
+	s := testStore(t, tokenResponse())
 
-	if err := c.refreshSession(context.Background(), g, false); err != nil {
-		t.Fatalf("refreshSession(false): %v", err)
+	if err := c.refresh(context.Background(), s, false); err != nil {
+		t.Fatalf("refresh(false): %v", err)
 	}
 	if !cap.has("without_new_session", "1") {
 		t.Errorf("query %q misses without_new_session=1", cap.rawQuery)

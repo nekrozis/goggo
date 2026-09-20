@@ -158,7 +158,7 @@ func TestInstallEndToEnd(t *testing.T) {
 	d := newOfflineDownloader(t, f.Server, cfg, console)
 	// The offline downloader builds an empty credential store; give it a fresh
 	// token so the transfer's per-chunk expiry checks pass without a refresh.
-	d.token.SetJSON(map[string]any{
+	d.token.StoreLoginResponse(map[string]any{
 		"access_token": "at", "refresh_token": "rt", "expires_in": 3600, "user_id": "u1",
 	})
 	if err := d.Install(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact)); err != nil {
@@ -295,7 +295,7 @@ func TestInstallPublishesProgressThroughTheRun(t *testing.T) {
 		Dependencies{Progress: progress, HTTPTransport: gate})
 	// The offline downloader builds an empty credential store; give it a fresh
 	// token so the transfer's per-chunk expiry checks pass without a refresh.
-	d.token.SetJSON(map[string]any{
+	d.token.StoreLoginResponse(map[string]any{
 		"access_token": "at", "refresh_token": "rt", "expires_in": 3600, "user_id": "u1",
 	})
 

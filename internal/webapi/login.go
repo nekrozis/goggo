@@ -142,8 +142,8 @@ type loginStep struct {
 // Login performs the website OAuth login up to the first interaction it needs,
 // and returns:
 //
-//   - nil challenge, nil error: login completed; tokens are in the GalaxyConfig
-//     passed at construction;
+//   - nil challenge, nil error: login completed; tokens are in the credential
+//     store passed at construction;
 //   - challenge, nil error: user interaction is required — call ContinueLogin;
 //   - nil challenge, error: login failed.
 //
@@ -386,11 +386,11 @@ func (c *Client) finishWithCode(ctx context.Context, code string) error {
 // further (error handling, endpoints, client credentials).
 func (c *Client) exchangeCode(ctx context.Context, code string) error {
 	q := url.Values{}
-	q.Set("client_id", c.galaxy.GetClientID())
-	q.Set("client_secret", c.galaxy.GetClientSecret())
+	q.Set("client_id", c.galaxy.ClientID())
+	q.Set("client_secret", c.galaxy.ClientSecret())
 	q.Set("grant_type", "authorization_code")
 	q.Set("code", code)
-	q.Set("redirect_uri", c.galaxy.GetRedirectURI())
+	q.Set("redirect_uri", c.galaxy.RedirectURI())
 	tokenBody, err := c.getResponse(ctx, c.ep.auth+"/token?"+q.Encode())
 	if err != nil {
 		// This URL carries client_secret and the one-time code, so it is
@@ -401,7 +401,7 @@ func (c *Client) exchangeCode(ctx context.Context, code string) error {
 	if err != nil {
 		return fmt.Errorf("webapi: parse token response: %w", err)
 	}
-	c.galaxy.SetJSON(token)
+	c.galaxy.StoreLoginResponse(token)
 	return nil
 }
 
@@ -440,12 +440,12 @@ func (c *Client) walkRedirectChain(ctx context.Context, redirectURL string) (cod
 func (c *Client) postForm(ctx context.Context, target, body string) (responseMeta, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(body))
 	if err != nil {
-		return responseMeta{}, err
+		return responseMeta{}, httpx.SanitizeError(err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := c.hx.DoNoRedirect(ctx, req)
 	if err != nil {
-		return responseMeta{}, err
+		return responseMeta{}, httpx.SanitizeError(err)
 	}
 	return drainResponse(req.URL, resp), nil
 }

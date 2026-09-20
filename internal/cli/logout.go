@@ -7,8 +7,8 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/nekrozis/goggo/internal/auth"
 	"github.com/nekrozis/goggo/internal/config"
-	"github.com/nekrozis/goggo/internal/core"
 )
 
 // logout clears the local login state: the Galaxy token store and the cookie
@@ -24,10 +24,11 @@ import (
 // genuine removal failure returns an error, naming the path; the success line is
 // then not printed, and a failure on the second path leaves the first gone.
 func logout(cfg config.Config, out io.Writer) error {
-	for _, path := range []string{core.TokenPath(cfg), cfg.Curl.CookiePath} {
-		if err := removeAuthFile(path); err != nil {
-			return err
-		}
+	if err := auth.RemoveStore(auth.StorePath(cfg)); err != nil {
+		return err
+	}
+	if err := removeAuthFile(cfg.Curl.CookiePath); err != nil {
+		return err
 	}
 	fmt.Fprintln(out, "Local login state cleared")
 	return nil

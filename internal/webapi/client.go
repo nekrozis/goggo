@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"regexp"
 
-	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/httpx"
 )
 
@@ -33,10 +32,22 @@ func defaultEndpoints() endpoints {
 	return endpoints{auth: DefaultAuthHost, login: DefaultLoginHost, www: DefaultWWWHost, embed: DefaultEmbedHost}
 }
 
+// ClientIdentity is what the website client needs from the credential seam:
+// the OAuth client identity plus the one write path for a login response. The
+// reset restores the default identity before a login, so a stored override
+// cannot leak into a fresh authorization.
+type ClientIdentity interface {
+	ClientID() string
+	ClientSecret() string
+	RedirectURI() string
+	ResetClient()
+	StoreLoginResponse(map[string]any)
+}
+
 // Client drives the GOG website login flow over an httpx transport.
 type Client struct {
 	ep     endpoints
-	galaxy *config.GalaxyConfig
+	galaxy ClientIdentity
 	hx     *httpx.Client
 }
 
@@ -47,7 +58,7 @@ type Client struct {
 // the same cookie jar — serves the login flow and session persistence
 // (LoadCookies/SaveCookies). Retry behaviour is the caller's too, see
 // RetryPolicyFor.
-func New(hx *httpx.Client, galaxy *config.GalaxyConfig) (*Client, error) {
+func New(hx *httpx.Client, galaxy ClientIdentity) (*Client, error) {
 	if galaxy == nil {
 		return nil, errors.New("webapi: nil galaxy config")
 	}
@@ -64,8 +75,8 @@ func New(hx *httpx.Client, galaxy *config.GalaxyConfig) (*Client, error) {
 // authURL builds the OAuth authorize URL.
 func (c *Client) authURL() string {
 	q := url.Values{}
-	q.Set("client_id", c.galaxy.GetClientID())
-	q.Set("redirect_uri", c.galaxy.GetRedirectURI())
+	q.Set("client_id", c.galaxy.ClientID())
+	q.Set("redirect_uri", c.galaxy.RedirectURI())
 	q.Set("response_type", "code")
 	q.Set("layout", "default")
 	q.Set("brand", "gog")
@@ -126,11 +137,11 @@ func drainResponse(reqURL *url.URL, resp *http.Response) responseMeta {
 func (c *Client) noRedirectGet(ctx context.Context, target string) (responseMeta, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		return responseMeta{}, err
+		return responseMeta{}, httpx.SanitizeError(err)
 	}
 	resp, err := c.hx.DoNoRedirect(ctx, req)
 	if err != nil {
-		return responseMeta{}, err
+		return responseMeta{}, httpx.SanitizeError(err)
 	}
 	return drainResponse(req.URL, resp), nil
 }

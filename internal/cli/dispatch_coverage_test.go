@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/nekrozis/goggo/internal/auth"
 	"github.com/nekrozis/goggo/internal/core"
 )
 
@@ -200,8 +201,8 @@ func TestAuthLoginSucceedsAndExitsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newConfig: %v", err)
 	}
-	if _, err := os.Stat(core.TokenPath(cfg)); err != nil {
-		t.Errorf("token file %q was not written: %v", core.TokenPath(cfg), err)
+	if _, err := os.Stat(auth.StorePath(cfg)); err != nil {
+		t.Errorf("token file %q was not written: %v", auth.StorePath(cfg), err)
 	}
 	if _, err := os.Stat(filepath.Join(cfg.ConfigDirectory, "cookies.txt")); err != nil {
 		t.Errorf("cookie file was not written: %v", err)

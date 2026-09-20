@@ -38,7 +38,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/auth"
 	"github.com/nekrozis/goggo/internal/galaxy"
 	"github.com/nekrozis/goggo/internal/httpx"
 )
@@ -174,9 +174,12 @@ func newChainFixture(t *testing.T, opts ...func(*chainFixture)) *chainFixture {
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
-	galaxyCfg := config.NewGalaxyConfig()
-	galaxyCfg.SetJSON(map[string]any{"access_token": chainToken, "expires_in": 3600})
-	f.client, err = galaxy.New(hx, galaxyCfg)
+	store, err := auth.Open("")
+	if err != nil {
+		t.Fatalf("auth.Open: %v", err)
+	}
+	store.StoreLoginResponse(map[string]any{"access_token": chainToken, "expires_in": 3600})
+	f.client, err = galaxy.New(hx, store)
 	if err != nil {
 		t.Fatalf("galaxy.New: %v", err)
 	}

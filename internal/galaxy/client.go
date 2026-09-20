@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/httpx"
 	"github.com/nekrozis/goggo/internal/jsonval"
 )
@@ -37,26 +36,30 @@ func defaultEndpoints() endpoints {
 	return endpoints{contentSystem: DefaultContentSystemHost, cdn: DefaultCDNHost, api: DefaultAPIHost}
 }
 
+// AuthorizationSource is what the Galaxy API client needs from the credential
+// seam: the header value, never the token behind it.
+type AuthorizationSource interface{ AuthorizationValue() string }
+
 // Client drives the Galaxy content API over an httpx transport.
 type Client struct {
-	ep     endpoints
-	galaxy *config.GalaxyConfig
-	hx     *httpx.Client
+	ep    endpoints
+	authz AuthorizationSource
+	hx    *httpx.Client
 }
 
-// New builds a Client on a caller-provided transport and token store. Both
-// arguments are required; a nil one is an error.
-func New(hx *httpx.Client, galaxy *config.GalaxyConfig) (*Client, error) {
-	if galaxy == nil {
+// New builds a Client on a caller-provided transport and credential source.
+// Both arguments are required; a nil one is an error.
+func New(hx *httpx.Client, authz AuthorizationSource) (*Client, error) {
+	if authz == nil {
 		return nil, errors.New("galaxy: nil galaxy config")
 	}
 	if hx == nil {
 		return nil, errors.New("galaxy: nil http client")
 	}
 	return &Client{
-		ep:     defaultEndpoints(),
-		galaxy: galaxy,
-		hx:     hx,
+		ep:    defaultEndpoints(),
+		authz: authz,
+		hx:    hx,
 	}, nil
 }
 
@@ -65,15 +68,11 @@ func New(hx *httpx.Client, galaxy *config.GalaxyConfig) (*Client, error) {
 // field-level problems are wrapped with context by the caller.
 var ErrNotJSON = errors.New("galaxy: response was not JSON")
 
-// bearer returns the token to attach, or "" when no Authorization header must
-// be sent. An expired store never contributes a token, and neither does an
-// empty one: the request then goes out unauthenticated and the server's answer
-// decides the outcome.
-func (c *Client) bearer() string {
-	if c.galaxy.IsExpired() {
-		return ""
-	}
-	return c.galaxy.GetAccessToken()
+// authorization returns the Authorization header value, or "" when no header
+// must be sent. An expired or empty store never contributes a value: the request
+// then goes out unauthenticated and the server's answer decides the outcome.
+func (c *Client) authorization() string {
+	return c.authz.AuthorizationValue()
 }
 
 // getResponse fetches target and returns the body.
@@ -84,10 +83,10 @@ func (c *Client) bearer() string {
 func (c *Client) getResponse(ctx context.Context, target string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		return "", err
+		return "", httpx.SanitizeError(err)
 	}
-	if tok := c.bearer(); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
+	if v := c.authorization(); v != "" {
+		req.Header.Set("Authorization", v)
 	}
 	body, err := c.hx.DoBytesWithRetry(ctx, req)
 	if err != nil {

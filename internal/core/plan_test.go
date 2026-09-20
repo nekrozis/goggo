@@ -726,7 +726,7 @@ func TestBuildPlanInstallDirTemplateNeedsProductInfo(t *testing.T) {
 			// The plan refreshes an expired token before it reads the document;
 			// a fresh one keeps the credential refresh (and its token file) out
 			// of a test about the install directory.
-			d.token.SetJSON(map[string]any{"access_token": "a", "refresh_token": "r", "expires_in": 3600})
+			d.token.StoreLoginResponse(map[string]any{"access_token": "a", "refresh_token": "r", "expires_in": 3600})
 
 			res, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
 			if err != nil {

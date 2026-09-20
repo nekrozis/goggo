@@ -87,7 +87,7 @@ func newSFCInstallFixture(t *testing.T, containerBody string, serveOwnChunk bool
 func (fi *sfcInstallFixture) downloader(t *testing.T, console *fakeConsole) *Downloader {
 	t.Helper()
 	d := newOfflineDownloader(t, fi.f.Server, fi.cfg, console)
-	d.token.SetJSON(map[string]any{
+	d.token.StoreLoginResponse(map[string]any{
 		"access_token": "at", "refresh_token": "rt", "expires_in": 3600, "user_id": "u1",
 	})
 	return d

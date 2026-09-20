@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"time"
 
@@ -62,39 +61,38 @@ func OpenWith(ctx context.Context, cfg config.Config, ui Console, req SessionReq
 	if err := ensureDirectories(cfg); err != nil {
 		return nil, err
 	}
-	galaxyStore := config.NewGalaxyConfig()
+	store, err := auth.Open(auth.StorePath(cfg))
+	if err != nil {
+		return nil, err
+	}
 	// The session owns the transport: the login flow's cookies live in this
 	// client's jar, and the same handle persists them.
 	hx, err := httpx.New(httpxCfg(cfg, deps))
 	if err != nil {
 		return nil, err
 	}
-	web, err := webapi.New(hx, galaxyStore)
+	web, err := webapi.New(hx, store)
 	if err != nil {
 		return nil, err
 	}
-	gx, err := galaxy.New(hx, galaxyStore)
+	gx, err := galaxy.New(hx, store)
 	if err != nil {
 		return nil, err
 	}
 
-	d := &Downloader{cfg: cfg, ui: ui, http: hx, web: web, galaxy: gx, progress: deps.Progress, token: galaxyStore}
+	d := &Downloader{cfg: cfg, ui: ui, http: hx, web: web, galaxy: gx, progress: deps.Progress, token: store}
 	if err := hx.LoadCookies(); err != nil {
 		return nil, err
 	}
-	if err := auth.LoadTokenFile(d.token, TokenPath(cfg)); err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
-			return nil, err
-		}
-		// No token file yet: a fresh install, which leaves the store empty.
-	}
-	d.token.SetFilepath(TokenPath(cfg))
 
-	if d.token.IsExpired() && d.token.GetRefreshToken() != "" {
-		if err := auth.NewClient(hx).Refresh(ctx, d.token); err == nil {
-			_ = auth.SaveTokenFile(d.token, d.token.GetFilepath())
+	// An expired store with a session to renew is refreshed before anything
+	// asks for a credential; Refresh reports a store with no refresh token
+	// without a request, and a failed refresh is not fatal here — the login
+	// flow below decides.
+	if store.Expired() && !store.Empty() {
+		if err := store.Refresh(ctx, auth.NewClient(hx)); err == nil {
+			_ = store.Save()
 		}
-		// A failed refresh is not fatal here: the login flow below decides.
 	}
 
 	d.loggedIn = d.checkLoggedIn(ctx)
@@ -146,13 +144,6 @@ func retryWait(cfg config.Config) time.Duration {
 	return time.Duration(cfg.Wait) * time.Millisecond
 }
 
-// TokenPath is the Galaxy token store location. It is exported
-// because the location is this layer's to define: Open loads and saves through
-// it, and the front end's local logout removes exactly this file.
-func TokenPath(cfg config.Config) string {
-	return cfg.ConfigDirectory + "/galaxy_tokens.json"
-}
-
 // checkLoggedIn probes the website session and requires an unexpired Galaxy
 // token.
 func (d *Downloader) checkLoggedIn(ctx context.Context) bool {
@@ -160,7 +151,7 @@ func (d *Downloader) checkLoggedIn(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	return ok && !d.token.IsExpired()
+	return ok && !d.token.Expired()
 }
 
 // ensureDirectories creates the per-user directories the program writes to: the
@@ -179,19 +170,16 @@ func ensureDirectories(cfg config.Config) error {
 	return nil
 }
 
-// credentials resolves the credentials the login flow needs: a supplied pair
-// (flags or configuration) is used as it is; with --browser-login the
-// credentials are irrelevant, so an empty pair is not an error; otherwise a
-// non-terminal input takes the headless branch, which names the files it
-// expects instead of prompting — and a PARTIALLY supplied pair takes that
-// branch too, since a lone --login-email is not used without a terminal;
-// otherwise each MISSING value is asked for on demand, and a value still empty
-// is an error.
+// credentials resolves the credentials the login flow needs: the email may be
+// supplied (the --email flag); the password never is, it only ever comes from the
+// prompt. With --browser-login the credentials are irrelevant, so an empty pair
+// is not an error; otherwise a non-terminal input takes the headless branch,
+// which names the files it expects instead of prompting — and an email supplied
+// without a terminal takes that branch too, since a lone --email is not used
+// without a terminal; otherwise each MISSING value is asked for on demand, and a
+// value still empty is an error.
 func credentials(cfg config.Config, ui Console, interactive bool) (email, password string, err error) {
-	email, password = cfg.Email, cfg.Password
-	if email != "" && password != "" {
-		return email, password, nil
-	}
+	email = cfg.Email
 	if cfg.ForceBrowserLogin {
 		return email, password, nil
 	}
@@ -203,10 +191,8 @@ func credentials(cfg config.Config, ui Console, interactive bool) (email, passwo
 			return "", "", err
 		}
 	}
-	if password == "" {
-		if password, err = ui.PromptPassword(); err != nil {
-			return "", "", err
-		}
+	if password, err = ui.PromptPassword(); err != nil {
+		return "", "", err
 	}
 	if email == "" || password == "" {
 		return "", "", errors.New("Email and/or password empty")
@@ -225,7 +211,7 @@ func credentials(cfg config.Config, ui Console, interactive bool) (email, passwo
 // allowed solely when a terminal can answer it (see SessionRequest.AllowLogin).
 func headlessCredentials(cfg config.Config, ui Console) error {
 	fmt.Fprintln(ui.Out(), cfg.Curl.CookiePath)
-	fmt.Fprintln(ui.Out(), TokenPath(cfg))
+	fmt.Fprintln(ui.Out(), auth.StorePath(cfg))
 	return errors.New("no credentials available in a non-interactive session; " +
 		"run `goggo auth login` in a terminal")
 }
@@ -253,7 +239,7 @@ func (d *Downloader) Login(ctx context.Context) error {
 	fmt.Fprintln(d.ui.ErrOut(), "Galaxy: Login successful")
 
 	// Persist what the login produced: the token file and the cookie jar.
-	if err := auth.SaveTokenFile(d.token, d.token.GetFilepath()); err != nil {
+	if err := d.token.Save(); err != nil {
 		return err
 	}
 

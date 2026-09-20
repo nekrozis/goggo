@@ -171,7 +171,12 @@ func newOfflineDownloaderWith(t *testing.T, srv *httptest.Server, cfg config.Con
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
-	store := config.NewGalaxyConfig()
+	// The store is opened at the production location, so a run that refreshes or
+	// logs in persists exactly where a real one does.
+	store, err := auth.Open(auth.StorePath(cfg))
+	if err != nil {
+		t.Fatalf("auth.Open: %v", err)
+	}
 	web, err := webapi.New(hx, store)
 	if err != nil {
 		t.Fatalf("webapi.New: %v", err)
@@ -180,7 +185,6 @@ func newOfflineDownloaderWith(t *testing.T, srv *httptest.Server, cfg config.Con
 	if err != nil {
 		t.Fatalf("galaxy.New: %v", err)
 	}
-	store.SetFilepath(TokenPath(cfg))
 	return &Downloader{cfg: cfg, ui: ui, http: hx, web: web, galaxy: gx, progress: deps.Progress, token: store}
 }
 
@@ -254,7 +258,6 @@ func TestCredentialsPromptOnDemand(t *testing.T) {
 		name         string
 		interactive  bool
 		email        string
-		password     string
 		forceBrowser bool
 		answers      []string
 		want         [2]string
@@ -263,10 +266,6 @@ func TestCredentialsPromptOnDemand(t *testing.T) {
 		{
 			name: "email flag only", interactive: true, email: "a@b", answers: []string{"pw"},
 			want: [2]string{"a@b", "pw"}, wantPrompts: []string{"password"},
-		},
-		{
-			name: "both flags", interactive: true, email: "a@b", password: "pw",
-			want: [2]string{"a@b", "pw"},
 		},
 		{
 			name: "no flags", interactive: true, answers: []string{"a@b", "pw"},
@@ -282,7 +281,7 @@ func TestCredentialsPromptOnDemand(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			ui := newFakeConsole(c.answers...)
 			cfg := config.NewConfig("/cfg", "/cache")
-			cfg.Email, cfg.Password = c.email, c.password
+			cfg.Email = c.email
 			cfg.ForceBrowserLogin = c.forceBrowser
 
 			email, password, err := credentials(cfg, ui, c.interactive)
@@ -327,7 +326,7 @@ func TestCredentialsHeadless(t *testing.T) {
 		t.Helper()
 		dir := t.TempDir()
 		cfg := config.NewConfig(dir, dir)
-		return cfg, cfg.Curl.CookiePath, TokenPath(cfg)
+		return cfg, cfg.Curl.CookiePath, auth.StorePath(cfg)
 	}
 
 	// run drives the branch and returns everything the caller can observe.
@@ -397,8 +396,9 @@ func TestCredentialsHeadless(t *testing.T) {
 	})
 
 	t.Run("email only falls through to the branch", func(t *testing.T) {
-		//
-		// not become a password-less login.
+		// A configured email cannot pair with a password that was never asked
+		// for: without a terminal the flow must not become a password-less
+		// login.
 		cfg, _, _ := newCfg(t)
 		cfg.Email = "a@b"
 		err, out, errOut := runHeadless(t, cfg)
@@ -409,26 +409,8 @@ func TestCredentialsHeadless(t *testing.T) {
 		if errOut != "" {
 			t.Errorf("stderr = %q, want no prompt", errOut)
 		}
-		if !strings.Contains(out, TokenPath(cfg)) {
+		if !strings.Contains(out, auth.StorePath(cfg)) {
 			t.Errorf("stdout = %q, want the token path", out)
-		}
-	})
-
-	t.Run("supplied pair skips the branch", func(t *testing.T) {
-		cfg, _, _ := newCfg(t)
-		cfg.Email, cfg.Password = "a@b", "pw"
-		ui := newFakeConsole()
-
-		email, password, err := credentials(cfg, ui, false)
-		if err != nil {
-			t.Fatalf("credentials: %v", err)
-		}
-		if email != "a@b" || password != "pw" {
-			t.Errorf("credentials = %q/%q, want the supplied pair", email, password)
-		}
-		if ui.out.Len() != 0 || ui.errOut.Len() != 0 {
-			t.Errorf("output = %q / %q, want nothing (the credential pair is read first)",
-				ui.out.String(), ui.errOut.String())
 		}
 	})
 }
@@ -473,7 +455,7 @@ func TestLoginStreamsAndStatus(t *testing.T) {
 			defer srv.Close()
 
 			cfg := config.NewConfig(t.TempDir(), t.TempDir())
-			cfg.Email, cfg.Password = "user@example.com", "pw"
+			cfg.Email = "user@example.com"
 			cfg.ForceBrowserLogin = c.browser
 			// The token file lives under the configuration directory, which Open
 			// normally creates; this test drives login directly.
@@ -481,7 +463,13 @@ func TestLoginStreamsAndStatus(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			ui := newFakeConsole(c.answers...)
+			// The password is asked for first — the one credential the
+			// configuration cannot supply. --browser-login asks for nothing.
+			answers := c.answers
+			if !c.browser {
+				answers = append([]string{"pw"}, c.answers...)
+			}
+			ui := newFakeConsole(answers...)
 			d := newOfflineDownloader(t, srv, cfg, ui)
 
 			err := d.Login(context.Background())
@@ -546,8 +534,8 @@ func TestLoginFailureReportsOnce(t *testing.T) {
 	defer srv.Close()
 
 	cfg := config.NewConfig(t.TempDir(), t.TempDir())
-	cfg.Email, cfg.Password = "user@example.com", "pw"
-	ui := newFakeConsole()
+	cfg.Email = "user@example.com"
+	ui := newFakeConsole("pw")
 	d := newOfflineDownloader(t, srv, cfg, ui)
 
 	err := d.Login(context.Background())
@@ -613,7 +601,7 @@ func TestEnsureDirectories(t *testing.T) {
 // writer and the result is read back through the production reader, so nothing
 // here depends on how the file is laid out.
 //
-// Coverage boundary: the sequence runs through auth.LoadTokenFile plus
+// Coverage boundary: the sequence runs through the store Open builds plus
 // Downloader.Init rather than through Open, because Open builds its transport
 // from the configuration and therefore cannot be pointed at a test server. Open's
 // own glue is not exercised here.
@@ -637,19 +625,21 @@ func TestInitRefreshesAndSavesExpiredToken(t *testing.T) {
 	if err := ensureDirectories(cfg); err != nil {
 		t.Fatalf("ensureDirectories: %v", err)
 	}
-	seed := config.NewGalaxyConfig()
-	seed.SetJSON(map[string]any{
+	seed, err := auth.Open(auth.StorePath(cfg))
+	if err != nil {
+		t.Fatalf("auth.Open: %v", err)
+	}
+	seed.StoreLoginResponse(map[string]any{
 		"access_token": "at-1", "refresh_token": "rt-1", "expires_in": -10, "user_id": "u1",
 	})
-	if err := auth.SaveTokenFile(seed, TokenPath(cfg)); err != nil {
+	if err := seed.Save(); err != nil {
 		t.Fatalf("seed the token store: %v", err)
 	}
 
+	// The downloader opens the same location, so the seeded store is what it
+	// starts from.
 	d := newOfflineDownloader(t, srv, cfg, newFakeConsole())
-	if err := auth.LoadTokenFile(d.token, TokenPath(cfg)); err != nil {
-		t.Fatalf("LoadTokenFile: %v", err)
-	}
-	if !d.token.IsExpired() {
+	if !d.token.Expired() {
 		t.Fatal("the seeded token must read as expired")
 	}
 
@@ -659,17 +649,17 @@ func TestInitRefreshesAndSavesExpiredToken(t *testing.T) {
 	if tokenRequests != 1 {
 		t.Errorf("token endpoint was called %d times, want exactly one refresh", tokenRequests)
 	}
-	if got := d.token.GetAccessToken(); got != "at-2" {
-		t.Errorf("access token = %q, want the refreshed one", got)
+	if got := d.token.AuthorizationValue(); got != "Bearer at-2" {
+		t.Errorf("stored authorization value = %q, want the refreshed token", got)
 	}
 
 	// Saved through the production reader: a fresh store sees the new token.
-	reread := config.NewGalaxyConfig()
-	if err := auth.LoadTokenFile(reread, TokenPath(cfg)); err != nil {
-		t.Fatalf("LoadTokenFile after Init: %v", err)
+	reread, err := auth.Open(auth.StorePath(cfg))
+	if err != nil {
+		t.Fatalf("auth.Open after Init: %v", err)
 	}
-	if got := reread.GetAccessToken(); got != "at-2" {
-		t.Errorf("stored access token = %q, want the refreshed token written to disk", got)
+	if got := reread.AuthorizationValue(); got != "Bearer at-2" {
+		t.Errorf("stored authorization value = %q, want the refreshed token written to disk", got)
 	}
 }
 
@@ -760,12 +750,15 @@ func seededToken(t *testing.T, cfg config.Config, expiresIn int) {
 	if err := ensureDirectories(cfg); err != nil {
 		t.Fatalf("ensureDirectories: %v", err)
 	}
-	store := config.NewGalaxyConfig()
-	store.SetJSON(map[string]any{
+	store, err := auth.Open(auth.StorePath(cfg))
+	if err != nil {
+		t.Fatalf("auth.Open: %v", err)
+	}
+	store.StoreLoginResponse(map[string]any{
 		"access_token": "at-seed", "refresh_token": "rt-seed",
 		"expires_in": expiresIn, "user_id": "u1",
 	})
-	if err := auth.SaveTokenFile(store, TokenPath(cfg)); err != nil {
+	if err := store.Save(); err != nil {
 		t.Fatalf("seed the token store: %v", err)
 	}
 }
@@ -824,17 +817,17 @@ func TestOpenWithInjectedTransportRefreshesExpiredToken(t *testing.T) {
 	if logins != 0 {
 		t.Errorf("login attempts = %d, want none: the refresh succeeded", logins)
 	}
-	if got := d.token.GetAccessToken(); got != "at-new" {
-		t.Errorf("access token = %q, want the refreshed one", got)
+	if got := d.token.AuthorizationValue(); got != "Bearer at-new" {
+		t.Errorf("stored authorization value = %q, want the refreshed one", got)
 	}
 
 	// Saved through the production reader: a fresh store sees the new token.
-	reread := config.NewGalaxyConfig()
-	if err := auth.LoadTokenFile(reread, TokenPath(cfg)); err != nil {
-		t.Fatalf("LoadTokenFile after OpenWith: %v", err)
+	reread, err := auth.Open(auth.StorePath(cfg))
+	if err != nil {
+		t.Fatalf("auth.Open after OpenWith: %v", err)
 	}
-	if got := reread.GetAccessToken(); got != "at-new" {
-		t.Errorf("stored access token = %q, want the refreshed token written to disk", got)
+	if got := reread.AuthorizationValue(); got != "Bearer at-new" {
+		t.Errorf("stored authorization value = %q, want the refreshed token written to disk", got)
 	}
 }
 
@@ -882,9 +875,9 @@ func TestOpenWithInjectedTransportWithoutToken(t *testing.T) {
 func TestOpenWithInjectedTransportRunsTheFullLogin(t *testing.T) {
 	srv := newOpenTestServer(t)
 	cfg := config.NewConfig(t.TempDir(), t.TempDir())
-	cfg.Email, cfg.Password = "user@example.com", "pw"
+	cfg.Email = "user@example.com"
 
-	d, err := OpenWith(context.Background(), cfg, newFakeConsole(), SessionRequest{AllowLogin: true}, injectedDeps(t, srv.Server))
+	d, err := OpenWith(context.Background(), cfg, newFakeConsole("pw"), SessionRequest{AllowLogin: true}, injectedDeps(t, srv.Server))
 	if err != nil {
 		t.Fatalf("OpenWith with a login: %v", err)
 	}
@@ -901,7 +894,7 @@ func TestOpenWithInjectedTransportRunsTheFullLogin(t *testing.T) {
 	if err := d.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	for _, path := range []string{cfg.Curl.CookiePath, TokenPath(cfg)} {
+	for _, path := range []string{cfg.Curl.CookiePath, auth.StorePath(cfg)} {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("%q was not written: %v", path, err)
 		}
@@ -1015,7 +1008,7 @@ func TestSessionRequestExplicitLoginKeepsTheNonInteractiveBranch(t *testing.T) {
 		injectedDeps(t, srv.Server)); err == nil || err.Error() != headlessMessage {
 		t.Fatalf("err = %v, want %q", err, headlessMessage)
 	}
-	if want := cfg.Curl.CookiePath + "\n" + TokenPath(cfg) + "\n"; ui.out.String() != want {
+	if want := cfg.Curl.CookiePath + "\n" + auth.StorePath(cfg) + "\n"; ui.out.String() != want {
 		t.Errorf("stdout = %q, want the two store paths %q", ui.out.String(), want)
 	}
 
@@ -1103,7 +1096,11 @@ func TestSessionRetryWaitReachesTheWire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
-	web, err := webapi.New(hx, config.NewGalaxyConfig())
+	store, err := auth.Open("")
+	if err != nil {
+		t.Fatalf("auth.Open: %v", err)
+	}
+	web, err := webapi.New(hx, store)
 	if err != nil {
 		t.Fatalf("webapi.New: %v", err)
 	}

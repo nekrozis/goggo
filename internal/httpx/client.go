@@ -202,7 +202,9 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return nil, err
+		// The transport reports a broken connection as a *url.Error carrying the
+		// request URL, and the signed download URLs carry a session token.
+		return nil, SanitizeError(err)
 	}
 	c.guardBody(resp)
 	return resp, nil
@@ -222,7 +224,7 @@ func (c *Client) DoNoRedirect(ctx context.Context, req *http.Request) (*http.Res
 	oneShot.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := oneShot.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, SanitizeError(err)
 	}
 	c.guardBody(resp)
 	return resp, nil
@@ -232,7 +234,8 @@ func (c *Client) DoNoRedirect(ctx context.Context, req *http.Request) (*http.Res
 func (c *Client) Get(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		// An unparsable URL is reported as a *url.Error holding that URL.
+		return nil, SanitizeError(err)
 	}
 	return c.Do(ctx, req)
 }
@@ -252,7 +255,7 @@ func (c *Client) GetBytes(ctx context.Context, url string) ([]byte, error) {
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, &StatusError{Method: http.MethodGet, URL: url, Code: resp.StatusCode}
+		return nil, NewStatusError(http.MethodGet, url, resp.StatusCode)
 	}
 	return body, nil
 }
@@ -273,7 +276,7 @@ func (c *Client) GetBytesWithRetry(ctx context.Context, url string) ([]byte, err
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, &StatusError{Method: http.MethodGet, URL: url, Code: resp.StatusCode}
+		return nil, NewStatusError(http.MethodGet, url, resp.StatusCode)
 	}
 	return body, nil
 }
@@ -302,7 +305,7 @@ func (c *Client) DoBytesWithRetry(ctx context.Context, req *http.Request) ([]byt
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, &StatusError{Method: req.Method, URL: req.URL.String(), Code: resp.StatusCode}
+		return nil, NewStatusError(req.Method, req.URL.String(), resp.StatusCode)
 	}
 	return body, nil
 }

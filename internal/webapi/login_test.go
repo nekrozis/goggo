@@ -12,14 +12,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/auth"
 	"github.com/nekrozis/goggo/internal/httpx"
 )
+
+// newEmptyStore returns an empty credential store: these tests exercise the
+// login flow, not the credentials it stores.
+func newEmptyStore(t *testing.T) *auth.Store {
+	t.Helper()
+	s, err := auth.Open("")
+	if err != nil {
+		t.Fatalf("auth.Open: %v", err)
+	}
+	return s
+}
 
 // newTestClient builds a Client against srv. Default endpoints are spread so
 // the www and embed account probes get distinct path prefixes while auth and
 // login share the root.
-func newTestClient(t *testing.T, srv *httptest.Server, retries int) (*Client, *config.GalaxyConfig) {
+func newTestClient(t *testing.T, srv *httptest.Server, retries int) (*Client, *auth.Store) {
 	t.Helper()
 	hx, err := httpx.New(httpx.Config{
 		UserAgent:   "goggo-test/1.0",
@@ -28,7 +39,7 @@ func newTestClient(t *testing.T, srv *httptest.Server, retries int) (*Client, *c
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
-	galaxy := config.NewGalaxyConfig()
+	galaxy := newEmptyStore(t)
 	cl, err := New(hx, galaxy)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -154,13 +165,10 @@ func TestLoginSuccess(t *testing.T) {
 	if *gotCode != "AUTH1" {
 		t.Errorf("token endpoint code = %q, want AUTH1", *gotCode)
 	}
-	if got := galaxy.GetAccessToken(); got != "at-1" {
-		t.Errorf("access token = %q", got)
+	if got := galaxy.AuthorizationValue(); got != "Bearer at-1" {
+		t.Errorf("stored authorization value = %q", got)
 	}
-	if got := galaxy.GetRefreshToken(); got != "rt-1" {
-		t.Errorf("refresh token = %q", got)
-	}
-	if galaxy.IsExpired() {
+	if galaxy.Expired() {
 		t.Error("fresh token reported expired")
 	}
 }
@@ -575,7 +583,7 @@ func TestNewRejectsNilInputs(t *testing.T) {
 	if _, err := New(hx, nil); err == nil {
 		t.Error("New: want error for nil galaxy")
 	}
-	if _, err := New(nil, config.NewGalaxyConfig()); err == nil {
+	if _, err := New(nil, newEmptyStore(t)); err == nil {
 		t.Error("New: want error for nil http client")
 	}
 }
@@ -677,7 +685,7 @@ func TestLoginHonoursCallerTransportPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
-	cl, err := New(hx, config.NewGalaxyConfig())
+	cl, err := New(hx, newEmptyStore(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -710,7 +718,7 @@ func TestLoginRetryWaitApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
-	cl, err := New(hx, config.NewGalaxyConfig())
+	cl, err := New(hx, newEmptyStore(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

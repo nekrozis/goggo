@@ -82,7 +82,6 @@ type Config struct {
 	LanguagePriority        string
 	VersionString           string
 	Email                   string
-	Password                string
 	GalaxyBuildSortingOrder string
 
 	Retries          int

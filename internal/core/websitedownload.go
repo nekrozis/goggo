@@ -315,7 +315,7 @@ func (d *Downloader) websiteProvider(policy checksumPolicy) *websiteURLProvider 
 		policy:    policy,
 		refresh: tokenRefresher{
 			refresh: d.refreshAndSave,
-			expired: func() bool { return d.token.IsExpired() },
+			expired: func() bool { return d.token.Expired() },
 		},
 	}
 }

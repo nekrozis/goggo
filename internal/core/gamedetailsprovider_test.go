@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/auth"
 	"github.com/nekrozis/goggo/internal/galaxy"
 	"github.com/nekrozis/goggo/internal/gamedetails"
 	"github.com/nekrozis/goggo/internal/httpx"
@@ -23,7 +23,11 @@ func newGamedetailsResolver(t *testing.T, f *providerFixture, refreshes *atomic.
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
-	gx, err := galaxy.New(hx, config.NewGalaxyConfig())
+	store, err := auth.Open("")
+	if err != nil {
+		t.Fatalf("auth.Open: %v", err)
+	}
+	gx, err := galaxy.New(hx, store)
 	if err != nil {
 		t.Fatalf("galaxy.New: %v", err)
 	}

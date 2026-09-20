@@ -273,7 +273,7 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bool, resumeLen int, sink progressSink) ([]byte, time.Time, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, time.Time{}, 0, err
+		return nil, time.Time{}, 0, httpx.SanitizeError(err)
 	}
 	if resume && resumeLen > 0 {
 		req.Header.Set("Range", "bytes="+strconv.Itoa(resumeLen)+"-")
@@ -286,7 +286,7 @@ func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bo
 	lm := lastModifiedFrom(resp)
 	if resp.StatusCode >= 400 {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return nil, lm, resp.StatusCode, &httpx.StatusError{Method: http.MethodGet, URL: url, Code: resp.StatusCode}
+		return nil, lm, resp.StatusCode, httpx.NewStatusError(http.MethodGet, url, resp.StatusCode)
 	}
 	// The body streams into the buffer instead of ReadAll: a break mid-transfer
 	// leaves the bytes already received in the buffer, which is what the caller

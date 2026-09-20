@@ -174,7 +174,7 @@ func (d *Downloader) chunkURLProvider() *chunkURLProvider {
 		galaxy:   d.galaxy,
 		priority: d.cfg.DownloadConfig.GalaxyCDNPriority,
 		refresh:  d.refreshAndSave,
-		expired:  func() bool { return d.token.IsExpired() },
+		expired:  func() bool { return d.token.Expired() },
 	}
 }
 

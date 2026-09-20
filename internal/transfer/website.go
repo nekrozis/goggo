@@ -362,7 +362,7 @@ func websiteDownloadAttempt(ctx context.Context, task model.WebsiteTask, deps We
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		f.Close()
-		return time.Time{}, &downloadError{err, failureRemove, false}
+		return time.Time{}, &downloadError{httpx.SanitizeError(err), failureRemove, false}
 	}
 	if resume {
 		req.Header.Set("Range", "bytes="+strconv.FormatInt(fileSize(task.Destination), 10)+"-")
@@ -387,7 +387,7 @@ func websiteDownloadAttempt(ctx context.Context, task model.WebsiteTask, deps We
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		f.Close()
 		return time.Time{}, &downloadError{
-			&httpx.StatusError{Method: http.MethodGet, URL: url, Code: resp.StatusCode},
+			httpx.NewStatusError(http.MethodGet, url, resp.StatusCode),
 			failureRemove, resp.StatusCode != http.StatusRequestedRangeNotSatisfiable,
 		}
 	}

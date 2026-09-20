@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/nekrozis/goggo/internal/auth"
 	"github.com/nekrozis/goggo/internal/config"
-	"github.com/nekrozis/goggo/internal/core"
 )
 
 // newLogoutConfig builds a configuration rooted in a temporary tree, laid out
@@ -58,7 +58,7 @@ const logoutClearedLine = "Local login state cleared\n"
 func TestLogoutClearsAuthenticationStateOnly(t *testing.T) {
 	cfg := newLogoutConfig(t)
 
-	authFiles := []string{core.TokenPath(cfg), cfg.Curl.CookiePath}
+	authFiles := []string{auth.StorePath(cfg), cfg.Curl.CookiePath}
 	for _, p := range authFiles {
 		writeTestFile(t, p, "auth state")
 	}
@@ -98,7 +98,7 @@ func TestLogoutClearsAuthenticationStateOnly(t *testing.T) {
 // logged out" branch is the implementation of it.
 func TestLogoutIsIdempotent(t *testing.T) {
 	cfg := newLogoutConfig(t)
-	writeTestFile(t, core.TokenPath(cfg), "{}")
+	writeTestFile(t, auth.StorePath(cfg), "{}")
 	writeTestFile(t, cfg.Curl.CookiePath, "cookies")
 
 	for i := 1; i <= 3; i++ {
@@ -141,7 +141,7 @@ func TestLogoutOnMissingDirectoryIsSuccess(t *testing.T) {
 // the resulting state.
 func TestLogoutPropagatesRemovalFailure(t *testing.T) {
 	cfg := newLogoutConfig(t)
-	writeTestFile(t, core.TokenPath(cfg), "{}")
+	writeTestFile(t, auth.StorePath(cfg), "{}")
 	cfg.Curl.CookiePath = invalidPath
 
 	var out bytes.Buffer
@@ -152,7 +152,7 @@ func TestLogoutPropagatesRemovalFailure(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("stdout = %q, want no success line when the run failed", out.String())
 	}
-	if _, statErr := os.Stat(core.TokenPath(cfg)); !errors.Is(statErr, fs.ErrNotExist) {
+	if _, statErr := os.Stat(auth.StorePath(cfg)); !errors.Is(statErr, fs.ErrNotExist) {
 		t.Errorf("token file must already be gone (stat err = %v)", statErr)
 	}
 }

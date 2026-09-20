@@ -219,7 +219,7 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 			// about, so no request is made and the template falls back to its
 			// literal text.
 			if baseID != "" {
-				refresh := tokenRefresher{refresh: d.refreshAndSave, expired: func() bool { return d.token.IsExpired() }}
+				refresh := tokenRefresher{refresh: d.refreshAndSave, expired: func() bool { return d.token.Expired() }}
 				if err := refresh.refreshIfExpired(ctx); err != nil {
 					return res, fmt.Errorf("galaxy: refresh login: %w", err)
 				}

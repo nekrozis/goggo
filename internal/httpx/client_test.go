@@ -314,7 +314,7 @@ func TestNewCookieFileWiring(t *testing.T) {
 		t.Fatal(err)
 	}
 	caller := &http.Client{Jar: jar}
-	path := filepath.Join(t.TempDir(), "cookies.txt")
+	path := filepath.Join(t.TempDir(), "cookies.bin")
 
 	cases := []struct {
 		name       string
@@ -392,7 +392,7 @@ func TestTransportOverrideKeepsTheCookieJar(t *testing.T) {
 		t.Fatalf("parse server URL: %v", err)
 	}
 	exit := &rewriteTransport{target: target}
-	cookieFile := filepath.Join(t.TempDir(), "cookies.txt")
+	cookieFile := filepath.Join(t.TempDir(), "cookies.bin")
 
 	c, err := New(Config{CookieFile: cookieFile, UserAgent: "goggo-test/1.0", Transport: exit})
 	if err != nil {
@@ -412,7 +412,7 @@ func TestTransportOverrideKeepsTheCookieJar(t *testing.T) {
 		t.Fatalf("SaveCookies with a replaced transport: %v", err)
 	}
 	if saved.Written == 0 {
-		t.Error("SaveCookies wrote no rows, want the cookie the jar received")
+		t.Error("SaveCookies wrote nothing, want the cookie the jar received")
 	}
 	fresh, err := New(Config{CookieFile: cookieFile, Transport: exit})
 	if err != nil {

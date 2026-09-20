@@ -8,15 +8,34 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/nekrozis/goggo/internal/cookiefile"
+	"github.com/nekrozis/goggo/internal/secretfile"
 )
 
 // cookieFileMode mirrors the token-file writer in internal/auth: 0600 is Unix
 // semantics; on Windows no claim of equivalent ACL behaviour is made.
 const cookieFileMode = 0o600
+
+// The on-disk envelope of the cookie file. It is a NON-PLAINTEXT,
+// NON-ENCRYPTED format: the payload is obfuscated with a fixed keystream that
+// anyone holding this source can recover. It provides no cryptographic
+// confidentiality and is not meant to resist malware, EDR or anyone analysing
+// the machine; its only effect is that the file is no longer text, so a plain
+// grep, a text index or an accidental upload does not pick up a session cookie.
+//
+// The framing itself lives in secretfile, which knows nothing about cookies;
+// this file supplies the magic, the version and the key.
+const (
+	cookieFileMagic   = "GOGGOCKS"
+	cookieFileVersion = 1
+)
+
+// cookieFileObfuscation is the key the cookie payload is XORed with. It is
+// obfuscation material, not a secret, and it is deliberately NOT the token
+// store's key: the two files share a framing, not a payload encoding.
+var cookieFileObfuscation = secretfile.XOR("goggo-cookie-store-v1")
 
 var (
 	// ErrCookieFileNotConfigured is returned by SaveCookies when no
@@ -33,8 +52,8 @@ var (
 )
 
 // SaveCookiesResult reports the outcome of SaveCookies. It stays minimal:
-// Written counts the rows actually encoded, excluding cookies the Netscape
-// format cannot represent (a TAB/CR/LF in a column), which the codec skips.
+// Written counts the cookies encoded, which is every cookie handed to the
+// codec — the payload can represent any byte sequence a cookie can hold.
 type SaveCookiesResult struct {
 	Written int
 }
@@ -50,14 +69,17 @@ type cookieEntry struct {
 //
 // It is an initialisation-time API, not a merge or snapshot-replacement API:
 // the decoded cookies go through the same SetCookies event path the runtime
-// uses, so jar and persistence state are rebuilt identically, and a file's rows
-// read as "this cookie still exists" (deletion events never appear in a
-// cookies.txt file). cookiejar.Jar has no public "remove all cookies" API, so an
-// existing jar is never cleared — call this on a fresh Client.
+// uses, so jar and persistence state are rebuilt identically, and a file's
+// records read as "this cookie still exists" (deletion events are not
+// representable in a stored file). cookiejar.Jar has no public "remove all
+// cookies" API, so an existing jar is never cleared — call this on a fresh
+// Client.
 //
 // A missing file is an empty state, not an error; a caller-provided HTTPClient
-// yields ErrCookieFileUnsupported; any other I/O failure is wrapped with the
-// path.
+// yields ErrCookieFileUnsupported; a file that is not a well-formed container or
+// not a well-formed record sequence is an error naming the path, because a
+// cookie store that cannot be read is not the same thing as one that was never
+// written.
 func (c *Client) LoadCookies() error {
 	if c.cookieFile == "" {
 		return nil
@@ -72,7 +94,11 @@ func (c *Client) LoadCookies() error {
 		}
 		return fmt.Errorf("httpx: load cookie file %q: %w", c.cookieFile, err)
 	}
-	for _, pc := range cookiefile.Parse(data) {
+	cookies, err := decodeCookieFile(data)
+	if err != nil {
+		return fmt.Errorf("httpx: load cookie file %q: %w", c.cookieFile, err)
+	}
+	for _, pc := range cookies {
 		u := reconstructURL(pc)
 		c.store.SetCookies(u, []*http.Cookie{reconstructCookie(pc, u)})
 	}
@@ -92,8 +118,8 @@ func (c *Client) SaveCookies() (SaveCookiesResult, error) {
 	if c.store == nil {
 		return SaveCookiesResult{}, ErrCookieFileUnsupported
 	}
-	rows := fileCookies(c.store.snapshot(), c.store.now())
-	n, err := writeCookieFile(c.cookieFile, rows)
+	records := fileCookies(c.store.snapshot(), c.store.now())
+	n, err := writeCookieFile(c.cookieFile, records)
 	if err != nil {
 		return SaveCookiesResult{}, fmt.Errorf("httpx: save cookie file %q: %w", c.cookieFile, err)
 	}
@@ -112,28 +138,44 @@ func (s *cookieStore) snapshot() []cookieEntry {
 	return out
 }
 
+// decodeCookieFile unwraps the container and then the records inside it. Each
+// layer reports its own failure: secretfile's five for the framing, this
+// package's cookie payload error for the records.
+func decodeCookieFile(data []byte) ([]cookiefile.PersistentCookie, error) {
+	payload, err := secretfile.Decode(cookieFileMagic, cookieFileVersion, cookieFileObfuscation, data)
+	if err != nil {
+		return nil, err
+	}
+	return cookiefile.Decode(payload)
+}
+
+// encodeCookieFile is decodeCookieFile's inverse.
+func encodeCookieFile(cookies []cookiefile.PersistentCookie) []byte {
+	payload := cookiefile.Encode(cookies)
+	return secretfile.Encode(cookieFileMagic, cookieFileVersion, cookieFileObfuscation, payload)
+}
+
 // reconstructURL builds the URL a persisted cookie is replayed against. It is
 // the minimal URL that lets the jar accept the cookie: host is the cookie's
-// domain (a leading dot is only a file-format convention and is dropped here)
-// and the scheme honours Secure so a secure cookie is not replayed over http.
-// The path is the cookie's own path when it has one.
+// domain and the scheme honours Secure so a secure cookie is not replayed over
+// http. The path is the cookie's own path when it has one.
 func reconstructURL(pc cookiefile.PersistentCookie) *url.URL {
 	scheme := "http"
 	if pc.Secure {
 		scheme = "https"
 	}
-	u := &url.URL{Scheme: scheme, Host: strings.TrimPrefix(pc.Domain, ".")}
+	u := &url.URL{Scheme: scheme, Host: pc.Domain}
 	if pc.Path != "" {
 		u.Path = pc.Path
 	}
 	return u
 }
 
-// reconstructCookie turns a file row back into a Set-Cookie equivalent. The
-// host-only / domain distinction is carried by Domain: an empty Domain means
-// host-only to the jar, so the file's Domain must NOT be copied into it for
-// host-only rows. A missing path is completed with the same RFC default-path
-// helper used when recording events (no second implementation).
+// reconstructCookie turns a stored record back into a Set-Cookie equivalent.
+// The host-only / domain distinction is carried by Domain: an empty Domain
+// means host-only to the jar, so the record's Domain must NOT be copied into it
+// for host-only records. A missing path is completed with the same RFC
+// default-path helper used when recording events (no second implementation).
 func reconstructCookie(pc cookiefile.PersistentCookie, u *url.URL) *http.Cookie {
 	path := pc.Path
 	if path == "" {
@@ -153,24 +195,20 @@ func reconstructCookie(pc cookiefile.PersistentCookie, u *url.URL) *http.Cookie 
 	return c
 }
 
-// fileCookies converts a snapshot into file rows: deterministic order, the
-// conventional leading dot on domain cookies, and entries that have expired
-// since they were recorded are dropped. Session cookies (zero expiry) are
-// KEPT and written as expiry 0 — "session" describes a cookie's lifetime, it
-// is not a reason to omit the row.
+// fileCookies converts a snapshot into stored records: deterministic order, the
+// domain verbatim, and entries that have expired since they were recorded are
+// dropped. Session cookies (zero expiry) are KEPT and written as expiry 0 —
+// "session" describes a cookie's lifetime, it is not a reason to omit the
+// record.
 func fileCookies(snap []cookieEntry, now time.Time) []cookiefile.PersistentCookie {
 	out := make([]cookiefile.PersistentCookie, 0, len(snap))
 	for _, e := range snap {
 		if !e.state.expires.IsZero() && e.state.expires.Before(now) {
 			continue
 		}
-		domain := e.key.domain
-		if !e.key.hostOnly {
-			domain = "." + domain
-		}
 		out = append(out, cookiefile.PersistentCookie{
 			Expires:  e.state.expires,
-			Domain:   domain,
+			Domain:   e.key.domain,
 			Path:     e.key.path,
 			Name:     e.key.name,
 			Value:    e.state.value,
@@ -199,11 +237,14 @@ func fileCookies(snap []cookieEntry, now time.Time) []cookiefile.PersistentCooki
 	return out
 }
 
-// writeCookieFile writes rows to path atomically: a temp file in the same
+// writeCookieFile writes cookies to path atomically: a temp file in the same
 // directory (created 0600 before any content is written) is written, synced,
 // closed and renamed over path. This prevents a truncated file on the normal
 // path but claims no cross-platform crash durability; on Windows the replace
 // semantics of os.Rename apply as-is.
+//
+// The count returned is the number of cookies written. The payload can hold any
+// cookie, so unlike the text format every cookie is written.
 func writeCookieFile(path string, cookies []cookiefile.PersistentCookie) (int, error) {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".goggo-cookies-*")
@@ -215,8 +256,7 @@ func writeCookieFile(path string, cookies []cookiefile.PersistentCookie) (int, e
 		os.Remove(tmp.Name())
 		return 0, fmt.Errorf("chmod temp cookie file: %w", err)
 	}
-	n, err := cookiefile.Write(tmp, cookies)
-	if err != nil {
+	if _, err := tmp.Write(encodeCookieFile(cookies)); err != nil {
 		tmp.Close()
 		os.Remove(tmp.Name())
 		return 0, fmt.Errorf("encode cookies: %w", err)
@@ -234,5 +274,5 @@ func writeCookieFile(path string, cookies []cookiefile.PersistentCookie) (int, e
 		os.Remove(tmp.Name())
 		return 0, fmt.Errorf("replace cookie file: %w", err)
 	}
-	return n, nil
+	return len(cookies), nil
 }

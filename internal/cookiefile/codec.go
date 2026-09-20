@@ -1,29 +1,37 @@
 package cookiefile
 
 import (
-	"io"
-	"strconv"
-	"strings"
+	"encoding/binary"
+	"errors"
 	"time"
 )
 
-// headerLine is the conventional first line of a cookies.txt file.
-const headerLine = "# Netscape HTTP Cookie File"
+// The flag byte of a record carries the three booleans a cookie has and
+// nothing else, so a bit outside this set means the payload was not written by
+// this codec.
+const (
+	flagSecure   = 1 << 0
+	flagHttpOnly = 1 << 1
+	flagHostOnly = 1 << 2
 
-// httpOnlyPrefix marks HttpOnly cookies in the cookies.txt "#HttpOnly_"
-// extension: the domain field carries this prefix before the actual domain.
-const httpOnlyPrefix = "#HttpOnly_"
+	knownFlags = flagSecure | flagHttpOnly | flagHostOnly
+)
 
-// fieldCount is the number of TAB-separated columns per Netscape row:
-// domain, includeSubdomains, path, secure, expiry, name, value.
-const fieldCount = 7
+// recordHeaderLen is flags plus expires: the fixed part of a record, read
+// before its four length-prefixed fields.
+const recordHeaderLen = 1 + 8
 
-// PersistentCookie is one cookie as carried by a cookies.txt file.
+// ErrMalformedPayload is this layer's own failure: the payload is not a record
+// sequence. It is deliberately not one of secretfile's framing errors, which
+// describe the container rather than the records inside it.
+var ErrMalformedPayload = errors.New("cookie payload is malformed")
+
+// PersistentCookie is one cookie as carried by the cookie store file.
 //
 // Domain is kept verbatim (leading dot and case preserved) in both
 // directions: this codec does not normalise domain semantics — that is the
-// bridge's job (see doc.go). HostOnly maps one-to-one onto the file's
-// includeSubdomains column (TRUE => HostOnly=false, FALSE => HostOnly=true).
+// bridge's job (see doc.go). HostOnly is an explicit flag of the record, so
+// unlike a Netscape row the domain never encodes it.
 type PersistentCookie struct {
 	Expires  time.Time
 	Domain   string
@@ -35,139 +43,123 @@ type PersistentCookie struct {
 	HostOnly bool
 }
 
-// unrepresentable reports whether the row cannot be expressed in the
-// TAB-delimited Netscape format: a TAB, CR or LF inside any of the four
-// free-form columns would break the column layout (there is no escaping
-// mechanism in the format).
-func (c PersistentCookie) unrepresentable() bool {
-	return strings.ContainsAny(c.Domain, "\t\r\n") ||
-		strings.ContainsAny(c.Path, "\t\r\n") ||
-		strings.ContainsAny(c.Name, "\t\r\n") ||
-		strings.ContainsAny(c.Value, "\t\r\n")
-}
-
-// Parse decodes a cookies.txt document into its rows.
+// Encode serialises cookies into the payload: one record per cookie, in the
+// order given, with no count field — the payload length is the single source of
+// truth for how many records there are.
 //
-// Tolerance: comment lines and blank lines are skipped, and a malformed row is
-// skipped rather than failing the whole parse. A domain column starting with the
-// "#HttpOnly_" prefix yields HttpOnly=true with the prefix stripped; any other
-// "#"-prefixed row is a comment. Both LF and CRLF line endings are accepted, and the
-// function never fails and never panics on arbitrary input.
-func Parse(data []byte) []PersistentCookie {
-	var out []PersistentCookie
-	for _, raw := range strings.Split(string(data), "\n") {
-		line := strings.TrimSuffix(raw, "\r")
-		if line == "" {
-			continue
+// A record is:
+//
+//	flags(1)   bit0=secure  bit1=httpOnly  bit2=hostOnly
+//	expires(8) int64 Unix seconds; 0 means a session cookie
+//	domain     uint32 big-endian length + UTF-8 bytes
+//	path       uint32 big-endian length + UTF-8 bytes
+//	name       uint32 big-endian length + UTF-8 bytes
+//	value      uint32 big-endian length + UTF-8 bytes
+//
+// Every byte sequence a cookie can hold is representable, so no cookie is ever
+// skipped here.
+func Encode(cookies []PersistentCookie) []byte {
+	var out []byte
+	for _, c := range cookies {
+		var flags byte
+		if c.Secure {
+			flags |= flagSecure
 		}
-		cols := strings.Split(line, "\t")
-		if len(cols) != fieldCount {
-			continue
+		if c.HttpOnly {
+			flags |= flagHttpOnly
 		}
-		domain := cols[0]
-		httpOnly := false
-		if strings.HasPrefix(domain, httpOnlyPrefix) {
-			httpOnly = true
-			domain = domain[len(httpOnlyPrefix):]
-		} else if strings.HasPrefix(domain, "#") {
-			continue
+		if c.HostOnly {
+			flags |= flagHostOnly
 		}
-		if domain == "" {
-			continue
-		}
+		out = append(out, flags)
 
-		// Second column is includeSubdomains: TRUE means a domain cookie
-		// (HostOnly=false), FALSE means a host-only cookie (HostOnly=true).
-		include, ok := boolColumn(cols[1], true)
-		if !ok {
-			continue
+		var expires int64
+		if !c.Expires.IsZero() {
+			expires = c.Expires.Unix()
 		}
-		secure, ok := boolColumn(cols[3], false)
-		if !ok {
-			continue
-		}
+		out = binary.BigEndian.AppendUint64(out, uint64(expires))
 
-		expiry, err := strconv.ParseInt(cols[4], 10, 64)
-		if err != nil || expiry < 0 {
-			continue
+		for _, field := range []string{c.Domain, c.Path, c.Name, c.Value} {
+			out = binary.BigEndian.AppendUint32(out, uint32(len(field)))
+			out = append(out, field...)
 		}
-		var expires time.Time
-		if expiry > 0 {
-			expires = time.Unix(expiry, 0)
-		}
-
-		out = append(out, PersistentCookie{
-			Expires:  expires,
-			Domain:   domain,
-			Path:     cols[2],
-			Name:     cols[5],
-			Value:    cols[6],
-			Secure:   secure,
-			HttpOnly: httpOnly,
-			HostOnly: !include,
-		})
 	}
 	return out
 }
 
-// boolColumn parses a TRUE/FALSE column and reports whether it reads TRUE.
-// An empty column is treated as emptyIs; writers always emit one of the two
-// words, so this only guards hand-edited files. ok is false for any other
-// value, which makes the caller skip the row as malformed.
-func boolColumn(s string, emptyIs bool) (bool, bool) {
-	switch s {
-	case "TRUE":
-		return true, true
-	case "FALSE":
-		return false, true
-	case "":
-		return emptyIs, true
-	default:
-		return false, false
+// Decode reads a payload back into its records.
+//
+// An empty payload is an empty cookie set, not a failure. Anything else that is
+// not a record sequence is ErrMalformedPayload: a record cut off by the end of
+// the payload, a flag byte with a bit this codec does not define, or a field
+// length that runs past the end.
+func Decode(payload []byte) ([]PersistentCookie, error) {
+	r := recordReader{data: payload}
+	var out []PersistentCookie
+	for r.remaining() > 0 {
+		c, err := r.record()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
 	}
+	return out, nil
 }
 
-// Write encodes cookies to w in cookies.txt form: a leading comment header
-// then one row per cookie. Rows whose Domain/Path/Name/Value contain a TAB,
-// CR or LF cannot be expressed and are SKIPPED (they never fail the write);
-// the number of successfully written rows is returned so the caller can
-// report the skip count (len(cookies)-n). w errors are returned unchanged.
-func Write(w io.Writer, cookies []PersistentCookie) (int, error) {
-	if _, err := io.WriteString(w, headerLine+"\n"); err != nil {
-		return 0, err
-	}
-	n := 0
-	for _, c := range cookies {
-		if c.unrepresentable() {
-			continue
-		}
-		if _, err := io.WriteString(w, encodeRow(c)); err != nil {
-			return n, err
-		}
-		n++
-	}
-	return n, nil
+// recordReader walks a payload field by field, so every bounds check sits in
+// one place and a short read is always the same error.
+type recordReader struct {
+	data []byte
+	pos  int
 }
 
-// encodeRow renders one cookie as a single line (no trailing newline-free
-// output: the newline is included).
-func encodeRow(c PersistentCookie) string {
-	domain := c.Domain
-	if c.HttpOnly {
-		domain = httpOnlyPrefix + domain
+func (r *recordReader) remaining() int { return len(r.data) - r.pos }
+
+// take consumes n bytes, or reports the payload as malformed when fewer remain.
+func (r *recordReader) take(n int) ([]byte, error) {
+	if n < 0 || n > r.remaining() {
+		return nil, ErrMalformedPayload
 	}
-	include := "FALSE"
-	if !c.HostOnly {
-		include = "TRUE"
+	b := r.data[r.pos : r.pos+n]
+	r.pos += n
+	return b, nil
+}
+
+// field reads one length-prefixed field.
+func (r *recordReader) field() (string, error) {
+	raw, err := r.take(4)
+	if err != nil {
+		return "", err
 	}
-	secure := "FALSE"
-	if c.Secure {
-		secure = "TRUE"
+	b, err := r.take(int(binary.BigEndian.Uint32(raw)))
+	if err != nil {
+		return "", err
 	}
-	expiry := "0"
-	if !c.Expires.IsZero() {
-		expiry = strconv.FormatInt(c.Expires.Unix(), 10)
+	return string(b), nil
+}
+
+// record reads the next record.
+func (r *recordReader) record() (PersistentCookie, error) {
+	head, err := r.take(recordHeaderLen)
+	if err != nil {
+		return PersistentCookie{}, err
 	}
-	return domain + "\t" + include + "\t" + c.Path + "\t" + secure + "\t" + expiry +
-		"\t" + c.Name + "\t" + c.Value + "\n"
+	flags := head[0]
+	if flags&^knownFlags != 0 {
+		return PersistentCookie{}, ErrMalformedPayload
+	}
+
+	var c PersistentCookie
+	if expires := int64(binary.BigEndian.Uint64(head[1:])); expires != 0 {
+		c.Expires = time.Unix(expires, 0)
+	}
+	c.Secure = flags&flagSecure != 0
+	c.HttpOnly = flags&flagHttpOnly != 0
+	c.HostOnly = flags&flagHostOnly != 0
+	for _, dst := range []*string{&c.Domain, &c.Path, &c.Name, &c.Value} {
+		if *dst, err = r.field(); err != nil {
+			return PersistentCookie{}, err
+		}
+	}
+	return c, nil
 }

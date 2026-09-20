@@ -212,7 +212,7 @@ func TestTransportOwnedByCallerPersistsCookies(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cookieFile := filepath.Join(t.TempDir(), "cookies.txt")
+	cookieFile := filepath.Join(t.TempDir(), "cookies.bin")
 
 	// First transport: receives the cookie, then persists the jar.
 	first, err := httpx.New(httpx.Config{CookieFile: cookieFile})

@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -204,7 +203,7 @@ func TestAuthLoginSucceedsAndExitsZero(t *testing.T) {
 	if _, err := os.Stat(auth.StorePath(cfg)); err != nil {
 		t.Errorf("token file %q was not written: %v", auth.StorePath(cfg), err)
 	}
-	if _, err := os.Stat(filepath.Join(cfg.ConfigDirectory, "cookies.txt")); err != nil {
-		t.Errorf("cookie file was not written: %v", err)
+	if _, err := os.Stat(cfg.Curl.CookiePath); err != nil {
+		t.Errorf("cookie file %q was not written: %v", cfg.Curl.CookiePath, err)
 	}
 }

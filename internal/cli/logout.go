@@ -16,8 +16,8 @@ import (
 // cache root are left alone.
 //
 // It deliberately does NOT go through core.Open: a core.Downloader flushes its
-// cookie jar on Close, which would write cookies.txt straight back and undo the
-// removal, and an Open that is allowed to log in could start a fresh login.
+// cookie jar on Close, which would write the cookie file straight back and undo
+// the removal, and an Open that is allowed to log in could start a fresh login.
 // Nothing here creates a directory, opens a socket or reads a cookie.
 //
 // Removal is idempotent — an already-gone path counts as success, so only a

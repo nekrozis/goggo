@@ -2,11 +2,9 @@ package auth
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/crc32"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/secretfile"
 )
 
 // defaultExpiresIn is the token lifetime assumed when the server response
@@ -255,30 +254,27 @@ func (s *Store) Save() error {
 // the file is no longer text, so a plain grep or a text index does not pick up
 // the credential fields.
 //
+// The framing itself lives in secretfile, which knows nothing about tokens; this
+// file supplies the magic, the version and the key, so the format is this
+// package's choice even though the layout is shared.
+//
 //	crc32 covers truncation, random corruption and a partial write. It is an
 //	integrity check, not a security measure: rewriting the payload lets an
 //	attacker rewrite the checksum too.
 const (
-	storeMagic     = "GOGGOAUTH"
-	storeVersion   = 1
-	storeHeaderLen = len(storeMagic) + 1 + 4
-	storeCRCLen    = 4
+	storeMagic   = "GOGGOAUTH"
+	storeVersion = 1
 )
 
-// storeKeystream is the obfuscation key. It is a constant, not a secret.
-var storeKeystream = []byte("goggo-credential-store-v1")
+// storeObfuscation is the key the token payload is XORed with. It is
+// obfuscation material, not a secret, and it is deliberately NOT derived from
+// the magic: the bytes this program has already written must keep decoding, and
+// a later change to another file kind's framing must not reach this one.
+var storeObfuscation = secretfile.XOR("goggo-credential-store-v1")
 
-// storeEncodeError names the six ways a store file can fail to decode. They are
-// separate values so Open's failures stay distinguishable: a truncated payload
-// reported as a checksum failure would hide the real cause.
-var (
-	errStoreTruncated = errors.New("store header is truncated")
-	errStoreMagic     = errors.New("store magic does not match")
-	errStoreVersion   = errors.New("store version is not supported")
-	errStoreLength    = errors.New("store length does not match the file")
-	errStoreCRC       = errors.New("store checksum does not match")
-	errStorePayload   = errors.New("store payload is not a JSON object")
-)
+// errStorePayload is the one failure the framing cannot report, because it is
+// about what the payload means rather than how it is framed.
+var errStorePayload = errors.New("store payload is not a JSON object")
 
 // encodeStore serialises a token tree into the on-disk envelope.
 func encodeStore(store map[string]any) ([]byte, error) {
@@ -286,63 +282,22 @@ func encodeStore(store map[string]any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("auth: marshal token store: %w", err)
 	}
-	return frameStore(xorKeystream(plain)), nil
+	return secretfile.Encode(storeMagic, storeVersion, storeObfuscation, plain), nil
 }
 
-// frameStore wraps an obfuscated payload in the header and checksum. It is the
-// one place the framing is built, so a test that needs a payload the framing
-// accepts and the JSON layer rejects can reuse it instead of restating the
-// layout.
-func frameStore(payload []byte) []byte {
-	out := make([]byte, 0, storeHeaderLen+len(payload)+storeCRCLen)
-	out = append(out, storeMagic...)
-	out = append(out, storeVersion)
-	out = binary.BigEndian.AppendUint32(out, uint32(len(payload)))
-	out = append(out, payload...)
-	return binary.BigEndian.AppendUint32(out, crc32.ChecksumIEEE(payload))
-}
-
-// decodeStore parses the envelope. The checks run in the order the failures can
-// be told apart:
-//
-//	header completeness -> magic -> version -> declared length -> checksum -> JSON
-//
-// The length check comes before the checksum on purpose: a truncated file is a
-// length failure, and reporting it as a checksum failure would lose the reason.
+// decodeStore parses the envelope and then the token tree inside it. A framing
+// failure is reported by secretfile as itself; a payload that decodes but is not
+// a JSON object is this package's failure.
 func decodeStore(data []byte) (map[string]any, error) {
-	if len(data) < storeHeaderLen {
-		return nil, errStoreTruncated
+	plain, err := secretfile.Decode(storeMagic, storeVersion, storeObfuscation, data)
+	if err != nil {
+		return nil, err
 	}
-	if string(data[:len(storeMagic)]) != storeMagic {
-		return nil, errStoreMagic
-	}
-	if data[len(storeMagic)] != storeVersion {
-		return nil, errStoreVersion
-	}
-	length := int(binary.BigEndian.Uint32(data[len(storeMagic)+1:]))
-	if len(data) != storeHeaderLen+length+storeCRCLen {
-		return nil, errStoreLength
-	}
-
-	payload := data[storeHeaderLen : storeHeaderLen+length]
-	if got, want := binary.BigEndian.Uint32(data[storeHeaderLen+length:]), crc32.ChecksumIEEE(payload); got != want {
-		return nil, errStoreCRC
-	}
-
 	var obj map[string]any
-	if err := json.Unmarshal(xorKeystream(payload), &obj); err != nil || obj == nil {
+	if err := json.Unmarshal(plain, &obj); err != nil || obj == nil {
 		return nil, errStorePayload
 	}
 	return obj, nil
-}
-
-// xorKeystream applies the obfuscation, which is its own inverse.
-func xorKeystream(data []byte) []byte {
-	out := make([]byte, len(data))
-	for i := range data {
-		out[i] = data[i] ^ storeKeystream[i%len(storeKeystream)]
-	}
-	return out
 }
 
 // tokenFileMode is the permission mode for token files. 0600 is Unix semantics;

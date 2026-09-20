@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/nekrozis/goggo/internal/auth"
 	"github.com/nekrozis/goggo/internal/core"
+	"github.com/nekrozis/goggo/internal/httpx"
 )
 
 // The credential seam (internal/auth) and the URL-redaction boundary
@@ -196,12 +199,42 @@ func sentinelRoots(t *testing.T, expiresAt int64) string {
 	if err := seed.Save(); err != nil {
 		t.Fatalf("seed the session: %v", err)
 	}
-	// One session cookie, in the Netscape shape the cookie store reads back.
-	cookies := "# Netscape HTTP Cookie File\n.gog.com\tTRUE\t/\tFALSE\t0\tSID\t" + sentinel + "\n"
-	if err := os.WriteFile(cfg.Curl.CookiePath, []byte(cookies), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	seedSentinelCookie(t, cfg.Curl.CookiePath)
 	return t.TempDir()
+}
+
+// sentinelCookieTransport answers the one request that plants the session
+// cookie: the jar records the response's Set-Cookie and the client's own
+// SaveCookies then writes the file. Seeding through the seam is deliberate —
+// the guard must not know the cookie file's format, which is exactly what this
+// round changes about it.
+type sentinelCookieTransport struct{}
+
+func (sentinelCookieTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Set-Cookie": []string{"SID=" + sentinel + "; Domain=.gog.com; Path=/"}},
+		Body:       io.NopCloser(strings.NewReader("")),
+		Request:    req,
+	}, nil
+}
+
+// seedSentinelCookie plants the session cookie a run must carry, through the
+// transport's own persistence path rather than by writing the file.
+func seedSentinelCookie(t *testing.T, path string) {
+	t.Helper()
+	c, err := httpx.New(httpx.Config{CookieFile: path, Transport: sentinelCookieTransport{}})
+	if err != nil {
+		t.Fatalf("httpx.New: %v", err)
+	}
+	resp, err := c.Get(context.Background(), "https://www.gog.com/")
+	if err != nil {
+		t.Fatalf("seed the session cookie: %v", err)
+	}
+	resp.Body.Close()
+	if _, err := c.SaveCookies(); err != nil {
+		t.Fatalf("seed the session cookie: %v", err)
+	}
 }
 
 // sentinelExpiry is the token file's expires_at: a live token for the classes
@@ -294,7 +327,7 @@ func TestCredentialsNeverReachTheOutput(t *testing.T) {
 			args:    []string{"auth", "login"},
 			stdin:   "user@example.com\n" + sentinel + "\n",
 			wantErr: []string{"no credentials available in a non-interactive session"},
-			wantOut: []string{"cookies.txt", "credentials.bin"},
+			wantOut: []string{"cookies.bin", "credentials.bin"},
 		},
 	}
 

@@ -2,9 +2,11 @@ package httpx
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/nekrozis/goggo/internal/cookiefile"
+	"github.com/nekrozis/goggo/internal/secretfile"
 )
 
 // cookieFileClient builds a Client whose jar is a cookieStore, the way a
@@ -32,13 +35,41 @@ func cookieFileClient(t *testing.T, path string) *Client {
 	return c
 }
 
-// writeFixture writes a minimal cookies.txt with the given rows.
-func writeFixture(t *testing.T, path string, rows ...string) {
+// cookieFileFixturePath is the file a test writes its fixture to. The name is
+// the production one, so a test never has to think about it.
+func cookieFileFixturePath(t *testing.T) string {
 	t.Helper()
-	data := "# Netscape HTTP Cookie File\n" + strings.Join(rows, "\n") + "\n"
-	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
-		t.Fatalf("write fixture: %v", err)
+	return filepath.Join(t.TempDir(), "cookies.bin")
+}
+
+// hostOnlyCookie and domainCookie build the stored records the fixtures use.
+// They differ only in the flag that says whether the cookie belongs to one host
+// or to a whole domain.
+func hostOnlyCookie(domain, path, name, value string) cookiefile.PersistentCookie {
+	return cookiefile.PersistentCookie{Domain: domain, Path: path, Name: name, Value: value, HostOnly: true}
+}
+
+func domainCookie(domain, path, name, value string) cookiefile.PersistentCookie {
+	return cookiefile.PersistentCookie{Domain: domain, Path: path, Name: name, Value: value}
+}
+
+// writeCookieFixture plants a cookie file through this package's own encoding,
+// so a test states the cookies it wants rather than the bytes of the file.
+func writeCookieFixture(t *testing.T, path string, cookies ...cookiefile.PersistentCookie) {
+	t.Helper()
+	if err := os.WriteFile(path, encodeCookieFile(cookies), 0o600); err != nil {
+		t.Fatalf("write cookie fixture: %v", err)
 	}
+}
+
+// readCookieFile decodes a cookie file through this package's own decoding.
+func readCookieFile(t *testing.T, path string) []cookiefile.PersistentCookie {
+	t.Helper()
+	cookies, err := decodeCookieFile(mustRead(t, path))
+	if err != nil {
+		t.Fatalf("decode %q: %v", path, err)
+	}
+	return cookies
 }
 
 func mustRead(t *testing.T, path string) []byte {
@@ -87,7 +118,7 @@ func TestSaveCookiesUnconfiguredFails(t *testing.T) {
 }
 
 func TestCookieFileUnsupportedWithCallerHTTPClient(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cookies.txt")
+	path := filepath.Join(t.TempDir(), "cookies.bin")
 	c, err := New(Config{HTTPClient: &http.Client{}, CookieFile: path})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -104,8 +135,7 @@ func TestCookieFileUnsupportedWithCallerHTTPClient(t *testing.T) {
 }
 
 func TestLoadCookiesMissingFileIsEmptyState(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "does-not-exist.txt")
-	c := cookieFileClient(t, path)
+	c := cookieFileClient(t, filepath.Join(t.TempDir(), "does-not-exist.bin"))
 	if err := c.LoadCookies(); err != nil {
 		t.Fatalf("LoadCookies: %v", err)
 	}
@@ -126,29 +156,77 @@ func TestLoadCookiesReadErrorIsWrappedWithPath(t *testing.T) {
 	}
 }
 
-func TestLoadCookiesSkipsMalformedRows(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cookies.txt")
-	writeFixture(t, path,
-		"good.example\tFALSE\t/\tFALSE\t0\tGOOD\t1",
-		"too\tfew\tcolumns",
-		"bad-flag.example\tMAYBE\t/\tFALSE\t0\tX\t1",
-		"# a comment",
-	)
+func TestLoadCookiesEmptyFileIsAnEmptyState(t *testing.T) {
+	path := cookieFileFixturePath(t)
+	writeCookieFixture(t, path)
 	c := cookieFileClient(t, path)
 	if err := c.LoadCookies(); err != nil {
 		t.Fatalf("LoadCookies: %v", err)
 	}
-	if cs := c.store.Cookies(mustParse(t, "https://good.example/")); len(cs) != 1 || cs[0].Name != "GOOD" {
-		t.Errorf("good row not loaded: %+v", cs)
-	}
-	if n := len(c.store.persist); n != 1 {
-		t.Errorf("persist size = %d, want 1 (malformed rows skipped, not fatal)", n)
+	if n := len(c.store.persist); n != 0 {
+		t.Errorf("persist size = %d, want 0", n)
 	}
 }
 
+// TestLoadReportsACorruptFileAsAnError: a file that cannot be read is not the
+// same thing as a session that was never stored, so it is reported rather than
+// silently treated as "no cookies".
+func TestLoadReportsACorruptFileAsAnError(t *testing.T) {
+	cases := []struct {
+		name    string
+		data    []byte
+		wantErr error
+	}{
+		{
+			name:    "not a container at all",
+			data:    []byte("# Netscape HTTP Cookie File\n.gog.com\tTRUE\t/\tFALSE\t0\tSID\tv\n"),
+			wantErr: secretfile.ErrMagic,
+		},
+		{
+			name:    "an empty file",
+			data:    nil,
+			wantErr: secretfile.ErrTruncated,
+		},
+		{
+			// The framing is intact; the records inside it are not. The
+			// failure must be the cookie layer's, not one of the five
+			// framing errors.
+			name:    "a payload that is not a record sequence",
+			data:    encodeRawPayload([]byte{0x80}), // a flag byte with no defined bit
+			wantErr: cookiefile.ErrMalformedPayload,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := cookieFileFixturePath(t)
+			if err := os.WriteFile(path, c.data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			client := cookieFileClient(t, path)
+			err := client.LoadCookies()
+			if !errors.Is(err, c.wantErr) {
+				t.Errorf("LoadCookies = %v, want %v", err, c.wantErr)
+			}
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%q", path)) {
+				t.Errorf("error %v must name the file it could not read", err)
+			}
+			if n := len(client.store.persist); n != 0 {
+				t.Errorf("persist size = %d, want 0 after a failed load", n)
+			}
+		})
+	}
+}
+
+// encodeRawPayload frames payload the way SaveCookies does, so a test can hand
+// LoadCookies a container that is well-formed but holds anything it likes.
+func encodeRawPayload(payload []byte) []byte {
+	return secretfile.Encode(cookieFileMagic, cookieFileVersion, cookieFileObfuscation, payload)
+}
+
 func TestLoadReconstructsHostOnlyCookie(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cookies.txt")
-	writeFixture(t, path, "www.example.com\tFALSE\t/\tFALSE\t0\tSID\tv1")
+	path := cookieFileFixturePath(t)
+	writeCookieFixture(t, path, hostOnlyCookie("www.example.com", "/", "SID", "v1"))
 	c := cookieFileClient(t, path)
 	if err := c.LoadCookies(); err != nil {
 		t.Fatalf("LoadCookies: %v", err)
@@ -166,8 +244,8 @@ func TestLoadReconstructsHostOnlyCookie(t *testing.T) {
 }
 
 func TestLoadReconstructsDomainCookie(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cookies.txt")
-	writeFixture(t, path, ".example.com\tTRUE\t/\tFALSE\t0\tDOM\tv2")
+	path := cookieFileFixturePath(t)
+	writeCookieFixture(t, path, domainCookie("example.com", "/", "DOM", "v2"))
 	c := cookieFileClient(t, path)
 	if err := c.LoadCookies(); err != nil {
 		t.Fatalf("LoadCookies: %v", err)
@@ -183,11 +261,11 @@ func TestLoadReconstructsDomainCookie(t *testing.T) {
 	}
 }
 
-// TestLoadCompletesDefaultPath checks that a row without a path is completed
+// TestLoadCompletesDefaultPath checks that a record without a path is completed
 // with the same RFC default-path helper used when recording events.
 func TestLoadCompletesDefaultPath(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cookies.txt")
-	writeFixture(t, path, "example.com\tFALSE\t\tFALSE\t0\tSID\tv3")
+	path := cookieFileFixturePath(t)
+	writeCookieFixture(t, path, hostOnlyCookie("example.com", "", "SID", "v3"))
 	c := cookieFileClient(t, path)
 	if err := c.LoadCookies(); err != nil {
 		t.Fatalf("LoadCookies: %v", err)
@@ -203,8 +281,10 @@ func TestLoadCompletesDefaultPath(t *testing.T) {
 }
 
 func TestLoadReconstructsSecureCookie(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cookies.txt")
-	writeFixture(t, path, "example.com\tFALSE\t/\tTRUE\t0\tSEC\tv4")
+	path := cookieFileFixturePath(t)
+	secure := hostOnlyCookie("example.com", "/", "SEC", "v4")
+	secure.Secure = true
+	writeCookieFixture(t, path, secure)
 	c := cookieFileClient(t, path)
 	if err := c.LoadCookies(); err != nil {
 		t.Fatalf("LoadCookies: %v", err)
@@ -218,14 +298,19 @@ func TestLoadReconstructsSecureCookie(t *testing.T) {
 	}
 }
 
-func TestLoadPreservesHttpOnlyRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cookies.txt")
-	writeFixture(t, path, "#HttpOnly_example.com\tFALSE\t/\tFALSE\t0\tSID\tv5")
+// TestHttpOnlySurvivesASaveAndLoad locks that the flag is stored and read back
+// as itself: it is a field of the record, so nothing about it may depend on how
+// a domain is written.
+func TestHttpOnlySurvivesASaveAndLoad(t *testing.T) {
+	path := cookieFileFixturePath(t)
+	httpOnly := hostOnlyCookie("example.com", "/", "SID", "v5")
+	httpOnly.HttpOnly = true
+	writeCookieFixture(t, path, httpOnly)
+
 	c := cookieFileClient(t, path)
 	if err := c.LoadCookies(); err != nil {
 		t.Fatalf("LoadCookies: %v", err)
 	}
-
 	key := cookieKey{domain: "example.com", path: "/", name: "SID", hostOnly: true}
 	if st, ok := c.store.persist[key]; !ok || !st.httpOnly {
 		t.Fatalf("persist = %+v (ok=%v), want httpOnly", st, ok)
@@ -233,17 +318,22 @@ func TestLoadPreservesHttpOnlyRoundTrip(t *testing.T) {
 	if _, err := c.SaveCookies(); err != nil {
 		t.Fatalf("SaveCookies: %v", err)
 	}
-	if body := string(mustRead(t, path)); !strings.Contains(body, "#HttpOnly_example.com") {
-		t.Errorf("saved file lost the #HttpOnly_ prefix:\n%s", body)
+
+	records := readCookieFile(t, path)
+	if len(records) != 1 || !records[0].HttpOnly || !records[0].HostOnly {
+		t.Errorf("stored records = %+v, want one httpOnly host-only record", records)
+	}
+	if records[0].Domain != "example.com" {
+		t.Errorf("domain = %q, want it unchanged by the round trip", records[0].Domain)
 	}
 }
 
-// TestLoadSessionCookieStaysSession locks that expiry=0 means "session cookie",
-// which is persisted and reloaded as a session cookie, not as a persisting
+// TestLoadSessionCookieStaysSession locks that an expiry of 0 means "session
+// cookie", which is persisted and reloaded as a session cookie, not as a
 // cookie with an invented expiry.
 func TestLoadSessionCookieStaysSession(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cookies.txt")
-	writeFixture(t, path, "example.com\tFALSE\t/\tFALSE\t0\tSESS\tv6")
+	path := cookieFileFixturePath(t)
+	writeCookieFixture(t, path, hostOnlyCookie("example.com", "/", "SESS", "v6"))
 	c := cookieFileClient(t, path)
 	if err := c.LoadCookies(); err != nil {
 		t.Fatalf("LoadCookies: %v", err)
@@ -256,29 +346,32 @@ func TestLoadSessionCookieStaysSession(t *testing.T) {
 	if _, err := c.SaveCookies(); err != nil {
 		t.Fatalf("SaveCookies: %v", err)
 	}
-	rows := cookiefile.Parse(mustRead(t, path))
-	if len(rows) != 1 || !rows[0].Expires.IsZero() {
-		t.Errorf("session cookie not written with expiry 0: %+v", rows)
+	records := readCookieFile(t, path)
+	if len(records) != 1 || !records[0].Expires.IsZero() {
+		t.Errorf("session cookie not stored with expiry 0: %+v", records)
 	}
 }
 
 // TestLoadFeedsEventsThroughRecord proves Load goes through the SetCookies
-// event path rather than writing persist directly: an already-expired row is
+// event path rather than writing persist directly: an already-expired record is
 // refused by record, exactly as a live expired event would be.
 func TestLoadFeedsEventsThroughRecord(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cookies.txt")
-	writeFixture(t, path, "example.com\tFALSE\t/\tFALSE\t1\tOLD\tv7") // expiry 1970 -> past
+	path := cookieFileFixturePath(t)
+	expired := hostOnlyCookie("example.com", "/", "OLD", "v7")
+	expired.Expires = time.Unix(1, 0) // 1970 -> past
+	writeCookieFixture(t, path, expired)
+
 	c := cookieFileClient(t, path)
 	if err := c.LoadCookies(); err != nil {
 		t.Fatalf("LoadCookies: %v", err)
 	}
 	if n := len(c.store.persist); n != 0 {
-		t.Errorf("persist size = %d, want 0 (expired row must not enter persist)", n)
+		t.Errorf("persist size = %d, want 0 (expired record must not enter persist)", n)
 	}
 }
 
 func TestSaveDropsEntriesExpiredSinceRecording(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cookies.txt")
+	path := cookieFileFixturePath(t)
 	c := cookieFileClient(t, path)
 	c.store.now = func() time.Time { return fixedNow }
 
@@ -296,8 +389,8 @@ func TestSaveDropsEntriesExpiredSinceRecording(t *testing.T) {
 	if res.Written != 0 {
 		t.Errorf("Written = %d, want 0", res.Written)
 	}
-	if rows := cookiefile.Parse(mustRead(t, path)); len(rows) != 0 {
-		t.Errorf("expired cookie was written: %+v", rows)
+	if records := readCookieFile(t, path); len(records) != 0 {
+		t.Errorf("expired cookie was written: %+v", records)
 	}
 }
 
@@ -324,25 +417,22 @@ func TestSaveWritesDeterministicSortedOutput(t *testing.T) {
 		return mustRead(t, path)
 	}
 
-	forward := save(filepath.Join(dir, "fwd.txt"), []int{0, 1, 2})
-	reverse := save(filepath.Join(dir, "rev.txt"), []int{2, 1, 0})
+	forward := save(filepath.Join(dir, "fwd.bin"), []int{0, 1, 2})
+	reverse := save(filepath.Join(dir, "rev.bin"), []int{2, 1, 0})
 	if !bytes.Equal(forward, reverse) {
-		t.Errorf("insertion order changed output:\nforward=%q\nreverse=%q", forward, reverse)
+		t.Errorf("insertion order changed the file:\nforward=%q\nreverse=%q", forward, reverse)
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(forward)), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("lines = %d (%q), want header + 3 rows", len(lines), forward)
-	}
-	if rows := cookiefile.Parse(forward); len(rows) != 3 ||
-		rows[0].Domain != "alpha.example" || rows[1].Domain != "mid.example" || rows[2].Domain != "zeta.example" {
-		t.Errorf("rows not sorted by domain: %+v", rows)
+	records := readCookieFile(t, filepath.Join(dir, "fwd.bin"))
+	if len(records) != 3 ||
+		records[0].Domain != "alpha.example" || records[1].Domain != "mid.example" || records[2].Domain != "zeta.example" {
+		t.Errorf("records not sorted by domain: %+v", records)
 	}
 }
 
 func TestSaveReplacesFileAtomicallyWith0600(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cookies.txt")
-	if err := os.WriteFile(path, []byte("stale garbage without a header\n"), 0o644); err != nil {
+	path := filepath.Join(t.TempDir(), "cookies.bin")
+	if err := os.WriteFile(path, []byte("stale garbage without a container\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -357,8 +447,8 @@ func TestSaveReplacesFileAtomicallyWith0600(t *testing.T) {
 	if strings.Contains(string(data), "stale garbage") {
 		t.Errorf("previous content survived the replace: %q", data)
 	}
-	if !strings.HasPrefix(string(data), "# Netscape HTTP Cookie File") {
-		t.Errorf("file lacks the codec header: %q", data)
+	if !bytes.HasPrefix(data, []byte(cookieFileMagic)) {
+		t.Errorf("file does not start with the container magic: %q", data)
 	}
 	if entries, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".goggo-cookies-*")); err != nil || len(entries) != 0 {
 		t.Errorf("temp file left behind: %v (%v)", entries, err)
@@ -374,11 +464,72 @@ func TestSaveReplacesFileAtomicallyWith0600(t *testing.T) {
 	}
 }
 
+// TestStoredCookieFileIsNotPlaintextAndStillSends is the round's central guard,
+// in both halves at once: the file must not carry the session cookie in the
+// clear, and a session restored from it must still send that cookie. The first
+// half alone would be satisfied by a file nothing can read, so the request the
+// restored jar makes is part of the same test.
+func TestStoredCookieFileIsNotPlaintextAndStillSends(t *testing.T) {
+	const (
+		name  = "SIDSENTINEL"
+		value = "COOKIE-VALUE-SENTINEL-4f7c"
+	)
+	path := filepath.Join(t.TempDir(), "cookies.bin")
+
+	var mu sync.Mutex
+	var sent [][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/set" {
+			http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/"})
+			return
+		}
+		mu.Lock()
+		sent = append(sent, cookiePairs(r.Cookies()))
+		mu.Unlock()
+	}))
+	t.Cleanup(srv.Close)
+
+	src := cookieFileClient(t, path)
+	if _, err := src.Get(context.Background(), srv.URL+"/set"); err != nil {
+		t.Fatalf("Get(/set): %v", err)
+	}
+	if _, err := src.SaveCookies(); err != nil {
+		t.Fatalf("SaveCookies: %v", err)
+	}
+
+	data := mustRead(t, path)
+	for _, needle := range []string{value, name} {
+		if bytes.Contains(data, []byte(needle)) {
+			t.Errorf("the stored file contains %q in the clear", needle)
+		}
+	}
+	if !bytes.HasPrefix(data, []byte(cookieFileMagic)) {
+		t.Errorf("stored file starts with %q, want the container magic", data[:min(len(data), len(cookieFileMagic))])
+	}
+
+	dst := cookieFileClient(t, path)
+	if err := dst.LoadCookies(); err != nil {
+		t.Fatalf("LoadCookies: %v", err)
+	}
+	if _, err := dst.Get(context.Background(), srv.URL+"/check"); err != nil {
+		t.Fatalf("Get(/check): %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 1 {
+		t.Fatalf("the fixture served %d authenticated requests, want 1: the cookie was never sent", len(sent))
+	}
+	if want := []string{name + "=" + value}; !slices.Equal(sent[0], want) {
+		t.Errorf("the request carried %v, want %v", sent[0], want)
+	}
+}
+
 // TestRoundTripPreservesSendBehaviourAndBytes is the integration test: state
 // saved by one client and loaded by a fresh one must send the same cookies, and
 // re-saving must produce identical bytes.
 func TestRoundTripPreservesSendBehaviourAndBytes(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cookies.txt")
+	path := filepath.Join(t.TempDir(), "cookies.bin")
 
 	src := cookieFileClient(t, path)
 	src.store.now = func() time.Time { return fixedNow }
@@ -434,7 +585,7 @@ func TestRoundTripPreservesSendBehaviourAndBytes(t *testing.T) {
 // savers must not deadlock or panic. (The race detector needs cgo, which this
 // project deliberately avoids.)
 func TestConcurrentSetCookiesAndSave(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cookies.txt")
+	path := filepath.Join(t.TempDir(), "cookies.bin")
 	c := cookieFileClient(t, path)
 	u := mustParse(t, "https://gog.com/")
 
@@ -460,7 +611,7 @@ func TestConcurrentSetCookiesAndSave(t *testing.T) {
 	if res.Written != 1 {
 		t.Errorf("Written = %d, want 1", res.Written)
 	}
-	if rows := cookiefile.Parse(mustRead(t, path)); len(rows) != 1 {
-		t.Errorf("rows = %+v, want one SID row", rows)
+	if records := readCookieFile(t, path); len(records) != 1 {
+		t.Errorf("records = %+v, want one SID record", records)
 	}
 }

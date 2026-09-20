@@ -22,7 +22,7 @@ func NewConfig(configHome, cacheHome string) Config {
 	cfg.CacheDirectory = cacheHome + "/" + ProgramName
 	cfg.XMLDirectory = cfg.CacheDirectory + "/xml"
 	cfg.ConfigDirectory = configHome + "/" + ProgramName
-	cfg.Curl.CookiePath = cfg.ConfigDirectory + "/cookies.txt"
+	cfg.Curl.CookiePath = cfg.ConfigDirectory + "/cookies.bin"
 	cfg.BlacklistFilePath = cfg.ConfigDirectory + "/blacklist.txt"
 	cfg.IgnorelistFilePath = cfg.ConfigDirectory + "/ignorelist.txt"
 

@@ -44,7 +44,7 @@ type cookieKey struct {
 }
 
 // cookieState is the persistable subset of a cookie event. expires is the
-// value to write into the Netscape file (zero = session cookie).
+// value to store (zero = session cookie).
 type cookieState struct {
 	expires  time.Time
 	value    string

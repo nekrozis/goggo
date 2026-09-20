@@ -115,3 +115,46 @@ func TestTheLegacyFileSurvivesAnAuthCommand(t *testing.T) {
 		t.Errorf("legacy file = %q, want it byte-identical", after)
 	}
 }
+
+// legacyCookieName is the cookie file an earlier build wrote: Netscape columns
+// beside the file this build keeps. Like the token file above, it is not this
+// build's to read or to delete.
+const legacyCookieName = "cookies.txt"
+
+// TestLogoutRemovesTheCookieFileAndSparesTheLegacyOne is the cookie half of the
+// same rule, at the level a user sees: --logout clears the file this build
+// owns — the cookie path the configuration names, whatever that is — and leaves
+// the earlier build's file byte-identical.
+func TestLogoutRemovesTheCookieFileAndSparesTheLegacyOne(t *testing.T) {
+	isolateRoots(t)
+	cfg, err := newConfig()
+	if err != nil {
+		t.Fatalf("newConfig: %v", err)
+	}
+	if err := os.MkdirAll(cfg.ConfigDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const body = "# Netscape HTTP Cookie File\n.gog.com\tTRUE\t/\tFALSE\t0\tSID\tlegacy\n"
+	legacy := filepath.Join(cfg.ConfigDirectory, legacyCookieName)
+	if err := os.WriteFile(legacy, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfg.Curl.CookiePath, []byte("session state"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, errOut := runReference(t, core.Dependencies{}, "auth", "logout"); strings.Contains(errOut, "Error:") {
+		t.Fatalf("auth logout: %s", errOut)
+	}
+
+	if _, err := os.Stat(cfg.Curl.CookiePath); !os.IsNotExist(err) {
+		t.Errorf("stat(%q) = %v, want the cookie file gone", cfg.Curl.CookiePath, err)
+	}
+	after, err := os.ReadFile(legacy)
+	if err != nil {
+		t.Fatalf("the legacy cookie file was removed: %v", err)
+	}
+	if string(after) != body {
+		t.Errorf("legacy cookie file = %q, want it byte-identical", after)
+	}
+}

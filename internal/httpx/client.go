@@ -34,8 +34,8 @@ type Config struct {
 
 	// CookieFile enables cookie-file persistence when non-empty: New installs
 	// a cookieStore as the transport's jar, and LoadCookies/SaveCookies read and
-	// write this Netscape cookies.txt path. New performs no file I/O itself, so
-	// the caller loads the state explicitly, before its session checks.
+	// write this path. New performs no file I/O itself, so the caller loads the
+	// state explicitly, before its session checks.
 	//
 	// A non-empty CookieFile with a caller-provided HTTPClient is an error
 	// (ErrCookieFileUnsupported): the caller's jar cannot be replaced.

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/secretfile"
 )
 
 // newTestStore returns an empty, unbound store: the state a fresh install has
@@ -131,33 +132,33 @@ func TestOpenRejectsAnUnusableFile(t *testing.T) {
 		body func(*testing.T) []byte
 		want error
 	}{
-		{"an empty file", func(*testing.T) []byte { return nil }, errStoreTruncated},
-		{"a header cut short", func(*testing.T) []byte { return []byte("GOGGO") }, errStoreTruncated},
+		{"an empty file", func(*testing.T) []byte { return nil }, secretfile.ErrTruncated},
+		{"a header cut short", func(*testing.T) []byte { return []byte("GOGGO") }, secretfile.ErrTruncated},
 		{"a foreign file", func(t *testing.T) []byte {
 			return append([]byte("NOTGOGGO"), valid(t)[len(storeMagic):]...)
-		}, errStoreMagic},
+		}, secretfile.ErrMagic},
 		{"a version this build does not know", func(t *testing.T) []byte {
 			data := valid(t)
 			data[len(storeMagic)] = 99
 			return data
-		}, errStoreVersion},
+		}, secretfile.ErrVersion},
 		{"a payload shorter than the header declares", func(t *testing.T) []byte {
 			data := valid(t)
 			return data[:len(data)-2]
-		}, errStoreLength},
+		}, secretfile.ErrLength},
 		{"trailing bytes after the checksum", func(t *testing.T) []byte {
 			return append(valid(t), 0x00)
-		}, errStoreLength},
+		}, secretfile.ErrLength},
 		{"a payload the checksum rejects", func(t *testing.T) []byte {
 			data := valid(t)
 			data[len(data)-1] ^= 0xff
 			return data
-		}, errStoreCRC},
+		}, secretfile.ErrCRC},
 		{"a payload that is not JSON", func(*testing.T) []byte {
-			return frameStore(xorKeystream([]byte("not json at all")))
+			return secretfile.Encode(storeMagic, storeVersion, storeObfuscation, []byte("not json at all"))
 		}, errStorePayload},
 		{"a payload that is JSON but not an object", func(*testing.T) []byte {
-			return frameStore(xorKeystream([]byte(`["a","b"]`)))
+			return secretfile.Encode(storeMagic, storeVersion, storeObfuscation, []byte(`["a","b"]`))
 		}, errStorePayload},
 	}
 

@@ -316,7 +316,7 @@ func TestRemoveOrphansDeletesExactlyTheList(t *testing.T) {
 	assertFileContent(t, unlisted, "x")
 
 	// A cancelled run removes nothing: the caller interrupted before the first
-	// deletion, and a destructive batch must not start on its way out (D33).
+	// deletion, and a destructive batch must not start on its way out.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	attempts, err = d.RemoveOrphans(ctx, OrphansResult{InstallPath: dir, Files: []string{unlisted}})

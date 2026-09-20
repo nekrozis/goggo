@@ -39,8 +39,7 @@ const (
 // downloadError is one download attempt's failure. keep decides the cleanup
 // (keep the partial file vs remove it); retryable decides whether another
 // attempt may follow. The two are independent: a transport failure keeps the
-// file and may retry, a local I/O failure removes it and never retries
-// (D71).
+// file and may retry, a local I/O failure removes it and never retries.
 type downloadError struct {
 	err       error
 	kind      downloadFailureKind
@@ -60,8 +59,8 @@ type WebsiteURLProvider interface {
 }
 
 // WebsiteDeps carries everything the website run needs from outside. The flag
-// fields are explicit values, not configuration reads (D25); the XML
-// directory is where the remote checksum documents are cached.
+// fields are explicit values, not configuration reads; the XML directory is
+// where the remote checksum documents are cached.
 type WebsiteDeps struct {
 	HTTP              *httpx.Client
 	URL               WebsiteURLProvider
@@ -79,15 +78,17 @@ type WebsiteDeps struct {
 	TaskResult func(task model.WebsiteTask, err error)
 }
 
-// RunWebsite executes the website download path: the single-file downloads with
-// their version checks, resume handling and failure cleanup.
+// RunWebsite executes the website download path as upstream writes it: the
+// single-file downloads with their version checks, the rename of the old file,
+// resume handling, the failure-cleanup matrix and the SSL retry class.
 //
-// Failure semantics are the website worker's own (D68): per-item problems —
+// Failure semantics are the website worker's own: per-item problems —
 // blacklisted files, missing directories, unusable downlink documents, renames
 // that fail — are reported and skipped without failing the run, while a download
 // that exhausts its retries is cleaned up according to its failure class.
 // RunWebsite returns nil when every task has ended; only a cancelled context makes
-// it return an error. The scheduling is shared with the Galaxy path (D67).
+// it return an error. The scheduling, the cancellation and the event delivery are
+// shared with the Galaxy path.
 func RunWebsite(ctx context.Context, tasks []model.WebsiteTask, opts Options, deps WebsiteDeps) error {
 	if deps.HTTP == nil || deps.URL == nil || deps.Observer == nil {
 		return errors.New("transfer: website run needs an http client, a url provider and an observer")
@@ -343,7 +344,7 @@ func downloadWithRetries(ctx context.Context, task model.WebsiteTask, opts Optio
 // websiteDownloadAttempt performs one attempt of the file download. A nil
 // downloadError means the attempt succeeded. The failure classification happens
 // where each error is produced — network-side failures keep the partial file,
-// local-side failures remove it (D71).
+// local-side failures remove it.
 func websiteDownloadAttempt(ctx context.Context, task model.WebsiteTask, deps WebsiteDeps, url string, resume bool, emit func(Event)) (lastModified time.Time, derr *downloadError) {
 	var f *os.File
 	var err error
@@ -396,7 +397,7 @@ func websiteDownloadAttempt(ctx context.Context, task model.WebsiteTask, deps We
 
 	// The stream is read and written block by block so that a read error (the
 	// network side) and a write error (the local side) classify separately —
-	// an io.Copy error could be either (D71).
+	// an io.Copy error could be either.
 	buf := make([]byte, 64<<10)
 	for {
 		if ctx.Err() != nil {

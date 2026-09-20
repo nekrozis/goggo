@@ -191,7 +191,7 @@ func compactPath(path string, maxCells int) string {
 	return truncateVisible(base, maxCells)
 }
 
-// taskLine renders one task row, degrading by priority (D31):
+// taskLine renders one task row, degrading by priority:
 // the bar goes first, then the path compacts (hierarchy-preserving), then
 // the byte counts, then the rate. The percentage and the row number survive
 // everything short of a truncation. t.path is the display path — already

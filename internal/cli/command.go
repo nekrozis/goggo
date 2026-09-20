@@ -2,7 +2,8 @@ package cli
 
 import "github.com/nekrozis/goggo/internal/config"
 
-// The command tree the CLI is built on (D1, D13, D14).
+// The command tree the CLI is built on: this CLI's own product surface,
+// organised by user concept rather than by the upstream flag set.
 //
 // This file is the parser's data and vocabulary — which commands exist, how they
 // nest, what each node accepts — and holds no behaviour. Only commands this build
@@ -95,7 +96,7 @@ const (
 )
 
 // metaAction is what a meta invocation asks for. Meta commands are built in:
-// they short-circuit before any business dispatch (D18).
+// they short-circuit before any business dispatch.
 type metaAction uint8
 
 const (
@@ -106,7 +107,7 @@ const (
 
 // target is the "<product id or gamename>[/<build id or index>]" argument the
 // Galaxy-backed commands take. Splitting it is the parser's job: the dispatcher
-// receives the two parts, never the joined string (D17).
+// receives the two parts, never the joined string.
 type target struct {
 	Product string
 	Build   string
@@ -137,7 +138,7 @@ type invocation struct {
 	// directory.
 	outputFile string
 	// yes carries the destructive-confirmation flag. Only the destructive
-	// commands accept it (D16).
+	// commands accept it.
 	yes bool
 }
 
@@ -145,7 +146,7 @@ type invocation struct {
 //
 // options lists what the node ADDS to the shared set (sharedOptions): the parser
 // checks an option against common ∪ node, so "global" means shared semantics, not
-// "every command accepts it" (D15). id is cmdNone for pure namespaces; "download"
+// "every command accepts it". id is cmdNone for pure namespaces; "download"
 // is the one node that is both a leaf and a namespace — a first word matching a
 // child dispatches the subcommand, anything else is an argument of the leaf.
 //
@@ -189,12 +190,11 @@ var installTargetOptions = []optionID{
 	optArch,
 }
 
-// listGamesOptions filters the games listing (D7: filters belong to the command,
-// not to the CLI at large).
+// listGamesOptions filters the games listing.
 //
 // The installer filters are the listing side of platform/language. They are
 // accepted by `list games` — the listing that shows installers — and not by the
-// other list resources, where they would filter nothing (D15).
+// other list resources, where they would filter nothing.
 var listGamesOptions = []optionID{
 	optTag,
 	optGame,
@@ -210,7 +210,7 @@ var listGamesOptions = []optionID{
 // saveOptions are the six artifact switches. On download they fetch AND write;
 // on list details/json they gate the fetch and the display only — list never
 // writes. download file accepts none of them: an option that does nothing is not
-// offered (D14).
+// offered.
 var saveOptions = []optionID{
 	optSaveSerials,
 	optSaveChangelogs,
@@ -237,8 +237,7 @@ var listDetailsNotes = []string{
 }
 
 // verifyOptions are what a read-only verification honours: it filters by the
-// include mask and honours the blacklist, while the orphan walk does neither
-// (D2).
+// include mask and honours the blacklist, while the orphan walk does neither.
 var verifyOptions = []optionID{
 	optInclude,
 	optExclude,

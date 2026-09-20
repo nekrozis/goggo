@@ -14,7 +14,7 @@ func (c *Client) GameDetailsJSON(ctx context.Context, gameID string) (map[string
 }
 
 // OwnedGameIDs fetches the ids of all owned products. It returns them rather
-// than storing them, so the caller owns the state (D2).
+// than storing them, so the caller owns the state.
 func (c *Client) OwnedGameIDs(ctx context.Context) ([]string, error) {
 	root, err := c.getResponseJSON(ctx, c.ep.www+"/user/data/games")
 	if err != nil {

@@ -17,7 +17,7 @@ type FileFact struct {
 
 	// Status is the observed fact. It is StatusUnset when Err is set: there is
 	// no fact about a file that could not be read, and neither "absent" nor
-	// "fine" may be claimed for it (decisions D43).
+	// "fine" may be claimed for it.
 	Status reconcile.FileStatus
 
 	// Err is the observation failure — the file's state could not be read.

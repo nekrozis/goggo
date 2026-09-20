@@ -368,7 +368,7 @@ func (t *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return http.DefaultTransport.RoundTrip(clone)
 }
 
-// TestTransportOverrideKeepsTheCookieJar locks D28-3: replacing the network exit
+// TestTransportOverrideKeepsTheCookieJar locks that replacing the network exit
 // must leave the client, its jar and the cookie file exactly what this package
 // builds. A caller-provided HTTPClient cannot do that — it decides the jar, which
 // is why it is refused together with a CookieFile.

@@ -15,7 +15,7 @@ import (
 // extraction: one member that lives inside the container, whose own chunk also
 // exists. containerBody is what the container file holds — passing anything
 // other than the member's own content is what makes the manifest's sfcRef
-// describe bytes the member does not have (the D48/D49 case).
+// describe bytes the member does not have.
 type sfcInstallFixture struct {
 	f           *planFixture
 	cfg         config.Config
@@ -93,11 +93,11 @@ func (fi *sfcInstallFixture) downloader(t *testing.T, console *fakeConsole) *Dow
 	return d
 }
 
-// TestInstallDownloadsAContainerMemberTheContainerCannotSupply is the D48 fix end
-// to end: the manifest's sfcRef points the member at bytes that are not its own,
-// so the extraction refuses to write them and the install downloads the member
-// through the ordinary transfer instead. The first install then holds what the
-// manifest declares, which is the whole point of D4.
+// TestInstallDownloadsAContainerMemberTheContainerCannotSupply covers the
+// direct-download fallback end to end: the manifest's sfcRef points the member at
+// bytes that are not its own, so the extraction refuses to write them and the
+// install downloads the member through the ordinary transfer instead. The first
+// install then holds what the manifest declares.
 func TestInstallDownloadsAContainerMemberTheContainerCannotSupply(t *testing.T) {
 	fi := newSFCInstallFixture(t, "bytes that are not the member's", true)
 	console := newFakeConsole()
@@ -123,10 +123,8 @@ func TestInstallDownloadsAContainerMemberTheContainerCannotSupply(t *testing.T) 
 }
 
 // TestInstallFailsWhenTheContainerMemberCannotBeDownloaded locks the failure
-// side: the extraction refuses the member, the direct
-// download cannot supply it either, and the install must NOT report success over
-// the missing file — the same rule D43 states for a state that could not be
-// verified.
+// side: the extraction refuses the member, the direct download cannot supply it
+// either, and the install must NOT report success over the missing file.
 func TestInstallFailsWhenTheContainerMemberCannotBeDownloaded(t *testing.T) {
 	fi := newSFCInstallFixture(t, "bytes that are not the member's", false)
 	console := newFakeConsole()

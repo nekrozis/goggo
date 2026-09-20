@@ -275,7 +275,7 @@ func TestShowBuildsIndexOutOfRange(t *testing.T) {
 
 // TestShowBuildsLinuxWithoutBuilds covers the fallback branch: the two messages
 // are printed and the run then reports that the installer fallback is not
-// implemented, instead of exiting as though it had run (D13).
+// implemented, instead of exiting as though it had run.
 func TestShowBuildsLinuxWithoutBuilds(t *testing.T) {
 	srv := newFixtureServer(t)
 	srv.setBuilds(`{}`)

@@ -255,9 +255,9 @@ func (d *Downloader) selectProductID(ctx context.Context, productID string) (str
 // gameListOptions assembles the product query for the game-name lookup.
 //
 // It duplicates the assembly in internal/cli/list.go on purpose: the listing
-// command still lives there (D17), and the two copies converge when it moves
-// into this package. Keeping them separate keeps this step from changing
-// listing behaviour.
+// command still lives there, and the two copies converge when it moves into
+// this package. Keeping them separate keeps this step from changing listing
+// behaviour.
 func (d *Downloader) gameListOptions(gameRegex string) catalog.ListOptions {
 	cfg := d.cfg
 	return catalog.ListOptions{

@@ -511,9 +511,9 @@ func mustChunkMD5(t *testing.T, cdn *testCDN, content string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// TestRunChunkResumeFromMemory locks the D72 model: a break mid-body keeps the
-// bytes already received in memory, and the retry carries a Range header from
-// that offset — the suffix appends and the chunk's hash passes.
+// TestRunChunkResumeFromMemory: a break mid-body keeps the bytes already
+// received in memory, and the retry carries a Range header from that offset —
+// the suffix appends and the chunk's hash passes.
 func TestRunChunkResumeFromMemory(t *testing.T) {
 	full := compress(t, "chunk body content")
 	var mu sync.Mutex
@@ -641,9 +641,8 @@ func TestRunChunkRange200Fold(t *testing.T) {
 	}
 }
 
-// TestRunChunkFiletime locks the D77 addition: the server's Last-Modified
-// moves onto the assembled file, and a chunk that carries no timestamp leaves
-// the mtime alone.
+// TestRunChunkFiletime: the server's Last-Modified moves onto the assembled
+// file, and a chunk that carries no timestamp leaves the mtime alone.
 func TestRunChunkFiletime(t *testing.T) {
 	lm := time.Date(2021, 7, 6, 5, 4, 3, 0, time.UTC)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -107,7 +107,7 @@ func TestRenderGameDetailsTextGolden(t *testing.T) {
 
 // TestSaveFlagAcceptance locks the three-leaf registration: download writes,
 // list details/json gate the display, and download file refuses the flags
-// outright (D14).
+// outright.
 func TestSaveFlagAcceptance(t *testing.T) {
 	inv := mustParse(t, "download", "g", "--save-serials", "--save-product-json")
 	if !inv.cfg.DownloadConfig.SaveSerials || !inv.cfg.DownloadConfig.SaveProductJSON {

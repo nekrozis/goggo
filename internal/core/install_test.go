@@ -167,7 +167,7 @@ func TestInstallEndToEnd(t *testing.T) {
 
 	// The assembled files carry the decompressed content of the chunks the
 	// plan selected — the DLC's bytes over the base game's for data.bin — and
-	// the small-files container unpacks its member and is gone (D73).
+	// the small-files container unpacks its member and is gone.
 	assertFileContent(t, installPath+"/game/data.bin", dlc.content)
 	assertFileContent(t, installPath+"/game/dep/depfile.bin", dep.content)
 	// The fixture's sfcRef advertises 100 bytes but the container holds fewer:

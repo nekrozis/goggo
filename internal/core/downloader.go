@@ -39,7 +39,7 @@ type Downloader struct {
 //
 // It exists for the one caller that still assembles its own work: the front
 // end's listing command fetches its data itself until that moves into this
-// package (D17). It goes away with that move.
+// package. It goes away with that move.
 func (d *Downloader) Config() config.Config { return d.cfg }
 
 // Web exposes the website client for the same transitional reason as Config:

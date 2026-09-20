@@ -77,8 +77,7 @@ func CompileFilters(gameRegex, filterListPath, ignoreDLCCountRegex string) (Filt
 // substring match, not a whole-string match.
 //
 // The patterns are evaluated by RE2, which does not support backreferences or
-// lookaround; those spellings are a compile error rather than a silently
-// different match (D4).
+// lookaround; those spellings are a compile error, not a silently different match.
 func MatchesAny(res []*regexp.Regexp, name string) bool {
 	for _, re := range res {
 		if re.MatchString(name) {

@@ -13,7 +13,8 @@ import (
 // ApplyPlanChanges executes the plan's destructive pre-work: the old-build
 // deletions, then the parent directories of every task. Per-item failures are
 // reported as error notices and skipped, non-fatally; a whole-function error
-// means the run cannot continue, e.g. a cancelled context (D62).
+// means the run cannot continue — a cancelled context returns ctx.Err() with
+// the notices collected so far.
 //
 // It does not create the task files themselves, download anything or clean up
 // partial downloads: those belong to the transfer and its failure handling.

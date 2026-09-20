@@ -11,7 +11,7 @@ import (
 )
 
 // tokenFileMode is the permission mode for token files. 0600 is Unix semantics;
-// on Windows no equivalent ACL behaviour is claimed (D4).
+// on Windows no equivalent ACL behaviour is claimed.
 const tokenFileMode = 0o600
 
 // SaveTokenFile persists g's token store to path as compact JSON, with the stored

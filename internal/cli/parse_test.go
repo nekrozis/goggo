@@ -77,9 +77,9 @@ func TestCommandTreeResolution(t *testing.T) {
 	}
 }
 
-// TestRemovedCommandsAreUnknown locks D14: the commands this build does not
-// have are absent from the tree. The removed option whose capability moved
-// somewhere else is the parser's own case in options_test.go
+// TestRemovedCommandsAreUnknown locks the product surface: the commands this
+// build does not have are absent from the tree. The removed option whose
+// capability moved somewhere else is the parser's own case in options_test.go
 // (TestParseUnknownAndRemovedOptions).
 func TestRemovedCommandsAreUnknown(t *testing.T) {
 	for _, name := range []string{"repair", "xml", "cache", "cloud", "config"} {
@@ -90,9 +90,9 @@ func TestRemovedCommandsAreUnknown(t *testing.T) {
 	}
 }
 
-// TestMetaShortcuts locks D18: -h/--help and
-// --version/version resolve as meta, carry the path they were asked about, and
-// leave the business payload empty.
+// TestMetaShortcuts locks the meta shortcuts: -h/--help and --version/version
+// resolve as meta, carry the path they were asked about, and leave the business
+// payload empty.
 func TestMetaShortcuts(t *testing.T) {
 	for _, args := range [][]string{{"-h"}, {"--help"}, {"help"}} {
 		inv := mustParse(t, args...)
@@ -151,8 +151,8 @@ func TestTypedPayload(t *testing.T) {
 	}
 }
 
-// TestOptionAcceptanceIsPerCommand locks D15: "shared"
-// means shared semantics, not unconditional acceptance.
+// TestOptionAcceptanceIsPerCommand locks what "shared" means: shared semantics,
+// not unconditional acceptance.
 func TestOptionAcceptanceIsPerCommand(t *testing.T) {
 	// Accepted where it means something.
 	if inv := mustParse(t, "install", "123", "--threads", "8", "--check-free-space"); inv.cfg.Threads != 8 {
@@ -168,14 +168,14 @@ func TestOptionAcceptanceIsPerCommand(t *testing.T) {
 	// so the option is refused rather than accepted and ignored.
 	mustUsageError(t, "orphans", "check", "123", "--include", "installers")
 	mustUsageError(t, "orphans", "check", "123", "--tag", "x")
-	// --yes belongs to the destructive command only (D16).
+	// --yes belongs to the destructive command only.
 	mustUsageError(t, "install", "123", "--yes")
 	mustUsageError(t, "orphans", "check", "123", "--yes")
 	// verify honours the include mask and the blacklist.
 	if inv := mustParse(t, "verify", "123", "--include", "installers"); inv.cfg.DownloadConfig.Include == 0 {
 		t.Error("verify --include produced an empty mask")
 	}
-	// Filters belong to the listing they filter (D7).
+	// Filters belong to the listing they filter.
 	mustUsageError(t, "install", "123", "--tag", "x")
 	if inv := mustParse(t, "list", "games", "--tag", "rpg,indie"); len(inv.cfg.DownloadConfig.Tags) != 2 {
 		t.Errorf("tags = %v, want two entries", inv.cfg.DownloadConfig.Tags)

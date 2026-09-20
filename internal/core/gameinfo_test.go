@@ -382,9 +382,9 @@ func gameInfoDocArrayDLCs(id, slug, title string, installers []string) string {
 		`"dlcs":[]}`
 }
 
-// TestGameDetailsSkipsAnArrayShapedDLCsMember locks D52 end-to-end: a product
-// whose dlcs is the empty array acquires like any DLC-less product — no error,
-// no expansion request, zero DLCs — instead of failing the run at Product.
+// TestGameDetailsSkipsAnArrayShapedDLCsMember locks the skip end to end: a
+// product whose dlcs is the empty array acquires like any DLC-less product — no
+// error, no expansion request, zero DLCs — instead of failing the run at Product.
 // This is the exact live shape (heroes_of_might_and_magic_3_complete_edition)
 // that the pre-fix build rejected.
 func TestGameDetailsSkipsAnArrayShapedDLCsMember(t *testing.T) {

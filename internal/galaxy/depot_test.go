@@ -449,7 +449,7 @@ func TestUint64Value(t *testing.T) {
 }
 
 // TestDepotItemsRejectsBrokenChunkFields: a chunk whose size is a string is a
-// protocol error, not a value to coerce (D10/D11).
+// protocol error, not a value to coerce.
 func TestDepotItemsRejectsBrokenChunkFields(t *testing.T) {
 	const body = `{"depot":{"items":[{"path":"a.bin",` +
 		`"chunks":[{"compressedMd5":"c","md5":"u","compressedSize":"1","size":1}]}]}}`

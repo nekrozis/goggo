@@ -229,7 +229,7 @@ func (d *Downloader) downloadWebsiteFile(ctx context.Context, spec, outputFile s
 // parseWebsiteFileSpec splits a spec into game, optional DLC gamename and file
 // id, after stripping the protocol prefix. Two parts name a base-game file,
 // three name a DLC file; anything else is refused. Empty segments are refused
-// too: dropping one silently would change which file is meant (D2).
+// too: dropping one silently would change which file is meant.
 func parseWebsiteFileSpec(spec string) (game, dlc, fileid string, err error) {
 	raw := strings.TrimPrefix(spec, config.ProtocolPrefix)
 	parts := strings.Split(raw, "/")

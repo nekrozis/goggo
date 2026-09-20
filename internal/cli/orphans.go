@@ -32,10 +32,10 @@ func (c *console) runOrphansCheck(ctx context.Context, d *core.Downloader, inv i
 //
 // The authorization is the front end's business (the terminal, `--yes` and the
 // answer), while core's is deleting the paths it was handed. The list is printed
-// before the question, so what the user approves is what they just read (D10).
+// before the question, so what the user approves is what they just read.
 //
 // The interrupt context is set up here because a cancelled removal stops and
-// still reports what it deleted (D33, D20).
+// still reports what it deleted.
 func (c *console) runOrphansRemove(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer) outcome {
 	ctx, stopSignal := signal.NotifyContext(ctx, os.Interrupt)
 	defer stopSignal()
@@ -51,10 +51,10 @@ func (c *console) runOrphansRemove(ctx context.Context, d *core.Downloader, inv 
 
 // removeOrphans authorizes and applies one removal.
 //
-// The list has already been shown, so what the user approves is what they just
-// read (D10), and the authorization has exactly two sources: the explicit --yes
-// flag, which says "I authorized this — do not ask" (D16), or the answer the
-// terminal gives. A run without authorization deletes nothing and reports that.
+// The list has already been shown, and the authorization has exactly two
+// sources: the explicit --yes flag, which says "I authorized this — do not
+// ask", or the answer the terminal gives. A run without authorization deletes
+// nothing and reports that.
 func (c *console) removeOrphans(ctx context.Context, d *core.Downloader, res core.OrphansResult, yes bool, stdout, stderr io.Writer) outcome {
 	if len(res.Files) == 0 {
 		// Nothing to authorize and nothing to delete; the count line above
@@ -97,10 +97,7 @@ func (c *console) removeOrphans(ctx context.Context, d *core.Downloader, res cor
 
 // authorized reports whether a removal may go ahead.
 //
-// An explicit --yes IS the authorization — asking anyway would make the flag
-// meaningless on a terminal, which is where a destructive command is normally
-// run (D16). Without it the terminal is asked, and anything short of a clear yes
-// is a no.
+// Without --yes the terminal is asked, and anything short of a clear yes is a no.
 func (c *console) authorized(yes bool, count int) bool {
 	if yes {
 		return true

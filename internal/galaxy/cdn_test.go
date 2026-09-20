@@ -154,7 +154,7 @@ func TestCdnURLTemplatesShape(t *testing.T) {
 }
 
 // TestCdnURLTemplatesEmptyFormatKept: an empty template stays in the list. Whether
-// a URL is usable is the caller's decision, not this layer's (D12).
+// a URL is usable is the caller's decision, not this layer's.
 func TestCdnURLTemplatesEmptyFormatKept(t *testing.T) {
 	doc := linkDoc(t, `{"urls":[{"url_format":""},{"endpoint_name":"cdn","url_format":"u"}]}`)
 

@@ -27,7 +27,7 @@ const maxUint64Exclusive = float64(1 << 64)
 // rule applies to.
 //
 // It is a parameter rather than a Client field so that this package keeps
-// knowing nothing about the download configuration (D6).
+// knowing nothing about the download configuration.
 type DepotOptions struct {
 	IsDependency   bool
 	LowercasePaths bool
@@ -42,7 +42,7 @@ type DepotOptions struct {
 // legitimately have no chunks.
 //
 // An empty hash reaches ManifestV2 unchanged and produces the request that step
-// already defines (D12).
+// already defines.
 func (c *Client) DepotItems(ctx context.Context, hash string, opts DepotOptions) ([]model.GalaxyDepotItem, error) {
 	manifest, err := c.ManifestV2(ctx, hash, opts.IsDependency)
 	if err != nil {
@@ -86,10 +86,10 @@ func (c *Client) DepotItems(ctx context.Context, hash string, opts DepotOptions)
 // only the entries the language and the architecture select.
 //
 // The language test: an entry matches when the depot lists "*" or a language the
-// anchored, case-insensitive regex finds, so an empty or missing "languages" list
-// selects nothing (D7). The architecture test: a missing or null "osBitness" means
-// the entry is not architecture-specific and is selected, otherwise the list must
-// contain "*" or the requested arch.
+// anchored, case-insensitive regex finds, so an empty or missing "languages"
+// list selects nothing. The architecture test: a missing or null "osBitness"
+// means the entry is not architecture-specific and is selected, otherwise the
+// list must contain "*" or the requested arch.
 //
 // languageRegex and arch are chosen by the caller, from config.Languages[].Regexp
 // and config.GalaxyArchs[].Code.
@@ -313,7 +313,7 @@ func itemMD5(obj map[string]any, chunks []model.GalaxyDepotItemChunk) (string, e
 // objectField reads a member that has to be a JSON object: absent or null is
 // (nil, nil) — "not present" — while any other type is an error, because a
 // document that carries the section in the wrong shape is broken rather than
-// empty (D9).
+// empty.
 func objectField(obj map[string]any, key string) (map[string]any, error) {
 	v, ok := obj[key]
 	if !ok || v == nil {
@@ -343,8 +343,8 @@ func arrayField(obj map[string]any, key string) ([]any, error) {
 //
 // A JSON number arrives as a float64, so precision above 2^53 is already lost;
 // the helper accepts non-negative whole values in the uint64 range. It is
-// deliberately strict (D10, D11): a string or a boolean is a protocol error for a
-// byte count, not a value to coerce. An absent or null member reads as 0.
+// deliberately strict: a string or a boolean is a protocol error for a byte
+// count, not a value to coerce. An absent or null member reads as 0.
 func uint64Value(v any) (uint64, error) {
 	switch t := v.(type) {
 	case nil:

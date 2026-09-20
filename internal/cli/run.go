@@ -135,7 +135,7 @@ func sessionRequest(class sessionClass, interactive bool) core.SessionRequest {
 }
 
 // dispatch runs one parsed invocation. The order below is the CLI's own: meta
-// answers first (D18), then the commands that need no session, then everything
+// answers first, then the commands that need no session, then everything
 // that does.
 func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps core.Dependencies) outcome {
 	ui := newConsole(stdin, stdout, stderr)

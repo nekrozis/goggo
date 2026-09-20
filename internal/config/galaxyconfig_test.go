@@ -288,9 +288,9 @@ func TestSetJSONPreservesValueTypes(t *testing.T) {
 	}
 }
 
-// TestJSONInt64Boundaries covers the D1 hardening: numbers that cannot be
-// represented as int64 are reported as absent instead of converted. -2^63 is
-// the accepted lower bound, +2^63 the rejected upper one.
+// TestJSONInt64Boundaries: numbers that cannot be represented as int64 are
+// reported as absent instead of converted. -2^63 is the accepted lower bound,
+// +2^63 the rejected upper one.
 func TestJSONInt64Boundaries(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -327,7 +327,7 @@ func TestJSONInt64Boundaries(t *testing.T) {
 }
 
 // TestNonFiniteExpiresInFallsBackToDefaultTTL: an unusable expires_in is
-// treated as absent, so the default TTL applies (D1).
+// treated as absent, so the default TTL applies.
 func TestNonFiniteExpiresInFallsBackToDefaultTTL(t *testing.T) {
 	for _, bad := range []any{math.NaN(), math.Inf(1), math.Inf(-1), math.Ldexp(1, 64)} {
 		g := NewGalaxyConfig()
@@ -340,7 +340,7 @@ func TestNonFiniteExpiresInFallsBackToDefaultTTL(t *testing.T) {
 }
 
 // TestNonFiniteExpiresAtCountsAsExpired: an unusable expires_at cannot show the
-// token to be valid, so it counts as expired (D1).
+// token to be valid, so it counts as expired.
 func TestNonFiniteExpiresAtCountsAsExpired(t *testing.T) {
 	for _, bad := range []any{math.NaN(), math.Inf(1), math.Inf(-1), math.Ldexp(1, 64), "not-a-number"} {
 		g := NewGalaxyConfig()

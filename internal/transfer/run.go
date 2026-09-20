@@ -28,7 +28,7 @@ import (
 // retries — reports itself as an EventMessageError and the remaining tasks
 // continue. Run returns nil once every task has ended, even if some failed; only
 // a cancelled context makes it return an error. The scheduling itself lives in
-// schedule, shared with the website path (D67).
+// schedule, shared with the website path.
 func Run(ctx context.Context, tasks []model.FileTask, opts Options, deps RunDeps) error {
 	if deps.HTTP == nil || deps.URL == nil || deps.Observer == nil {
 		return errors.New("transfer: run needs an http client, a url provider and an observer")
@@ -84,7 +84,7 @@ func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps R
 	// The authoritative reconcile: the plan's classification is advisory, the
 	// destination's actual state decides what this task must do — including
 	// skipping a file that was complete when the plan was built but changed
-	// before the run reached it (D13, D18, D42).
+	// before the run reached it.
 	decision, startChunk, err := reconcile.ReconcileExistingFile(task.Item, task.Destination)
 	if err != nil {
 		return fail("Failed to inspect " + task.Destination + ": " + err.Error())
@@ -146,10 +146,10 @@ func runChunkTask(ctx context.Context, task model.FileTask, opts Options, deps R
 // appends the decompressed bytes to the task's file. The URL is resolved once
 // per chunk; a retry re-performs the same URL.
 //
-// The two retry causes never mix (D72): a transport failure resumes the next
-// attempt from the bytes already in memory, with a Range header from the prefix
-// length, while a hash mismatch empties the buffer so the retry starts the
-// chunk from scratch — a corrupt prefix must not take part in the next hash.
+// The two retry causes never mix: a transport failure resumes the next attempt
+// from the bytes already in memory, with a Range header from the prefix length,
+// while a hash mismatch empties the buffer so the retry starts the chunk from
+// scratch — a corrupt prefix must not take part in the next hash.
 func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk model.GalaxyDepotItemChunk, opts Options, deps RunDeps, slot *progressSlot, emit func(Event)) error {
 	label := fmt.Sprintf("%s (chunk %d/%d)", task.Destination, index+1, len(task.Item.Chunks))
 
@@ -205,8 +205,8 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 			// A server that ignores Range answers 200 with the whole body
 			// again: folding it back to the suffix keeps the resume semantics.
 			// The guard fires only for an attempt that actually asked for a
-			// range past its first byte and got 200 back (D72) — a
-			// first attempt and a 206 never take this path.
+			// range past its first byte and got 200 back — a first attempt
+			// and a 206 never take this path.
 			if resume && code == http.StatusOK && len(data) >= len(body) {
 				data = data[len(body):]
 			}
@@ -216,7 +216,7 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 		// A 416 keeps the buffer for the hash check below: the server has
 		// nothing past the requested offset, so the bytes already in memory may
 		// be the whole chunk. With an empty buffer a 416 fails the task
-		// outright — a hash check over nothing can never succeed (D65).
+		// outright — a hash check over nothing can never succeed.
 		var rangeNotSatisfiable bool
 		if err != nil {
 			var status *httpx.StatusError
@@ -246,8 +246,8 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 			}
 			if !lastModified.IsZero() {
 				// The server's timestamp moves onto the file; a failure to set
-				// it is a warning, not a failed chunk (D77). It is set per
-				// chunk, so the value left behind is the last response's.
+				// it is a warning, not a failed chunk. It is set per chunk, so
+				// the value left behind is the last response's.
 				if cerr := os.Chtimes(task.Destination, lastModified, lastModified); cerr != nil {
 					emit(Event{Path: task.Destination, Text: cerr.Error(), Kind: EventMessageWarning})
 				}
@@ -305,11 +305,11 @@ func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bo
 // the task's file. The file handle has a single owner: the Close whose error is
 // returned is the only one.
 //
-// The verification-before-write order is the chunk transaction invariant
-// (decisions D16/D24): a chunk on disk is always a complete uncompressed chunk,
-// which is what makes the next run's boundary reconcile reliable. An uncompressed
-// md5 mismatch is not retried: the compressed bytes already passed their hash, so
-// re-fetching the same chunk would produce the same result (D1).
+// The verification-before-write order is the chunk transaction invariant: a
+// chunk on disk is always a complete uncompressed chunk, which is what makes the
+// next run's boundary reconcile reliable. An uncompressed md5 mismatch is not
+// retried: the compressed bytes already passed their hash, so re-fetching the
+// same chunk would produce the same result.
 func appendChunk(ctx context.Context, destination string, compressed []byte, wantMD5 string) error {
 	zr, err := zlib.NewReader(bytes.NewReader(compressed))
 	if err != nil {

@@ -15,10 +15,9 @@ import (
 	"github.com/nekrozis/goggo/internal/util"
 )
 
-// defaultInfoThreads is the default of the info-threads setting. The option is
-// not registered yet (D14 keeps the command tree to the surface that is
-// actually supported), so the value has no front end to live in and sits with
-// its only consumer.
+// defaultInfoThreads is the default of the info-threads setting. The command
+// tree carries only the surface that is actually supported, so the unregistered
+// option has no front end to live in and sits with its only consumer.
 const defaultInfoThreads = 4
 
 // GameDetailsRequest is one acquisition run's input.
@@ -31,8 +30,8 @@ type GameDetailsRequest struct {
 	Products []string
 
 	// InfoThreads is how many fetches run at once; zero means the run's
-	// setting. It is NOT --threads — that one is the download concurrency, and
-	// D46's eight does not carry over.
+	// setting. It is NOT --threads — that one is the download concurrency, whose
+	// default of eight does not carry over.
 	InfoThreads int
 
 	// Include overrides the run's type mask for this acquisition when set. Its

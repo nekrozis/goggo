@@ -29,7 +29,7 @@ const msgLevelVerbose = 1
 // message produced along the way. core does not print; the front end renders
 // the messages.
 //
-// InstallPath is the installation root the plan was built against (D81): the
+// InstallPath is the installation root the plan was built against: the
 // small-files containers and the orphan check need the same directory the
 // plan's destinations were derived from, and an empty or fully filtered plan
 // cannot yield it any other way.
@@ -54,7 +54,7 @@ type PlanResult struct {
 	// destination is in it without a task, and the small-files containers are
 	// NOT in it — they are unpacked into their members and deleted while the
 	// install runs (see ExtractSmallFilesContainers). Like the orphan check's
-	// ledger it describes which paths the installation owns (D44).
+	// ledger it describes which paths the installation owns.
 	Expected []InstalledFile
 }
 
@@ -293,7 +293,7 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 
 	// Differences from the previously installed build. The comparison runs
 	// after the SFC decision, so a file that moved into the container counts as
-	// deleted (D55). Only an install uses this: the deletes are what it
+	// deleted. Only an install uses this: the deletes are what it
 	// performs, and finding them costs a second manifest fetch plus a second
 	// depot expansion, which a verification has no use for.
 	previousBuildDeletes := func() ([]string, error) {
@@ -334,8 +334,7 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 							continue
 						}
 						// The message is emitted before existence is tested,
-						// so a path that is not on disk still gets its line
-						// (D57).
+						// so a path that is not on disk still gets its line.
 						filepath := installPath + "/" + old.Path
 						deletes = append(deletes, filepath)
 						res.addMessage("Deleting " + filepath)
@@ -397,7 +396,7 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 		// re-checks the destination authoritatively at task start, and the
 		// install is gated by revalidating the skipped set at the end. An
 		// observation failure fails the plan; it is never turned into a
-		// destructive action (D43).
+		// destructive action.
 		complete, err := reconcile.IsComplete(it, destination)
 		if err != nil {
 			return res, fmt.Errorf("Failed to inspect %s: %w", destination, err)
@@ -555,8 +554,7 @@ func manifestProductName(manifest map[string]any) string {
 }
 
 // manifestArray reads an optional array member: a missing or null member is an
-// empty slice, a present non-array is an error — the split D9 fixed for
-// container members.
+// empty slice, a present non-array is an error.
 func manifestArray(manifest map[string]any, key string) ([]any, error) {
 	raw, ok := manifest[key]
 	if !ok || raw == nil {

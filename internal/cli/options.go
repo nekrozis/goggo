@@ -17,7 +17,7 @@ import (
 // the parser declares them next to the options themselves.
 //
 // The download worker count is a front-end default too, but its value is a
-// product decision settled by measurement (D9/D46); see defaultThreads.
+// product decision settled by measurement; see defaultThreads.
 const (
 	defaultGalaxyBuildSort     = "score"
 	defaultGalaxyPlatform      = "w"
@@ -28,7 +28,7 @@ const (
 	defaultDirectory           = "./"
 
 	// defaultThreads is how many workers an install uses when --threads is
-	// absent; measurement put the knee of the rate curve at 8 (D46).
+	// absent; measurement put the knee of the rate curve at 8.
 	defaultThreads = 8
 
 	// The progress interval stays within 1..10000 ms; an out-of-range value is

@@ -102,8 +102,8 @@ func TestClassifyExistingFileStates(t *testing.T) {
 }
 
 // TestClassifyExistingFileObservationFailure locks that an unreadable path is
-// an error and never a fact (decisions D43): what cannot be observed must not be
-// reported as absent, let alone as fine.
+// an error and never a fact: what cannot be observed must not be reported as
+// absent, let alone as fine.
 //
 // The injection is a NUL byte in the path, which the filesystem rejects on every
 // platform — the project's environment-independent failure injection (a

@@ -130,10 +130,10 @@ func TestParseListResources(t *testing.T) {
 }
 
 // TestParseUnknownAndRemovedOptions locks the failure shape and the migration
-// hints (D2/D11): a removed option is still an error, the hint only says where
-// the capability went, and nothing is translated into an invocation.
+// hints: a removed option is still an error, the hint only says where the
+// capability went, and nothing is translated into an invocation.
 //
-// The credential options D19 refuses to introduce are the parser's other
+// The credential options this CLI refuses to introduce are the parser's other
 // refusal case — see TestCredentialOptionsAreNeverAdvertised, where their
 // absence of a hint is the point.
 func TestParseUnknownAndRemovedOptions(t *testing.T) {
@@ -175,9 +175,9 @@ func TestParseUnknownAndRemovedOptions(t *testing.T) {
 	}
 }
 
-// TestCredentialOptionsAreNeverAdvertised locks D19 end to end at the parser
-// boundary: the four ways of handing a secret to a command line are not part of
-// this CLI, and the refusal must not pretend otherwise.
+// TestCredentialOptionsAreNeverAdvertised locks the refusal end to end at the
+// parser boundary: the four ways of handing a secret to a command line are not
+// part of this CLI, and the refusal must not pretend otherwise.
 //
 // These options were never part of this CLI, so a migration hint would tell a
 // user that a capability was removed when it was never there. That is why the
@@ -185,8 +185,8 @@ func TestParseUnknownAndRemovedOptions(t *testing.T) {
 // hint rather than merely the failure.
 //
 // The value must not come back either: the refusal names the option, never what
-// was offered as its value (D19: a credential must not reach stderr, a log or an
-// audit file).
+// was offered as its value — a credential must not reach stderr, a log or an
+// audit file.
 func TestCredentialOptionsAreNeverAdvertised(t *testing.T) {
 	const secret = "hunter2"
 
@@ -217,13 +217,13 @@ func TestCredentialOptionsAreNeverAdvertised(t *testing.T) {
 	// credential option must never enter it — that would fabricate a history.
 	for _, name := range []string{"password", "password-stdin", "token-stdin", "non-interactive"} {
 		if _, ok := removedOptions[name]; ok {
-			t.Errorf("removedOptions[%q] is set: D19 refuses to introduce these, so they were never removed", name)
+			t.Errorf("removedOptions[%q] is set: this CLI never offered these, so they were never removed", name)
 		}
 	}
 }
 
 // TestParseLoginAndFilterFlags locks the auth command's inputs and the listing
-// filters (D7: they belong to the command).
+// filters.
 func TestParseLoginAndFilterFlags(t *testing.T) {
 	inv := parseOpts(t, "auth", "login", "--email", "user@example.com")
 	if inv.cmd != cmdAuthLogin || inv.cfg.Email != "user@example.com" {
@@ -307,8 +307,7 @@ func TestParseShowCommands(t *testing.T) {
 	}
 }
 
-// TestParseTargetErrors locks the target's shape rules (D2: refuse rather than
-// silently reinterpret).
+// TestParseTargetErrors locks the target's shape rules.
 func TestParseTargetErrors(t *testing.T) {
 	for _, arg := range []string{"", "/2", "1/2/3", "/"} {
 		if _, err := parseArgs([]string{"install", arg}, testDefaults()); err == nil {

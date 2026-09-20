@@ -771,8 +771,8 @@ func seededToken(t *testing.T, cfg config.Config, expiresIn int) {
 }
 
 // TestOpenWithInjectedTransportSeesAFreshAccount covers the seam's happy path
-// and the reason it replaces only the network exit (D28): the
-// run keeps its cookie file, so the session it builds persists like any other.
+// and the reason it replaces only the network exit: the run keeps its cookie
+// file, so the session it builds persists like any other.
 func TestOpenWithInjectedTransportSeesAFreshAccount(t *testing.T) {
 	srv := newOpenTestServer(t)
 	cfg := config.NewConfig(t.TempDir(), t.TempDir())
@@ -876,9 +876,9 @@ func TestOpenWithInjectedTransportWithoutToken(t *testing.T) {
 	}
 }
 
-// TestOpenWithInjectedTransportRunsTheFullLogin locks the property D28-3 was
-// decided for: a run through the seam can complete a login AND flush its cookie
-// jar, because the seam changes the network exit only.
+// TestOpenWithInjectedTransportRunsTheFullLogin locks the property the seam
+// must preserve: a run through the seam can complete a login AND flush its
+// cookie jar, because the seam changes the network exit only.
 func TestOpenWithInjectedTransportRunsTheFullLogin(t *testing.T) {
 	srv := newOpenTestServer(t)
 	cfg := config.NewConfig(t.TempDir(), t.TempDir())

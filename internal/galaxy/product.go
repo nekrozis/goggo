@@ -51,10 +51,8 @@ func (c *Client) Product(ctx context.Context, productID string) (map[string]any,
 // A dlcs member that is absent, null or not an object is skipped — no request,
 // no expanded_dlcs, the document returned as the API answered it. The live API
 // really does send the non-object shapes: a majority of one probed account's
-// products carry "dlcs": [] (D52, evidence in
-// dev/audit/evidence/D52-dlcs-census.txt). Inside an object the fields stay
-// strict (D52), because a lenient read has no observed sample to justify
-// widening them.
+// products carry "dlcs": []. Inside an object the fields stay strict, because a
+// lenient read has no observed sample to justify widening them.
 func (c *Client) expandDLCs(ctx context.Context, product map[string]any) error {
 	raw, present := product["dlcs"]
 	dlcs, isObject := raw.(map[string]any)

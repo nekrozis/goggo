@@ -181,7 +181,7 @@ func orphansRemovalFixture(t *testing.T) (core.OrphansResult, *core.Downloader, 
 	return core.OrphansResult{InstallPath: root, Files: files}, &core.Downloader{}, files
 }
 
-// TestRemoveOrphansWithYesDoesNotAsk locks the meaning of --yes (D16): it IS
+// TestRemoveOrphansWithYesDoesNotAsk locks the meaning of --yes: it IS
 // the authorization, so a removal that was given it goes straight to the
 // deletion — no question is printed, and the files are gone. Asking anyway would
 // make the flag useless exactly where it matters, on a terminal.

@@ -25,7 +25,7 @@ const (
 // renderList fetches and prints one of the list formats this build supports.
 // The data always comes from internal/catalog (or webapi for the tag table); the
 // CLI never re-implements filtering or mapping here. The listing command was
-// deliberately left out of internal/core (D17), so the orchestration it needs is
+// deliberately left out of internal/core, so the orchestration it needs is
 // reached through the two accessors below.
 func renderList(ctx context.Context, d *core.Downloader, format uint32, w io.Writer) error {
 	cfg := d.Config()

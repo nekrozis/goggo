@@ -72,7 +72,7 @@ type DeletionAttempt struct {
 //
 // A cancelled context stops the loop; the attempts made so far come back with
 // the error, because a destructive operation has to be auditable even when it
-// was interrupted (D33, D20).
+// was interrupted.
 func (d *Downloader) RemoveOrphans(ctx context.Context, res OrphansResult) ([]DeletionAttempt, error) {
 	return d.deleteOrphans(ctx, res.Files)
 }

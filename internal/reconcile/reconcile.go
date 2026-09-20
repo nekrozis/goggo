@@ -3,12 +3,12 @@
 //
 // It is observation-only and never modifies the filesystem. Its decision is
 // authoritative for the caller; a plan's classification is an optimisation, never
-// the correctness boundary (decisions D13-D19, D42-D44).
+// the correctness boundary.
 //
-// Resume semantics (decisions D6/D15): a partial file is resumable only when its
-// size lands exactly on an uncompressed chunk boundary AND the chunk before that
-// boundary matches its uncompressed md5; anything else is replaced. Whole-file
-// correctness is backstopped by the Item.MD5 check on the next reconcile.
+// Resume semantics: a partial file is resumable only when its size lands exactly
+// on an uncompressed chunk boundary AND the chunk before that boundary matches
+// its uncompressed md5; anything else is replaced. Whole-file correctness is
+// backstopped by the Item.MD5 check on the next reconcile.
 package reconcile
 
 import (
@@ -201,8 +201,8 @@ func ReconcileExistingFile(item model.GalaxyDepotItem, path string) (Decision, i
 //
 // A zero-size item needs no special case: it is OK when an empty file is there, ND
 // when the path is absent, and FS when something non-empty occupies it. An
-// observation failure (stat/open/read) comes back as a non-nil error and never as a
-// status: "the file could not be read" is not a fact about its content (D43).
+// observation failure (stat/open/read) is an installation error, never a status and
+// never a replace: "the file could not be read" is not a fact about its content.
 func ClassifyExistingFile(item model.GalaxyDepotItem, path string) (FileStatus, error) {
 	fi, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {

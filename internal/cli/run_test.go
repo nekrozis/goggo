@@ -147,7 +147,7 @@ func optionHelpLines(t *testing.T, id optionID) []string {
 }
 
 // TestRunHelpAndVersion covers the two meta answers, which run before any
-// session work (D18). The help is generated from the parser's tables, so it
+// session work. The help is generated from the parser's tables, so it
 // lists the command surface rather than a hand-kept option list.
 func TestRunHelpAndVersion(t *testing.T) {
 	// The root topic opens with the usage line, which names the program.
@@ -196,12 +196,12 @@ func TestRunHelpAndVersion(t *testing.T) {
 // TestRunFailures locks the failure contract: anything the
 // parser or the command tree refuses is a usage failure and exits 2, with the
 // diagnostic on stderr and nothing on stdout. Removed commands are unknown
-// commands now, not "not implemented" options (D1/D14) — their own case is
+// commands now, not "not implemented" options — their own case is
 // TestRunHelpForACommandAndRemovedCommands.
 //
 // secret is the value a case hands to an option, when that value is something
 // that must not come back out: the refusal may name the option, never what was
-// offered as its value (D19).
+// offered as its value.
 func TestRunFailures(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -220,9 +220,6 @@ func TestRunFailures(t *testing.T) {
 		{"malformed target", []string{"install", "/2"}, "the game is empty", ""},
 		{"show builds with a build", []string{"show", "builds", "123/2"}, "not a build", ""},
 		{"bare invocation", nil, "Usage:", ""},
-		// D19 at the exit-code level: the parser's refusal is not enough on its
-		// own — the run must fail as a usage error and keep the value out of
-		// both streams.
 		{"password argument", []string{"auth", "login", "--password", "hunter2"}, "unknown option", "hunter2"},
 		{"password stdin", []string{"auth", "login", "--password-stdin"}, "unknown option", ""},
 		{"token stdin", []string{"auth", "login", "--token-stdin"}, "unknown option", ""},
@@ -408,8 +405,8 @@ func TestRunMalformedTargetFailsOffline(t *testing.T) {
 
 // TestRunHelpListsTheCommandSurface keeps the help in step with the parser:
 // every command and every shared option the CLI accepts is listed, and nothing
-// it removed is (D14). The names come from the tables the help is generated
-// from, so the surface is compared with itself rather than with a second copy.
+// it removed is. The names come from the tables the help is generated from, so
+// the surface is compared with itself rather than with a second copy.
 func TestRunHelpListsTheCommandSurface(t *testing.T) {
 	_, out, _ := run(t, "", "--help")
 

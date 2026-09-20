@@ -68,12 +68,12 @@ func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 	if err != nil {
 		return err
 	}
-	// A container member the extraction refused is downloaded directly — the
+	// A container member the extraction refused is downloaded directly: the
 	// manifest's sfcRef does not describe it, and leaving the file unwritten
-	// would leave the installation short of the manifest state (D48/D49). The
-	// fallback is an ordinary transfer, so the front end sees the same events
-	// and the result counts as this install's own work; the container is not
-	// unpacked again for it.
+	// would leave the installation short of the manifest state. The fallback is
+	// an ordinary transfer, so the front end sees the same events and the result
+	// counts as this install's own work; the container is not unpacked again for
+	// it.
 	if len(pending) > 0 {
 		if err := d.runTransfer(ctx, pending); err != nil {
 			return err
@@ -85,7 +85,7 @@ func (d *Downloader) Install(ctx context.Context, req InstallRequest) error {
 			}
 			if !complete {
 				// The install must not report success over a file that does not
-				// hold what the manifest declares (decisions D43, D49).
+				// hold what the manifest declares.
 				return fmt.Errorf("%s: content does not match the manifest after the direct download", task.Destination)
 			}
 		}
@@ -108,7 +108,7 @@ func (d *Downloader) runTransfer(ctx context.Context, tasks []model.FileTask) er
 // revalidateSkipped re-observes the plan's skipped destinations and fails on
 // the first one that no longer satisfies its item. An observation failure
 // (an unreadable file) is an installation error too: the install must not
-// report success over a state it could not verify (D43).
+// report success over a state it could not verify.
 func revalidateSkipped(skipped []SkippedFile) error {
 	for _, sf := range skipped {
 		complete, err := reconcile.IsComplete(sf.Item, sf.Destination)
@@ -124,9 +124,7 @@ func revalidateSkipped(skipped []SkippedFile) error {
 
 // transferObserver picks the observer for a transfer run. A front end that can
 // consume the whole event stream — the CLI renderer — gets it through the
-// optional-ability assertion; a plain Console keeps the message-only adapter
-// (D75). The capability interface stays unexported; the CLI satisfies
-// it structurally.
+// optional-ability assertion; a plain Console keeps the message-only adapter.
 func (d *Downloader) transferObserver() transfer.Observer {
 	if sink, ok := d.ui.(transferEventSink); ok {
 		return sink

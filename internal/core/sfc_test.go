@@ -54,9 +54,8 @@ func newSFCFixture(t *testing.T) *sfcFixture {
 // the container by offset and size, written fresh, and the container is
 // removed. A member of another product is not cut from this container.
 //
-// None of these members declares a hash, which is the other half of the rule:
-// without a hash there is nothing to check, so the region is cut out as it
-// always was (D49 keeps that behaviour for members the manifest gives no hash).
+// None of these members declares a hash: without a hash there is nothing to
+// check, so the region is cut out as it always was.
 func TestExtractSmallFilesContainers(t *testing.T) {
 	f := newSFCFixture(t)
 	d := newOfflineDownloader(t, noopServer(t), planTestConfig(t), newFakeConsole())
@@ -86,11 +85,11 @@ func TestExtractSmallFilesContainers(t *testing.T) {
 	}
 }
 
-// TestExtractHoldsBackAMemberItsRegionDoesNotHold is the D48/D49 core rule: a
-// member whose container region does not hold its content is NOT written — the
-// wrong bytes must not reach the installation — and comes back to the caller as
-// a task, carrying its whole item so the direct download can use the member's
-// own chunks.
+// TestExtractHoldsBackAMemberItsRegionDoesNotHold is the core container-write
+// rule: a member whose container region does not hold its content is NOT written
+// — the wrong bytes must not reach the installation — and comes back to the
+// caller as a task, carrying its whole item so the direct download can use the
+// member's own chunks.
 func TestExtractHoldsBackAMemberItsRegionDoesNotHold(t *testing.T) {
 	f := newSFCFixture(t)
 	f.res.Plan.SFC[0].Items = []model.GalaxyDepotItem{
@@ -228,7 +227,7 @@ func TestExtractValidatesPartiallyOverlappingRegionsIndependently(t *testing.T) 
 // (pending + direct download), but a container that cannot be READ is an
 // observation failure — the extraction cannot tell what any later member holds,
 // so the install must not claim it converged, and the container must survive as
-// the only copy of those bytes (D43, D49).
+// the only copy of those bytes.
 //
 // The container is a directory here: opening it succeeds, the first read fails.
 // That makes the read path fail without asserting anything about permissions.
@@ -263,8 +262,7 @@ func TestExtractFailsAndKeepsTheContainerWhenReadingItFails(t *testing.T) {
 // container-access rule: "not on disk" is the only open failure
 // that may be passed over. A path the filesystem refuses — here one carrying a
 // NUL byte, the project's environment-independent way to make a path unopenable
-// — is an observation failure like a failed read, and nothing may be extracted
-// from it (D43, D49).
+// — fails the extraction too.
 //
 // Without the distinction this case became "the container is missing", and the
 // install carried on as if nothing had happened.

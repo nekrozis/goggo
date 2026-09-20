@@ -238,7 +238,7 @@ func TestLoadPreservesHttpOnlyRoundTrip(t *testing.T) {
 	}
 }
 
-// TestLoadSessionCookieStaysSession locks D1: expiry=0 means "session cookie",
+// TestLoadSessionCookieStaysSession locks that expiry=0 means "session cookie",
 // which is persisted and reloaded as a session cookie, not as a persisting
 // cookie with an invented expiry.
 func TestLoadSessionCookieStaysSession(t *testing.T) {

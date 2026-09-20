@@ -180,9 +180,8 @@ func planTestConfig(t *testing.T) config.Config {
 	// default; the test applies both so the plan sees production shapes.
 	cfg.Directories.Directory = dir + "/"
 	cfg.Directories.SubDirectories = true
-	// The subdirectory template is a Parse-time default (D35):
-	// config.NewConfig does not carry it, so the test supplies the value Parse
-	// would.
+	// The subdirectory template is a Parse-time default: config.NewConfig does
+	// not carry it, so the test supplies the value Parse would.
 	cfg.Directories.GalaxyInstallSubdir = "%install_dir%"
 	cfg.DownloadConfig.GalaxyPlatform = config.PlatformWindows
 	cfg.DownloadConfig.GalaxyLanguage = config.LangEN
@@ -249,7 +248,7 @@ func TestBuildPlanFullChain(t *testing.T) {
 	}
 
 	// The container is a task; the file inside it is plan data for the
-	// extraction step, not a download target (D50).
+	// extraction step, not a download target.
 	if len(res.Plan.SFC) != 1 {
 		t.Fatalf("SFC groups = %d, want 1", len(res.Plan.SFC))
 	}

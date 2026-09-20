@@ -176,8 +176,8 @@ type rateWindow struct {
 
 func (w *rateWindow) add(t time.Time, bytes int64) {
 	w.points = append(w.points, [2]int64{t.UnixNano(), bytes})
-	// Two trim conditions (D76): the slope only spans the last 10 seconds, and
-	// at most 100 samples are kept.
+	// Two trim conditions: the slope only spans the last 10 seconds, and at
+	// most 100 samples are kept.
 	cutoff := t.UnixNano() - int64(10*time.Second)
 	keep := 0
 	for keep < len(w.points) && w.points[keep][0] < cutoff {
@@ -192,8 +192,8 @@ func (w *rateWindow) add(t time.Time, bytes int64) {
 }
 
 // live returns the window's samples that are still inside the 10 s span at
-// now — the query-time trim (D76): the samples a stall has aged out must not
-// keep feeding a slope.
+// now — the query-time trim: the samples a stall has aged out must not keep
+// feeding a slope.
 func (w *rateWindow) live(now time.Time) [][2]int64 {
 	cutoff := now.UnixNano() - int64(10*time.Second)
 	live := w.points
@@ -367,9 +367,9 @@ func (r *renderer) displayPath(path string) string {
 }
 
 // OnEvent implements transfer.Observer. The call is serial — transfer delivers
-// through one goroutine (D59) — while the repaint loop reads the same
-// state, hence the mutex. Progress events are lifecycle noise here: the
-// numeric authority is Progress, so they are dropped.
+// through one goroutine — while the repaint loop reads the same state, hence
+// the mutex. Progress events are lifecycle noise here: the numeric authority is
+// Progress, so they are dropped.
 func (r *renderer) OnEvent(ev transfer.Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

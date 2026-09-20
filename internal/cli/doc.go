@@ -65,9 +65,9 @@ func (c *console) ErrOut() io.Writer {
 
 // attachInstallUI builds the renderer for one transferring run. The sink is
 // chosen by the OUTPUT side — stdout is a terminal ⇒ live TTY frames through a
-// coordinator; otherwise the append-only log sink (D8) — and the width and
-// height come from that same descriptor, not from stdin, which stays reserved
-// for the prompts. subject names the command for the closing line
+// coordinator; otherwise the append-only log sink — and the width and height
+// come from that same descriptor, not from stdin, which stays reserved for the
+// prompts. subject names the command for the closing line
 // ("Installation", "Download"), so the frame cannot misname what it just ran.
 func (c *console) attachInstallUI(cfg config.Config, source progressSource, subject string) {
 	bar := progress.NewBar(cfg.Unicode, cfg.Color)
@@ -115,8 +115,8 @@ func (c *console) attachInstallUI(cfg config.Config, source progressSource, subj
 func (c *console) endInstallScope() { c.coord = nil }
 
 // OnEvent hands the transfer event stream to the renderer. The method exists so
-// core's optional-ability assertion finds the console capable (D75): core knows
-// no renderer type, only this behaviour.
+// core's optional-ability assertion finds the console capable: core knows no
+// renderer type, only this behaviour.
 func (c *console) OnEvent(ev transfer.Event) {
 	if c.renderer != nil {
 		c.renderer.OnEvent(ev)

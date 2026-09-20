@@ -18,13 +18,13 @@ import (
 
 // ExtractSmallFilesContainers unpacks the plan's small-files containers: each
 // member is cut out of its container by offset and size, and the container is
-// removed afterwards. It runs after the transfer completes successfully (D73).
+// removed afterwards. It runs after the transfer completes successfully.
 //
-// A member that declares a hash is checked against the bytes its region holds
-// before anything is written (D49); a mismatch is not written and comes back as
-// a task to download directly, because the manifest's sfcRef cannot describe
-// such a member (D4, D48). A container that is not on disk is passed over
-// silently, but one that IS there and cannot be opened fails the run (D43, D49).
+// A member that declares a hash is verified against the bytes its region holds
+// before anything is written; a mismatch is not written and comes back as a
+// task to download directly, because the manifest's sfcRef cannot describe
+// such a member. A container that is not on disk is passed over silently, but
+// one that IS there and cannot be opened fails the run.
 func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanResult) ([]model.FileTask, error) {
 	var pending []model.FileTask
 	for _, group := range res.Plan.SFC {
@@ -38,8 +38,7 @@ func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanRe
 		}
 		if err != nil {
 			// A permission problem, a path that is not a file, a name the
-			// filesystem refuses: the members cannot be read, so the install
-			// must not report that it converged (D49, three failure classes).
+			// filesystem refuses: the members cannot be read.
 			return pending, fmt.Errorf("%s: %w", container, err)
 		}
 		extracted, missed, err := d.extractContainer(ctx, f, group, res.InstallPath)
@@ -66,8 +65,7 @@ func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanRe
 //
 // The container is read once, forward: the distinct regions are visited in
 // ascending offset order and the buffer keeps only the tail the next region can
-// still share, which is what keeps a container from costing one read per member
-// (D49).
+// still share, which is what keeps a container from costing one read per member.
 func (d *Downloader) extractContainer(ctx context.Context, src io.Reader, group model.SFCGroup, installPath string) (int, []model.FileTask, error) {
 	// The verbose listing keeps the plan's order, as it did before the members
 	// were grouped by region.
@@ -100,9 +98,6 @@ func (d *Downloader) extractContainer(ctx context.Context, src io.Reader, group 
 		}
 		for _, member := range region.members {
 			if member.item.MD5 != "" && sum != member.item.MD5 {
-				// The container does not hold this member's content. Nothing is
-				// written: the wrong bytes never reach the installation, and the
-				// member is downloaded directly instead (D49).
 				fmt.Fprintln(d.ui.ErrOut(), "Failed to extract "+member.destination+
 					": container content does not match the manifest hash; downloading it directly")
 				pending = append(pending, model.FileTask{Item: member.item, Destination: member.destination})
@@ -124,7 +119,7 @@ func (d *Downloader) extractContainer(ctx context.Context, src io.Reader, group 
 // sfcMember is one member waiting to be cut out of its container. The whole item
 // travels with it: a member held back for a direct download is handed to the
 // transfer as a task, and that download must use the member's own chunks, hash
-// and size rather than anything derived again from the manifest (D49).
+// and size rather than anything derived again from the manifest.
 type sfcMember struct {
 	item        model.GalaxyDepotItem
 	destination string
@@ -140,9 +135,8 @@ type sfcRegion struct {
 }
 
 // declaresHash reports whether any member of the region carries a hash to check
-// against. A region no member declares a hash for is still cut out, unverified —
-// kept for members the manifest gives no hash (D49): no hash means "not
-// verifiable", never "verified".
+// against. A region no member declares a hash for is still cut out, unverified:
+// no hash means "not verifiable", never "verified".
 func (r sfcRegion) declaresHash() bool {
 	for _, member := range r.members {
 		if member.item.MD5 != "" {

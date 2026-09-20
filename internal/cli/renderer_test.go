@@ -488,7 +488,7 @@ func TestRateWindowResetsOnADecrease(t *testing.T) {
 	}
 }
 
-// TestRateWindowTrimsByTime locks the D76 window's two trim conditions: the
+// TestRateWindowTrimsByTime locks the rate window's two trim conditions: the
 // slope spans at most the last 10 seconds and at most 100 points.
 func TestRateWindowTrimsByTime(t *testing.T) {
 	var w rateWindow

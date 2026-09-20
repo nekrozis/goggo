@@ -114,11 +114,10 @@ func TestProductSkipsExpansionWithoutDLCInformation(t *testing.T) {
 	}
 }
 
-// TestProductSkipsExpansionForNonObjectDLCs locks the dlcs guard (D52): a dlcs
-// member that is present but not an object — the empty array the live API really
-// sends for products without DLC information
-// (dev/audit/evidence/D52-dlcs-census.txt), a filled array, or any scalar — does
-// not enter the expansion block: no request, no expanded_dlcs, and the product
+// TestProductSkipsExpansionForNonObjectDLCs locks the dlcs guard: a dlcs member
+// that is present but not an object — the empty array the live API really sends
+// for products without DLC information, a filled array, or any scalar — does not
+// enter the expansion block: no request, no expanded_dlcs, and the product
 // document comes back as the API answered it.
 //
 // This test REVERSES the earlier TestProductRejectsAMalformedDLCsMember, which

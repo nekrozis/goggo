@@ -42,7 +42,7 @@ func TestFilteredProductsPageRendersQueryVerbatim(t *testing.T) {
 		t.Errorf("request URI = %q, want %q", *lastURI, want)
 	}
 	if strings.Contains(*lastURI, "%2C") {
-		t.Error("tags must not be percent-encoded (D5)")
+		t.Error("tags must not be percent-encoded")
 	}
 }
 
@@ -75,8 +75,8 @@ func TestFilteredProductsPageDecodesProducts(t *testing.T) {
 	}
 }
 
-// TestFilteredProductsPageEmptyListing locks the D3 split: an explicit integer
-// totalPages of 0 is a normal empty listing.
+// TestFilteredProductsPageEmptyListing: an explicit integer totalPages of 0 is
+// a normal empty listing.
 func TestFilteredProductsPageEmptyListing(t *testing.T) {
 	srv, _ := productServer(t, `{"page":1,"totalPages":0,"products":[]}`, http.StatusOK)
 	cl, _ := newTestClient(t, srv, 0)
@@ -90,8 +90,8 @@ func TestFilteredProductsPageEmptyListing(t *testing.T) {
 	}
 }
 
-// TestFilteredProductsPageRejectsBadPageFields locks D3: a missing or
-// malformed page/totalPages must not read as "no more results".
+// TestFilteredProductsPageRejectsBadPageFields: a missing or malformed
+// page/totalPages must not read as "no more results".
 func TestFilteredProductsPageRejectsBadPageFields(t *testing.T) {
 	cases := []struct {
 		name string

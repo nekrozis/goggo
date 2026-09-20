@@ -76,10 +76,9 @@ func TestLoadBlacklistMissingFile(t *testing.T) {
 	}
 }
 
-// TestLoadBlacklistReadError locks the D51 boundary: a read failure other than
-// a missing file is an error, never a silent empty blacklist. A directory in
-// place of the file makes the read fail on every platform without the file
-// being absent.
+// TestLoadBlacklistReadError: a read failure other than a missing file is an
+// error, never a silent empty blacklist. A directory in place of the file makes
+// the read fail on every platform without the file being absent.
 func TestLoadBlacklistReadError(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := LoadBlacklist(dir); err == nil {

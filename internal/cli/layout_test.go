@@ -131,10 +131,10 @@ func TestCompactPath(t *testing.T) {
 	}
 }
 
-// TestTaskLineDegradation locks the priority order (D31): the bar
-// goes first, then the path compacts hierarchically, then the byte counts,
-// then the rate — the percentage and the row number survive everything short
-// of a truncation, and compaction exists only for width.
+// TestTaskLineDegradation locks the priority order: the bar goes first, then
+// the path compacts hierarchically, then the byte counts, then the rate — the
+// percentage and the row number survive everything short of a truncation, and
+// compaction exists only for width.
 func TestTaskLineDegradation(t *testing.T) {
 	tk := taskRow{index: 7, path: "Data/Campaign/Shadow of Death/video.h3m", pct: 0.58, done: 300 << 20, total: 577 << 20, rate: 350e3}
 

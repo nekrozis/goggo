@@ -70,8 +70,8 @@ type ListOptions struct {
 // ListResult is the outcome of a listing run.
 //
 // OwnedIDs carries the owned product ids fetched by the same run. Returning
-// them keeps the fetch moment without reintroducing global state (D2); the
-// caller decides what to do with them.
+// them keeps the fetch moment without reintroducing global state; the caller
+// decides what to do with them.
 type ListResult struct {
 	Games    []model.GameItem
 	OwnedIDs []string
@@ -132,7 +132,7 @@ func List(ctx context.Context, wx ProductFetcher, opts ListOptions) (ListResult,
 // when requested.
 //
 // The walk ends on `page == totalPages || totalPages == 0`, evaluated on the
-// decoded page; a page missing those fields is an error in webapi (D3), so a
+// decoded page; a page missing those fields is an error in webapi, so a
 // malformed response cannot end the walk silently.
 func fetchProducts(ctx context.Context, wx ProductFetcher, opts ListOptions) ([]map[string]any, error) {
 	var products []map[string]any

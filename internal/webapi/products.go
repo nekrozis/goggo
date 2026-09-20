@@ -37,8 +37,8 @@ func (c *Client) WishlistPage(ctx context.Context, page int) (ProductPage, error
 }
 
 // queryString renders the query by concatenation. The tags parameter is already
-// a comma-separated list and is never re-encoded (D5), which is why url.Values
-// is not used here.
+// a comma-separated list and is never re-encoded, which is why url.Values is
+// not used here.
 func (q ProductQuery) queryString(page int) string {
 	s := "?hiddenFlag=" + strconv.Itoa(q.HiddenFlag) +
 		"&isUpdated=" + strconv.Itoa(q.IsUpdated) +
@@ -51,7 +51,7 @@ func (q ProductQuery) queryString(page int) string {
 
 // productPage decodes one listing page.
 //
-// Shape rules (D3):
+// Shape rules:
 //   - page and totalPages must be present integers; a missing or malformed value
 //     is an error, so a schema change cannot masquerade as "no results";
 //   - totalPages == 0 is a legitimate empty listing;

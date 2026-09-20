@@ -23,7 +23,7 @@ const (
 	optHelp optionID = iota
 	optVersion
 
-	// Shared options: shared semantics, not unconditional acceptance (D15).
+	// Shared options: shared semantics, not unconditional acceptance.
 	optVerbose
 	optNoColor
 	optNoUnicode
@@ -88,7 +88,7 @@ const (
 	optSaveProductJSON
 	optInfoThreads
 
-	// Destructive confirmation (orphans remove only, D16).
+	// Destructive confirmation (orphans remove only).
 	optYes
 
 	// auth login.
@@ -282,8 +282,8 @@ var optionTable = append([]optionSpec{
 				return usagef("invalid value for --threads: %q", v)
 			}
 			// An explicit value always wins over the parser's default, and 0
-			// keeps its meaning of "let the runtime fall back" (D9, D46);
-			// it is not a second spelling of "auto".
+			// keeps its meaning of "let the runtime fall back"; it is not a
+			// second spelling of "auto".
 			inv.cfg.Threads = uint32(n)
 			return nil
 		},
@@ -647,7 +647,7 @@ var removedOptions = map[string]string{
 //
 // It is the parser's single failure shape: the caller maps it onto the usage
 // exit code (2), so "the user asked for something the CLI does not offer" is
-// never mistaken for "the operation failed" (D2, D3).
+// never mistaken for "the operation failed".
 type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
@@ -668,8 +668,8 @@ func isUsageError(err error) bool {
 // command path, and the tokens after it are subcommands while the tree has a
 // matching child, then the command's arguments. The parse is deliberately
 // two-phase — path first, then the options checked against what that command
-// accepts (D15) — so "goggo list --threads 8" fails as an unaccepted option
-// rather than being quietly ignored.
+// accepts — so "goggo list --threads 8" fails as an unaccepted option rather
+// than being quietly ignored.
 func parseArgs(args []string, cfg config.Config) (invocation, error) {
 	inv := invocation{cfg: cfg}
 	applyParseDefaults(&inv.cfg)
@@ -764,7 +764,7 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 	// The help shortcut answers BEFORE the command line is resolved: it asks
 	// about a topic, so it must not require a runnable command underneath
 	// ("goggo auth -h" is help for the auth namespace, not a
-	// missing-subcommand error) and must not check the command's arity (D18).
+	// missing-subcommand error) and must not check the command's arity.
 	// Both spellings — this shortcut and the help command — resolve their topic
 	// with the SAME rule, so they can never disagree about what a topic is.
 	if helpSeen {
@@ -884,7 +884,7 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 	return inv, nil
 }
 
-// metaCommands are the built-ins the tree accepts without a command id (D18).
+// metaCommands are the built-ins the tree accepts without a command id.
 var metaCommands = []commandNode{
 	{name: "help", summary: "Show help for a command"},
 	{name: "version", summary: "Show version"},
@@ -965,7 +965,7 @@ func commandArity(id commandID) (string, int) {
 // The split is done here rather than through util.Split: that helper DROPS empty
 // tokens, which would hide a malformed argument ("/2" would silently become the
 // game "2"). More than two parts, or an empty game, is a usage error rather than
-// a silently ignored tail (D2). An empty build is read as "no build given".
+// a silently ignored tail. An empty build is read as "no build given".
 func parseTarget(arg string) (target, error) {
 	parts := strings.SplitN(arg, "/", 3)
 	if len(parts) > 2 {
@@ -995,7 +995,7 @@ func parseTarget(arg string) (target, error) {
 //	nothing resolvable → usage error: unknown command
 //
 // The alternative — printing the root help for anything unrecognised — would
-// answer a question the user did not ask while looking like success (D2).
+// answer a question the user did not ask while looking like success.
 func resolveHelpTopic(words []string) ([]string, error) {
 	if len(words) == 0 {
 		return nil, nil
@@ -1071,7 +1071,7 @@ func optionName(id optionID) string {
 // applyParseDefaults installs the defaults the option parser owns.
 //
 // One of them is a decision of its own: the download worker count, settled by
-// measurement (D9/D46) and documented on defaultThreads.
+// measurement and documented on defaultThreads.
 //
 // This runs before any option is read, so an option on the command line simply
 // overwrites what is set here — including "--threads 0", which keeps its meaning
@@ -1095,8 +1095,7 @@ func applyParseDefaults(cfg *config.Config) {
 	cfg.DownloadConfig.InstallerLanguage = installerLanguage
 	// Remote XML is on by default. With it off the installer/patch version check
 	// silently disappears, so the parser declares it true; the option itself is
-	// not registered (D14 keeps the surface to what is wired), so the field is
-	// only settable by a future config layer.
+	// not registered, so the field is only settable by a future config layer.
 	cfg.DownloadConfig.RemoteXML = true
 	cfg.Directories.GalaxyInstallSubdir = defaultGalaxyInstallSubdir
 	// The six website subdirectory defaults come from the config table —

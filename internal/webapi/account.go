@@ -2,9 +2,10 @@ package webapi
 
 import (
 	"context"
-
 	"encoding/json/jsontext"
 	"fmt"
+
+	"github.com/nekrozis/goggo/internal/jsonread"
 )
 
 // GameDetailsJSON fetches the per-game details document. A response that is not
@@ -26,12 +27,14 @@ func (c *Client) OwnedGameIDs(ctx context.Context) ([]string, error) {
 		// Missing, null or not an array: no ids and no error.
 		return ids, nil
 	}
-	owned, err := memberArray(raw)
+	owned, err := jsonread.Array(raw)
 	if err != nil {
 		return nil, fmt.Errorf("webapi: owned: %w", err)
 	}
 	for i, el := range owned {
-		s, err := memberText(el)
+		// An owned id is an identifier: the account's own list mixes a string
+		// entry with a numeric one, and both spell the same product id.
+		s, err := jsonread.Scalar(el)
 		if err != nil {
 			return nil, fmt.Errorf("webapi: owned[%d]: %w", i, err)
 		}
@@ -61,20 +64,46 @@ func (c *Client) Tags(ctx context.Context) (map[string]string, error) {
 		return nil, fmt.Errorf("webapi: tags: %w", err)
 	}
 	for i, child := range children {
-		node, err := memberObject(child)
+		node, err := jsonread.Object(child)
 		if err != nil {
 			return nil, fmt.Errorf("webapi: tags[%d]: %w", i, err)
 		}
 		// A missing id/name member reads as "".
-		id, err := memberText(node["id"])
+		//
+		// The id is the identifier family — the live API sends it as a number
+		// while this account's fixture sends a string — and the name is text.
+		id, err := jsonread.Scalar(node["id"])
 		if err != nil {
 			return nil, fmt.Errorf("webapi: tags[%d].id: %w", i, err)
 		}
-		name, err := memberText(node["name"])
+		name, err := jsonread.Text(node["name"])
 		if err != nil {
 			return nil, fmt.Errorf("webapi: tags[%d].name: %w", i, err)
 		}
 		tags[id] = name
 	}
 	return tags, nil
+}
+
+// containerValues returns the values of a container: array elements in their
+// document order, or the member values of an object. Both shapes are accepted
+// because the account's tag table is sent either way, and the caller wants the
+// values rather than the container kind.
+func containerValues(v jsontext.Value) ([]jsontext.Value, error) {
+	switch v.Kind() {
+	case jsontext.KindBeginArray:
+		return jsonread.Array(v)
+	case jsontext.KindBeginObject:
+		obj, err := jsonread.Object(v)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]jsontext.Value, 0, len(obj))
+		for _, e := range obj {
+			out = append(out, e)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("expected a JSON array or object, got %s", jsonread.Kind(v))
+	}
 }

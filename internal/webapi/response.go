@@ -6,6 +6,7 @@ import (
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"strings"
 )
 
@@ -53,14 +54,14 @@ func decodeJSONObject(body string) (map[string]jsontext.Value, error) {
 	if err := jsonv2.Unmarshal([]byte(body), &v); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNotJSON, err)
 	}
-	obj, err := memberObject(v)
+	obj, err := jsonread.Object(v)
 	if err != nil {
-		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonKind(v))
+		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonread.Kind(v))
 	}
 	if obj == nil {
-		// memberObject reports absent/null as "not present"; a body of "null"
+		// jsonread.Object reports absent/null as "not present"; a body of "null"
 		// is not an object either.
-		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonKind(v))
+		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonread.Kind(v))
 	}
 	return obj, nil
 }

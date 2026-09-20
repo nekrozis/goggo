@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 
 	"github.com/nekrozis/goggo/internal/httpx"
+	"github.com/nekrozis/goggo/internal/jsonread"
 )
 
 // codeKind distinguishes the two one-time-code flavours. It is an internal
@@ -408,7 +409,7 @@ func (c *Client) exchangeCode(ctx context.Context, code string) error {
 		return fmt.Errorf("webapi: parse token response: %w", err)
 	}
 	if token == nil {
-		return fmt.Errorf("webapi: parse token response: %w: got %s", ErrNotJSON, jsonKind(jsontext.Value(tokenBody)))
+		return fmt.Errorf("webapi: parse token response: %w: got %s", ErrNotJSON, jsonread.Kind(jsontext.Value(tokenBody)))
 	}
 	c.galaxy.StoreLoginResponse(token)
 	return nil

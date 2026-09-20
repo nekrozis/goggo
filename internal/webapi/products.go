@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"fmt"
+	"github.com/nekrozis/goggo/internal/jsonread"
 	"strconv"
 	"strings"
 )
@@ -73,12 +74,12 @@ func (c *Client) productPage(ctx context.Context, url string) (ProductPage, erro
 	products := []map[string]jsontext.Value{}
 	raw := root["products"]
 	if raw.Kind() == jsontext.KindBeginArray {
-		arr, err := memberArray(raw)
+		arr, err := jsonread.Array(raw)
 		if err != nil {
 			return ProductPage{}, fmt.Errorf("webapi: %s: products: %w", url, err)
 		}
 		for i, el := range arr {
-			obj, err := memberObject(el)
+			obj, err := jsonread.Object(el)
 			if err != nil {
 				return ProductPage{}, fmt.Errorf("webapi: %s: products[%d]: %w", url, i, err)
 			}
@@ -94,7 +95,7 @@ func requiredInt(root map[string]jsontext.Value, key, url string) (int, error) {
 	if !ok || raw.Kind() == jsontext.KindNull {
 		return 0, fmt.Errorf("webapi: %s: missing %q", url, key)
 	}
-	n, err := memberInt(raw)
+	n, err := jsonread.Int(raw)
 	if err != nil {
 		return 0, fmt.Errorf("webapi: %s: %q: %w", url, key, err)
 	}

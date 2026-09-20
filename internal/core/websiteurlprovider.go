@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/nekrozis/goggo/internal/galaxy"
-	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/transfer"
 )
@@ -79,7 +78,7 @@ func (p *websiteURLProvider) Resolve(ctx context.Context, task model.WebsiteTask
 	if !ok || raw == nil {
 		return "", "", fmt.Errorf("galaxy: %w", transfer.ErrNoDownlink)
 	}
-	downlink, err := jsonval.Str(raw)
+	downlink, err := memberText(raw)
 	if err != nil {
 		return "", "", fmt.Errorf("downlink: %w", err)
 	}
@@ -90,7 +89,7 @@ func (p *websiteURLProvider) Resolve(ctx context.Context, task model.WebsiteTask
 	readChecksum := p.policy == checksumAlways || (p.remoteXML && task.Checksummed)
 	if readChecksum {
 		if raw, ok := doc["checksum"]; ok && raw != nil {
-			checksumURL, err := jsonval.Str(raw)
+			checksumURL, err := memberText(raw)
 			if err != nil {
 				if p.policy == checksumAlways {
 					// The single-file chain never fails on the checksum

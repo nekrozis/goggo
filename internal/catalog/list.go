@@ -14,8 +14,8 @@ import (
 	"sort"
 	"strconv"
 
+	"encoding/json/jsontext"
 	"github.com/nekrozis/goggo/internal/config"
-	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/util"
 	"github.com/nekrozis/goggo/internal/webapi"
@@ -25,7 +25,7 @@ import (
 // satisfied by *webapi.Client; tests provide their own implementation.
 type ProductFetcher interface {
 	FilteredProductsPage(ctx context.Context, q webapi.ProductQuery, page int) (webapi.ProductPage, error)
-	GameDetailsJSON(ctx context.Context, gameID string) (map[string]any, error)
+	GameDetailsJSON(ctx context.Context, gameID string) (map[string]jsontext.Value, error)
 	OwnedGameIDs(ctx context.Context) ([]string, error)
 }
 
@@ -134,8 +134,8 @@ func List(ctx context.Context, wx ProductFetcher, opts ListOptions) (ListResult,
 // The walk ends on `page == totalPages || totalPages == 0`, evaluated on the
 // decoded page; a page missing those fields is an error in webapi, so a
 // malformed response cannot end the walk silently.
-func fetchProducts(ctx context.Context, wx ProductFetcher, opts ListOptions) ([]map[string]any, error) {
-	var products []map[string]any
+func fetchProducts(ctx context.Context, wx ProductFetcher, opts ListOptions) ([]map[string]jsontext.Value, error) {
+	var products []map[string]jsontext.Value
 	hidden := 0
 	page := 1
 	isUpdated := 0
@@ -170,8 +170,8 @@ func fetchProducts(ctx context.Context, wx ProductFetcher, opts ListOptions) ([]
 //
 // A failing details request is skipped: the game stays listed without DLC
 // information. No failure counter is kept, because no consumer needs one.
-func enrichDLC(ctx context.Context, wx ProductFetcher, product map[string]any, filters Filters, item *model.GameItem) error {
-	dlcCount, err := jsonval.Int(product["dlcCount"])
+func enrichDLC(ctx context.Context, wx ProductFetcher, product map[string]jsontext.Value, filters Filters, item *model.GameItem) error {
+	dlcCount, err := memberInt(product["dlcCount"])
 	if err != nil {
 		return fmt.Errorf("catalog: dlcCount: %w", err)
 	}
@@ -196,8 +196,8 @@ func enrichDLC(ctx context.Context, wx ProductFetcher, product map[string]any, f
 }
 
 // mapProduct turns one raw product into a GameItem plus its platform mask.
-func mapProduct(p map[string]any) (model.GameItem, uint32, error) {
-	name, err := jsonval.Str(p["slug"])
+func mapProduct(p map[string]jsontext.Value) (model.GameItem, uint32, error) {
+	name, err := memberText(p["slug"])
 	if err != nil {
 		return model.GameItem{}, 0, fmt.Errorf("catalog: slug: %w", err)
 	}
@@ -205,7 +205,7 @@ func mapProduct(p map[string]any) (model.GameItem, uint32, error) {
 	if err != nil {
 		return model.GameItem{}, 0, fmt.Errorf("catalog: id: %w", err)
 	}
-	isNew, err := jsonval.Bool(p["isNew"])
+	isNew, err := memberBool(p["isNew"])
 	if err != nil {
 		return model.GameItem{}, 0, fmt.Errorf("catalog: isNew: %w", err)
 	}
@@ -222,25 +222,24 @@ func mapProduct(p map[string]any) (model.GameItem, uint32, error) {
 
 // productID renders the product id: integer-shaped ids become decimal text,
 // everything else is stringified. A missing id reads as "" rather than "0".
-func productID(v any) (string, error) {
+func productID(v jsontext.Value) (string, error) {
 	return intShapedString(v)
 }
 
 // intShapedString renders a value with the `isInt ? to_string(asInt): asString` rule
 // used for product ids and for the wishlist discount percentage.
 //
-// Only integer-shaped values enter the integer branch: a boolean, a string or null
-// must stringify instead. Do not widen this gate — jsonval.Int alone would coerce
-// true to "1".
-func intShapedString(v any) (string, error) {
-	switch v.(type) {
-	case int, int64, uint64, float64:
-		if n, err := jsonval.Int(v); err == nil {
+// Only a NUMBER enters the integer branch: a boolean, a string or null must
+// stringify instead. Do not widen this gate — memberInt alone would coerce true
+// to "1".
+func intShapedString(v jsontext.Value) (string, error) {
+	if v.Kind() == jsontext.KindNumber {
+		if n, err := memberInt(v); err == nil {
 			return strconv.FormatInt(n, 10), nil
 		}
 		// A non-integral number falls through to the string form below.
 	}
-	return jsonval.Str(v)
+	return memberText(v)
 }
 
 // productUpdates reads the update count: an absent or null member leaves it at
@@ -248,16 +247,11 @@ func intShapedString(v any) (string, error) {
 // semantics.
 //
 // An over-long number yields 0 instead of failing the listing.
-func productUpdates(v any) (int, error) {
-	switch v.(type) {
-	case nil:
+func productUpdates(v jsontext.Value) (int, error) {
+	if v.Kind() == jsontext.KindInvalid || v.Kind() == jsontext.KindNull {
 		return 0, nil
-	case int:
-		return v.(int), nil
-	case int64:
-		return int(v.(int64)), nil
 	}
-	s, err := jsonval.Str(v)
+	s, err := memberText(v)
 	if err != nil {
 		return 0, fmt.Errorf("catalog: updates: %w", err)
 	}
@@ -292,9 +286,9 @@ func atoiPrefix(s string) int {
 
 // productPlatform derives the platform mask from worksOn. When the product
 // reports no platform at all, the mask becomes all platforms.
-func productPlatform(worksOn any) (uint32, error) {
-	obj, ok := worksOn.(map[string]any)
-	if !ok {
+func productPlatform(worksOn jsontext.Value) (uint32, error) {
+	obj, err := memberObject(worksOn)
+	if err != nil || obj == nil {
 		// A missing (or non-object) worksOn reports no platform.
 		return util.OptionValue("all", config.Platforms, false), nil
 	}
@@ -310,7 +304,7 @@ func productPlatform(worksOn any) (uint32, error) {
 
 // platformBits maps a worksOn object to its platform mask. The wishlist
 // listing uses it without the all-platforms fallback.
-func platformBits(worksOn map[string]any) (uint32, error) {
+func platformBits(worksOn map[string]jsontext.Value) (uint32, error) {
 	var platform uint32
 	for _, entry := range []struct {
 		key  string
@@ -320,7 +314,7 @@ func platformBits(worksOn map[string]any) (uint32, error) {
 		{"Mac", config.PlatformMac},
 		{"Linux", config.PlatformLinux},
 	} {
-		on, err := jsonval.Bool(worksOn[entry.key])
+		on, err := memberBool(worksOn[entry.key])
 		if err != nil {
 			return 0, fmt.Errorf("catalog: worksOn.%s: %w", entry.key, err)
 		}

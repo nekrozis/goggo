@@ -1,11 +1,10 @@
 package util
 
 import (
+	"encoding/json/jsontext"
 	"fmt"
 	"sort"
 	"strings"
-
-	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // strippedAllowed reports whether a byte survives StrippedString: an ASCII
@@ -47,9 +46,9 @@ func StrippedString(s string) string {
 // "manualUrl" member is taken without recursing into it, any other value is walked.
 //
 // Ordering: JSON arrays keep their element order, while object members are visited
-// in sorted key order, because Go's map[string]any does not preserve document order
-// and the result must be deterministic.
-func ManualURLsFromJSON(v any) ([]string, error) {
+// in sorted key order, because a Go map does not preserve document order and the
+// result must be deterministic.
+func ManualURLsFromJSON(v jsontext.Value) ([]string, error) {
 	var urls []string
 	if err := collectManualURLs(v, &urls); err != nil {
 		return nil, err
@@ -59,29 +58,37 @@ func ManualURLsFromJSON(v any) ([]string, error) {
 
 // collectManualURLs is the recursive core of ManualURLsFromJSON. A value that is
 // neither an array nor an object contributes nothing.
-func collectManualURLs(v any, urls *[]string) error {
-	switch t := v.(type) {
-	case map[string]any:
-		keys := make([]string, 0, len(t))
-		for k := range t {
+func collectManualURLs(v jsontext.Value, urls *[]string) error {
+	switch v.Kind() {
+	case jsontext.KindBeginObject:
+		obj, err := memberObject(v)
+		if err != nil {
+			return err
+		}
+		keys := make([]string, 0, len(obj))
+		for k := range obj {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
 			if k == "manualUrl" {
-				s, err := jsonval.Str(t[k])
+				s, err := memberText(obj[k])
 				if err != nil {
 					return fmt.Errorf("util: manualUrl: %w", err)
 				}
 				*urls = append(*urls, s)
 				continue
 			}
-			if err := collectManualURLs(t[k], urls); err != nil {
+			if err := collectManualURLs(obj[k], urls); err != nil {
 				return err
 			}
 		}
-	case []any:
-		for _, child := range t {
+	case jsontext.KindBeginArray:
+		arr, err := memberArray(v)
+		if err != nil {
+			return err
+		}
+		for _, child := range arr {
 			if err := collectManualURLs(child, urls); err != nil {
 				return err
 			}
@@ -99,7 +106,7 @@ const dlcURLPrefix = "/downloads/"
 // is a DLC name, de-duplicated with the first occurrence winning.
 //
 // A URL whose "/downloads/" marker has no following '/' is skipped.
-func DLCNamesFromJSON(v any) ([]string, error) {
+func DLCNamesFromJSON(v jsontext.Value) ([]string, error) {
 	urls, err := ManualURLsFromJSON(v)
 	if err != nil {
 		return nil, err

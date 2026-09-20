@@ -1,5 +1,7 @@
 package model
 
+import "encoding/json/jsontext"
+
 // GameItem is one account product as it comes out of the website listing,
 // before the per-game details are expanded into a GameDetails.
 type GameItem struct {
@@ -13,7 +15,7 @@ type GameItem struct {
 
 	// GameDetailsJSON is the raw per-game details document, nil when it was
 	// not requested or the request failed.
-	GameDetailsJSON map[string]any
+	GameDetailsJSON map[string]jsontext.Value
 
 	// Updates is the product's update count.
 	Updates int

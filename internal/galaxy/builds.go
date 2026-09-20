@@ -1,6 +1,9 @@
 package galaxy
 
-import "context"
+import (
+	"context"
+	"encoding/json/jsontext"
+)
 
 // Default platform and generation for ProductBuilds, applied when the caller
 // passes an empty value. They are unexported because nothing outside this
@@ -20,7 +23,7 @@ const (
 // The document is returned as decoded JSON with no schema of its own: the
 // caller navigates items[].generation and items[].link itself, and sorts the
 // array before doing so.
-func (c *Client) ProductBuilds(ctx context.Context, productID, platform, generation string) (map[string]any, error) {
+func (c *Client) ProductBuilds(ctx context.Context, productID, platform, generation string) (map[string]jsontext.Value, error) {
 	if platform == "" {
 		platform = defaultPlatform
 	}

@@ -2,12 +2,11 @@ package webapi
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // ErrNotJSON reports that a response body did not form the expected JSON
@@ -29,7 +28,7 @@ func (c *Client) getResponse(ctx context.Context, url string) (string, error) {
 
 // getResponseJSON fetches url and decodes the body as a JSON object. A body that
 // is not an object is an error.
-func (c *Client) getResponseJSON(ctx context.Context, url string) (map[string]any, error) {
+func (c *Client) getResponseJSON(ctx context.Context, url string) (map[string]jsontext.Value, error) {
 	body, err := c.getResponse(ctx, url)
 	if err != nil {
 		return nil, err
@@ -42,17 +41,26 @@ func (c *Client) getResponseJSON(ctx context.Context, url string) (map[string]an
 // problem, which callers may want to translate into their own hint (the CLI
 // renders the "--login" advice). HTTP-level failures never reach here —
 // getResponse has already turned >= 400 into a *httpx.StatusError.
-func decodeJSONObject(body string) (map[string]any, error) {
+//
+// Members are kept as raw JSON text rather than decoded Go values: a number
+// then keeps the literal the server sent, and nothing is paid for the parts of
+// a document this program never reads.
+func decodeJSONObject(body string) (map[string]jsontext.Value, error) {
 	if strings.TrimSpace(body) == "" {
 		return nil, fmt.Errorf("%w: empty body", ErrNotJSON)
 	}
-	var v any
-	if err := json.Unmarshal([]byte(body), &v); err != nil {
+	var v jsontext.Value
+	if err := jsonv2.Unmarshal([]byte(body), &v); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNotJSON, err)
 	}
-	obj, ok := v.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonval.Kind(v))
+	obj, err := memberObject(v)
+	if err != nil {
+		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonKind(v))
+	}
+	if obj == nil {
+		// memberObject reports absent/null as "not present"; a body of "null"
+		// is not an object either.
+		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonKind(v))
 	}
 	return obj, nil
 }

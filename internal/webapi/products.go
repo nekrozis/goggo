@@ -2,11 +2,10 @@ package webapi
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // ProductQuery is one getFilteredProducts request.
@@ -20,7 +19,7 @@ type ProductQuery struct {
 // holds the raw product objects so the assembly layer can map them
 // without re-fetching.
 type ProductPage struct {
-	Products   []map[string]any
+	Products   []map[string]jsontext.Value
 	Page       int
 	TotalPages int
 }
@@ -71,10 +70,15 @@ func (c *Client) productPage(ctx context.Context, url string) (ProductPage, erro
 		return ProductPage{}, err
 	}
 
-	products := []map[string]any{}
-	if arr, ok := root["products"].([]any); ok {
+	products := []map[string]jsontext.Value{}
+	raw := root["products"]
+	if raw.Kind() == jsontext.KindBeginArray {
+		arr, err := memberArray(raw)
+		if err != nil {
+			return ProductPage{}, fmt.Errorf("webapi: %s: products: %w", url, err)
+		}
 		for i, el := range arr {
-			obj, err := jsonval.Object(el)
+			obj, err := memberObject(el)
 			if err != nil {
 				return ProductPage{}, fmt.Errorf("webapi: %s: products[%d]: %w", url, i, err)
 			}
@@ -85,12 +89,12 @@ func (c *Client) productPage(ctx context.Context, url string) (ProductPage, erro
 }
 
 // requiredInt reads an integer field that must be present.
-func requiredInt(root map[string]any, key, url string) (int, error) {
-	v, ok := root[key]
-	if !ok || v == nil {
+func requiredInt(root map[string]jsontext.Value, key, url string) (int, error) {
+	raw, ok := root[key]
+	if !ok || raw.Kind() == jsontext.KindNull {
 		return 0, fmt.Errorf("webapi: %s: missing %q", url, key)
 	}
-	n, err := jsonval.Int(v)
+	n, err := memberInt(raw)
 	if err != nil {
 		return 0, fmt.Errorf("webapi: %s: %q: %w", url, key, err)
 	}

@@ -3,7 +3,7 @@ package core
 import (
 	"fmt"
 
-	"github.com/nekrozis/goggo/internal/jsonval"
+	"encoding/json/jsontext"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -52,7 +52,7 @@ func InstallSubdirNeedsProductInfo(template string) bool {
 // a non-empty value, so a missing slug or title leaves the NAME ITSELF as the
 // result — "%title%/setup" must not collapse to "/setup". The function issues
 // no request; the caller decides whether to fetch the document.
-func ResolveInstallSubdir(template string, manifest, product map[string]any) (string, error) {
+func ResolveInstallSubdir(template string, manifest, product map[string]jsontext.Value) (string, error) {
 	installDir, err := documentString(manifest, "installDirectory")
 	if err != nil {
 		return "", err
@@ -103,8 +103,8 @@ func ResolveInstallSubdir(template string, manifest, product map[string]any) (st
 // null one is the empty string, and a structured one is an error. That contract
 // matches the other document readers in this package, and it serves both the
 // manifest and the product document the install directory is derived from.
-func documentString(doc map[string]any, key string) (string, error) {
-	v, err := jsonval.Str(doc[key])
+func documentString(doc map[string]jsontext.Value, key string) (string, error) {
+	v, err := memberText(doc[key])
 	if err != nil {
 		return "", fmt.Errorf("galaxy: document %s: %w", key, err)
 	}

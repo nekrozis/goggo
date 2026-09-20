@@ -1,10 +1,9 @@
 package gamedetails
 
 import (
+	"encoding/json/jsontext"
 	"regexp"
 	"strings"
-
-	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // This file holds the two extractions the save-* output face performs on the
@@ -36,12 +35,12 @@ func SerialsFromCDKey(cdKey string) (text string, unsupported bool) {
 // the member — present-but-empty counts — and plain "Changelog" otherwise; an
 // absent or empty changelog yields nothing. A member of the wrong shape is an
 // error, never a coercion.
-func ChangelogFromJSON(doc map[string]any) (string, error) {
+func ChangelogFromJSON(doc map[string]jsontext.Value) (string, error) {
 	raw, ok := doc["changelog"]
 	if !ok || raw == nil {
 		return "", nil
 	}
-	changelog, err := jsonval.Str(raw)
+	changelog, err := memberText(raw)
 	if err != nil {
 		return "", err
 	}
@@ -50,7 +49,7 @@ func ChangelogFromJSON(doc map[string]any) (string, error) {
 	}
 	title := "Changelog"
 	if rawTitle, has := doc["title"]; has {
-		t, err := jsonval.Str(rawTitle)
+		t, err := memberText(rawTitle)
 		if err != nil {
 			return "", err
 		}

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nekrozis/goggo/internal/jsonval"
+	"encoding/json/jsontext"
 	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/webapi"
 )
@@ -63,10 +63,10 @@ func Wishlist(ctx context.Context, wx WishlistFetcher, opts WishlistOptions) ([]
 
 // mapWishlistItem maps one raw product. skip reports that the platform filter
 // excluded the entry.
-func mapWishlistItem(p map[string]any, opts WishlistOptions) (model.WishlistItem, bool, error) {
+func mapWishlistItem(p map[string]jsontext.Value, opts WishlistOptions) (model.WishlistItem, bool, error) {
 	var item model.WishlistItem
 
-	isMovie, err := jsonval.Bool(p["isMovie"])
+	isMovie, err := memberBool(p["isMovie"])
 	if err != nil {
 		return item, false, fmt.Errorf("catalog: isMovie: %w", err)
 	}
@@ -82,11 +82,11 @@ func mapWishlistItem(p map[string]any, opts WishlistOptions) (model.WishlistItem
 		}
 	}
 
-	comingSoon, err := jsonval.Bool(p["isComingSoon"])
+	comingSoon, err := memberBool(p["isComingSoon"])
 	if err != nil {
 		return item, false, fmt.Errorf("catalog: isComingSoon: %w", err)
 	}
-	discounted, err := jsonval.Bool(p["isDiscounted"])
+	discounted, err := memberBool(p["isDiscounted"])
 	if err != nil {
 		return item, false, fmt.Errorf("catalog: isDiscounted: %w", err)
 	}
@@ -142,9 +142,9 @@ func mapWishlistItem(p map[string]any, opts WishlistOptions) (model.WishlistItem
 
 // wishlistPlatformBits derives the worksOn mask without the "no platform means
 // all platforms" fallback the product listing applies.
-func wishlistPlatformBits(worksOn any) (uint32, error) {
-	obj, ok := worksOn.(map[string]any)
-	if !ok {
+func wishlistPlatformBits(worksOn jsontext.Value) (uint32, error) {
+	obj, err := memberObject(worksOn)
+	if err != nil || obj == nil {
 		return 0, nil
 	}
 	return platformBits(obj)
@@ -153,7 +153,7 @@ func wishlistPlatformBits(worksOn any) (uint32, error) {
 // wishlistReleaseDate reads the release date of a coming-soon product: an empty
 // value is skipped, an integer-shaped value is taken as-is, and anything else is
 // parsed from its string form.
-func wishlistReleaseDate(p map[string]any, comingSoon bool) (int64, error) {
+func wishlistReleaseDate(p map[string]jsontext.Value, comingSoon bool) (int64, error) {
 	if !comingSoon {
 		return 0, nil
 	}
@@ -161,14 +161,13 @@ func wishlistReleaseDate(p map[string]any, comingSoon bool) (int64, error) {
 	if !ok || isEmptyJSON(v) {
 		return 0, nil
 	}
-	switch v.(type) {
-	case int, int64, float64:
-		if n, err := jsonval.Int(v); err == nil {
+	if v.Kind() == jsontext.KindNumber {
+		if n, err := memberInt(v); err == nil {
 			return n, nil
 		}
 		// A non-integral number takes the string path.
 	}
-	s, err := jsonval.Str(v)
+	s, err := memberText(v)
 	if err != nil {
 		return 0, fmt.Errorf("catalog: releaseDate: %w", err)
 	}
@@ -177,15 +176,18 @@ func wishlistReleaseDate(p map[string]any, comingSoon bool) (int64, error) {
 
 // isEmptyJSON reports whether v is null, an empty array or an empty object. An
 // empty string, 0 and false are not empty, so they still reach the parsing path
-// (which yields 0 for them).
-func isEmptyJSON(v any) bool {
-	switch t := v.(type) {
-	case nil:
+// (which yields 0 for them). A member that is not in the document counts as
+// empty.
+func isEmptyJSON(v jsontext.Value) bool {
+	switch v.Kind() {
+	case jsontext.KindInvalid, jsontext.KindNull:
 		return true
-	case []any:
-		return len(t) == 0
-	case map[string]any:
-		return len(t) == 0
+	case jsontext.KindBeginArray:
+		arr, err := memberArray(v)
+		return err == nil && len(arr) == 0
+	case jsontext.KindBeginObject:
+		obj, err := memberObject(v)
+		return err == nil && len(obj) == 0
 	default:
 		return false
 	}
@@ -196,8 +198,8 @@ func isEmptyJSON(v any) bool {
 // appended to host+"/".
 //
 // An empty URL reaches the last branch.
-func wishlistURL(v any) (string, error) {
-	raw, err := jsonval.Str(v)
+func wishlistURL(v jsontext.Value) (string, error) {
+	raw, err := memberText(v)
 	if err != nil {
 		return "", fmt.Errorf("catalog: url: %w", err)
 	}
@@ -213,16 +215,17 @@ func wishlistURL(v any) (string, error) {
 
 // asObject returns v as a map, or nil when it is absent or not an object.
 // Indexing a nil map yields the zero value.
-func asObject(v any) map[string]any {
-	if obj, ok := v.(map[string]any); ok {
-		return obj
+func asObject(v jsontext.Value) map[string]jsontext.Value {
+	obj, err := memberObject(v)
+	if err != nil {
+		return nil
 	}
-	return nil
+	return obj
 }
 
 // stringField reads a string-valued member, reporting context on error.
-func stringField(obj map[string]any, key, field string) (string, error) {
-	s, err := jsonval.Str(obj[key])
+func stringField(obj map[string]jsontext.Value, key, field string) (string, error) {
+	s, err := memberText(obj[key])
 	if err != nil {
 		return "", fmt.Errorf("catalog: %s: %w", field, err)
 	}
@@ -230,8 +233,8 @@ func stringField(obj map[string]any, key, field string) (string, error) {
 }
 
 // boolField reads a boolean-valued member, reporting context on error.
-func boolField(obj map[string]any, key string) (bool, error) {
-	b, err := jsonval.Bool(obj[key])
+func boolField(obj map[string]jsontext.Value, key string) (bool, error) {
+	b, err := memberBool(obj[key])
 	if err != nil {
 		return false, fmt.Errorf("catalog: %s: %w", key, err)
 	}
@@ -239,7 +242,7 @@ func boolField(obj map[string]any, key string) (bool, error) {
 }
 
 // amountField renders a price member with the `isDouble` rule.
-func amountField(obj map[string]any, key string) (string, error) {
+func amountField(obj map[string]jsontext.Value, key string) (string, error) {
 	s, err := amountString(obj[key])
 	if err != nil {
 		return "", fmt.Errorf("catalog: %s: %w", key, err)
@@ -248,7 +251,7 @@ func amountField(obj map[string]any, key string) (string, error) {
 }
 
 // percentField renders the discount percentage with the `isInt` rule.
-func percentField(obj map[string]any, key string) (string, error) {
+func percentField(obj map[string]jsontext.Value, key string) (string, error) {
 	s, err := intShapedString(obj[key])
 	if err != nil {
 		return "", fmt.Errorf("catalog: %s: %w", key, err)
@@ -259,14 +262,14 @@ func percentField(obj map[string]any, key string) (string, error) {
 // amountString renders a price amount: a number becomes its fixed-point form,
 // anything else is stringified. Integer values are numbers too, so an integer
 // amount becomes "0.000000" rather than "0".
-func amountString(v any) (string, error) {
-	if jsonval.IsNumber(v) {
-		f, err := jsonval.Num(v)
+func amountString(v jsontext.Value) (string, error) {
+	if v.Kind() == jsontext.KindNumber {
+		f, err := memberFloat(v)
 		if err != nil {
 			return "", err
 		}
 		// Six fixed decimals, never an exponent.
 		return strconv.FormatFloat(f, 'f', 6, 64), nil
 	}
-	return jsonval.Str(v)
+	return memberText(v)
 }

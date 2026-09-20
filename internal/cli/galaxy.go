@@ -1,11 +1,12 @@
 package cli
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 
 	"github.com/nekrozis/goggo/internal/core"
+	"github.com/nekrozis/goggo/internal/util"
 )
 
 // renderBuilds prints the build listing.
@@ -21,16 +22,14 @@ func renderBuilds(w io.Writer, rows []core.BuildRow) error {
 
 // renderManifest prints the fetched manifest as styled JSON.
 //
-// Three properties matter, which is why this is not a bare Marshal: keys come out
-// in byte order (Go's map marshalling), HTML escaping is OFF (the default would
-// turn a URL's "&" and "<" into \u0026 and \u003c), and the indentation is a tab
-// with a trailing newline. Numbers are re-serialised from Go's float64 values, so
-// values beyond 2^53 are not reproduced exactly.
-func renderManifest(w io.Writer, doc map[string]any) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "\t")
-	enc.SetEscapeHTML(false)
-	return enc.Encode(doc)
+// The styling is not spelled here: util.WriteStyledJSON is the project's single
+// writer seam, and a second copy of the same encoder settings is how the two
+// drift apart. Keys come out in byte order (Go's map marshalling), HTML escaping
+// is off so a URL's "&" and "<" stay as themselves, and the indentation is a tab
+// with a trailing newline. A member is raw JSON text, so a number is emitted as
+// the literal the server sent rather than as a re-serialised float64.
+func renderManifest(w io.Writer, doc map[string]jsontext.Value) error {
+	return util.WriteStyledJSON(w, doc)
 }
 
 // renderCDNNames prints one endpoint name per line.

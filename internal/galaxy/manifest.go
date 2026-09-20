@@ -2,6 +2,7 @@ package galaxy
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"strings"
 )
 
@@ -9,7 +10,7 @@ import (
 //
 // The builds document carries that URL verbatim in items[].link, so it is taken
 // as given rather than rebuilt here.
-func (c *Client) ManifestV1(ctx context.Context, manifestURL string) (map[string]any, error) {
+func (c *Client) ManifestV1(ctx context.Context, manifestURL string) (map[string]jsontext.Value, error) {
 	return c.getResponseJSON(ctx, manifestURL)
 }
 
@@ -23,7 +24,7 @@ func (c *Client) ManifestV1(ctx context.Context, manifestURL string) (map[string
 // generation 1; a hash containing a "/" is interpolated as it is, query string
 // included. An empty hash still produces a request (".../v2/meta/"), and the
 // server's answer decides the outcome.
-func (c *Client) ManifestV2(ctx context.Context, manifestHash string, isDependency bool) (map[string]any, error) {
+func (c *Client) ManifestV2(ctx context.Context, manifestHash string, isDependency bool) (map[string]jsontext.Value, error) {
 	hash := manifestHash
 	if hash != "" {
 		// HashToGalaxyPath returns a hash containing "/" unchanged, so only the

@@ -11,10 +11,10 @@ import (
 	"sort"
 	"strings"
 
+	"encoding/json/jsontext"
 	"github.com/nekrozis/goggo/internal/blacklist"
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/galaxy"
-	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/reconcile"
 	"github.com/nekrozis/goggo/internal/util"
@@ -173,11 +173,11 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 	}
 	generation := 0
 	if index < len(items) {
-		entry, err := jsonval.Object(items[index])
+		entry, err := memberObject(items[index])
 		if err != nil {
 			return res, fmt.Errorf("galaxy: builds items[%d]: %w", index, err)
 		}
-		gen, err := jsonval.Int(entry["generation"])
+		gen, err := memberInt(entry["generation"])
 		if err != nil {
 			return res, fmt.Errorf("galaxy: builds items[%d].generation: %w", index, err)
 		}
@@ -209,7 +209,7 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 	// one, and it happens only when a request is actually about to go out.
 	installDirectory := ""
 	if d.cfg.Directories.SubDirectories {
-		var product map[string]any
+		var product map[string]jsontext.Value
 		if InstallSubdirNeedsProductInfo(req.SubdirTemplate) {
 			baseID, err := documentString(manifest, "baseProductId")
 			if err != nil {
@@ -514,12 +514,12 @@ func sfcGroupsFor(containers, items []model.GalaxyDepotItem) []model.SFCGroup {
 
 // buildsItems reads a builds document's items array: a missing or null member
 // is no items, a present non-array is an error.
-func buildsItems(builds map[string]any) ([]any, error) {
+func buildsItems(builds map[string]jsontext.Value) ([]jsontext.Value, error) {
 	raw, ok := builds["items"]
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	items, err := jsonval.Array(raw)
+	items, err := memberArray(raw)
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: builds items: %w", err)
 	}
@@ -527,15 +527,15 @@ func buildsItems(builds map[string]any) ([]any, error) {
 }
 
 // buildLink reads one build entry's link.
-func buildLink(items []any, index int) (string, error) {
+func buildLink(items []jsontext.Value, index int) (string, error) {
 	if index < 0 || index >= len(items) {
 		return "", fmt.Errorf("galaxy: builds items[%d]: out of range", index)
 	}
-	entry, err := jsonval.Object(items[index])
+	entry, err := memberObject(items[index])
 	if err != nil {
 		return "", fmt.Errorf("galaxy: builds items[%d]: %w", index, err)
 	}
-	link, err := jsonval.Str(entry["link"])
+	link, err := memberText(entry["link"])
 	if err != nil {
 		return "", fmt.Errorf("galaxy: builds items[%d].link: %w", index, err)
 	}
@@ -544,20 +544,20 @@ func buildLink(items []any, index int) (string, error) {
 
 // manifestProductName reads products[0].name; a document without products names
 // nothing.
-func manifestProductName(manifest map[string]any) string {
+func manifestProductName(manifest map[string]jsontext.Value) string {
 	raw, ok := manifest["products"]
 	if !ok || raw == nil {
 		return ""
 	}
-	products, err := jsonval.Array(raw)
+	products, err := memberArray(raw)
 	if err != nil || len(products) == 0 {
 		return ""
 	}
-	entry, err := jsonval.Object(products[0])
+	entry, err := memberObject(products[0])
 	if err != nil {
 		return ""
 	}
-	name, err := jsonval.Str(entry["name"])
+	name, err := memberText(entry["name"])
 	if err != nil {
 		return ""
 	}
@@ -566,12 +566,12 @@ func manifestProductName(manifest map[string]any) string {
 
 // manifestArray reads an optional array member: a missing or null member is an
 // empty slice, a present non-array is an error.
-func manifestArray(manifest map[string]any, key string) ([]any, error) {
+func manifestArray(manifest map[string]jsontext.Value, key string) ([]jsontext.Value, error) {
 	raw, ok := manifest[key]
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	v, err := jsonval.Array(raw)
+	v, err := memberArray(raw)
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: manifest %s: %w", key, err)
 	}
@@ -581,7 +581,7 @@ func manifestArray(manifest map[string]any, key string) ([]any, error) {
 // resolveDepotItems expands every depot, drops DLC entries when the include
 // mask does not ask for them, adds the selected dependencies, stamps product
 // ids, renames small-files containers and deduplicates by path.
-func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]any, req InstallRequest) ([]model.GalaxyDepotItem, error) {
+func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]jsontext.Value, req InstallRequest) ([]model.GalaxyDepotItem, error) {
 	baseProductID, err := documentString(manifest, "baseProductId")
 	if err != nil {
 		return nil, err
@@ -597,7 +597,7 @@ func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]
 	}
 	var items []model.GalaxyDepotItem
 	for i, raw := range depots {
-		depot, err := jsonval.Object(raw)
+		depot, err := memberObject(raw)
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: manifest depots[%d]: %w", i, err)
 		}
@@ -629,7 +629,7 @@ func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]
 		}
 		var wanted []string
 		for i, raw := range ids {
-			id, err := jsonval.Str(raw)
+			id, err := memberText(raw)
 			if err != nil {
 				return nil, fmt.Errorf("galaxy: manifest dependencies[%d]: %w", i, err)
 			}
@@ -643,16 +643,16 @@ func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]
 			// An empty document, or one without "depots", adds nothing.
 			raw, ok := depDoc["depots"]
 			if ok && raw != nil {
-				depotDocs, err := jsonval.Array(raw)
+				depotDocs, err := memberArray(raw)
 				if err != nil {
 					return nil, fmt.Errorf("galaxy: dependency repository depots: %w", err)
 				}
 				for i, raw := range depotDocs {
-					depot, err := jsonval.Object(raw)
+					depot, err := memberObject(raw)
 					if err != nil {
 						return nil, fmt.Errorf("galaxy: dependency repository depots[%d]: %w", i, err)
 					}
-					depID, err := jsonval.Str(depot["dependencyId"])
+					depID, err := memberText(depot["dependencyId"])
 					if err != nil {
 						return nil, fmt.Errorf("galaxy: dependency repository depots[%d].dependencyId: %w", i, err)
 					}
@@ -739,12 +739,12 @@ func readInfoBuildID(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var doc map[string]any
+	var doc map[string]jsontext.Value
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return "", nil
 	}
 	if doc == nil {
 		return "", nil
 	}
-	return jsonval.Str(doc["buildId"])
+	return memberText(doc["buildId"])
 }

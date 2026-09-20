@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
+	"encoding/json/jsontext"
 	"github.com/nekrozis/goggo/internal/catalog"
 	"github.com/nekrozis/goggo/internal/config"
-	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/model"
 )
 
@@ -77,7 +77,7 @@ type BuildRow struct {
 // renders the result first and the error second.
 type BuildsResult struct {
 	Builds   []BuildRow
-	Manifest map[string]any
+	Manifest map[string]jsontext.Value
 	Notice   Notice
 }
 
@@ -189,7 +189,7 @@ func (d *Downloader) showBuildsFor(ctx context.Context, productID, buildID strin
 	if index < 0 {
 		rows := make([]BuildRow, 0, len(items))
 		for i, raw := range items {
-			item, err := jsonval.Object(raw)
+			item, err := memberObject(raw)
 			if err != nil {
 				return BuildsResult{}, fmt.Errorf("galaxy: builds items[%d]: %w", i, err)
 			}
@@ -339,7 +339,7 @@ func (d *Downloader) accountListOptions() catalog.ListOptions {
 //
 // The sort is stable, so entries with equal keys keep the document order. That
 // matters here: equal keys are what decide which entry a build index selects.
-func (d *Downloader) sortProductBuilds(doc map[string]any) (map[string]any, error) {
+func (d *Downloader) sortProductBuilds(doc map[string]jsontext.Value) (map[string]jsontext.Value, error) {
 	order := d.cfg.GalaxyBuildSortingOrder
 	if order == "" || order == "none" || len(doc) == 0 {
 		return doc, nil
@@ -358,15 +358,15 @@ func (d *Downloader) sortProductBuilds(doc map[string]any) (map[string]any, erro
 	// passes consistent.
 	builds := make([]buildEntryDoc, len(items))
 	for i, raw := range items {
-		item, err := jsonval.Object(raw)
+		item, err := memberObject(raw)
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: builds items[%d]: %w", i, err)
 		}
-		date, err := jsonval.Str(item["date_published"])
+		date, err := memberText(item["date_published"])
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: builds items[%d].date_published: %w", i, err)
 		}
-		branch, err := jsonval.Str(item["branch"])
+		branch, err := memberText(item["branch"])
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: builds items[%d].branch: %w", i, err)
 		}
@@ -375,7 +375,7 @@ func (d *Downloader) sortProductBuilds(doc map[string]any) (map[string]any, erro
 	sort.SliceStable(builds, func(i, j int) bool { return builds[i].date > builds[j].date })
 
 	if order == "date" {
-		doc["items"] = documentsOf(builds)
+		doc["items"] = rawArray(documentsOf(builds))
 		return doc, nil
 	}
 
@@ -397,25 +397,25 @@ func (d *Downloader) sortProductBuilds(doc map[string]any) (map[string]any, erro
 	sort.SliceStable(positions, func(i, j int) bool {
 		return scores[positions[i]] < scores[positions[j]]
 	})
-	byScore := make([]any, len(positions))
+	byScore := make([]jsontext.Value, len(positions))
 	for i, pos := range positions {
 		byScore[i] = builds[pos].item
 	}
-	doc["items"] = byScore
+	doc["items"] = rawArray(byScore)
 	return doc, nil
 }
 
 // buildEntryDoc is one build entry while the list is being reordered: the
 // document itself plus the two fields the ordering reads.
 type buildEntryDoc struct {
-	item   any
+	item   jsontext.Value
 	date   string
 	branch string
 }
 
 // documentsOf collects the documents of a reordered build slice.
-func documentsOf(builds []buildEntryDoc) []any {
-	items := make([]any, len(builds))
+func documentsOf(builds []buildEntryDoc) []jsontext.Value {
+	items := make([]jsontext.Value, len(builds))
 	for i := range builds {
 		items[i] = builds[i].item
 	}
@@ -426,12 +426,8 @@ func documentsOf(builds []buildEntryDoc) []any {
 // "items" is no builds at all; any other non-array value is a protocol error.
 // The tier is the one the depot step established: absent means empty, the wrong
 // shape means error.
-func buildItems(doc map[string]any) ([]any, error) {
-	raw, ok := doc["items"]
-	if !ok || raw == nil {
-		return nil, nil
-	}
-	items, err := jsonval.Array(raw)
+func buildItems(doc map[string]jsontext.Value) ([]jsontext.Value, error) {
+	items, err := memberArray(doc["items"])
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: builds items: %w", err)
 	}
@@ -442,13 +438,13 @@ func buildItems(doc map[string]any) ([]any, error) {
 // otherwise the argument is used as an index. The whole argument must be an
 // integer; anything else means no build was selected (-1), which is what makes
 // the command print the listing.
-func buildIndexFor(items []any, buildID string) (int, error) {
+func buildIndexFor(items []jsontext.Value, buildID string) (int, error) {
 	for i, raw := range items {
-		item, err := jsonval.Object(raw)
+		item, err := memberObject(raw)
 		if err != nil {
 			return 0, fmt.Errorf("galaxy: builds items[%d]: %w", i, err)
 		}
-		id, err := jsonval.Str(item["build_id"])
+		id, err := memberText(item["build_id"])
 		if err != nil {
 			return 0, fmt.Errorf("galaxy: builds items[%d].build_id: %w", i, err)
 		}
@@ -464,19 +460,19 @@ func buildIndexFor(items []any, buildID string) (int, error) {
 }
 
 // buildRow reads one listing entry.
-func buildRow(index int, item map[string]any) (BuildRow, error) {
+func buildRow(index int, item map[string]jsontext.Value) (BuildRow, error) {
 	var row BuildRow
 	var err error
-	if row.VersionName, err = jsonval.Str(item["version_name"]); err != nil {
+	if row.VersionName, err = memberText(item["version_name"]); err != nil {
 		return BuildRow{}, fmt.Errorf("galaxy: builds items[%d].version_name: %w", index, err)
 	}
-	if row.DatePublished, err = jsonval.Str(item["date_published"]); err != nil {
+	if row.DatePublished, err = memberText(item["date_published"]); err != nil {
 		return BuildRow{}, fmt.Errorf("galaxy: builds items[%d].date_published: %w", index, err)
 	}
-	if row.BuildID, err = jsonval.Str(item["build_id"]); err != nil {
+	if row.BuildID, err = memberText(item["build_id"]); err != nil {
 		return BuildRow{}, fmt.Errorf("galaxy: builds items[%d].build_id: %w", index, err)
 	}
-	generation, err := jsonval.Int(item["generation"])
+	generation, err := memberInt(item["generation"])
 	if err != nil {
 		return BuildRow{}, fmt.Errorf("galaxy: builds items[%d].generation: %w", index, err)
 	}
@@ -488,19 +484,19 @@ func buildRow(index int, item map[string]any) (BuildRow, error) {
 // buildEntry reads the generation and link of one build entry. An index outside
 // the list has no entry, so it reads as generation 0 with no link — which the
 // switch in showBuildsFor turns into the "only generation 1 and 2" message.
-func buildEntry(items []any, index int) (generation int, link string, err error) {
+func buildEntry(items []jsontext.Value, index int) (generation int, link string, err error) {
 	if index < 0 || index >= len(items) {
 		return 0, "", nil
 	}
-	item, err := jsonval.Object(items[index])
+	item, err := memberObject(items[index])
 	if err != nil {
 		return 0, "", fmt.Errorf("galaxy: builds items[%d]: %w", index, err)
 	}
-	gen, err := jsonval.Int(item["generation"])
+	gen, err := memberInt(item["generation"])
 	if err != nil {
 		return 0, "", fmt.Errorf("galaxy: builds items[%d].generation: %w", index, err)
 	}
-	if link, err = jsonval.Str(item["link"]); err != nil {
+	if link, err = memberText(item["link"]); err != nil {
 		return 0, "", fmt.Errorf("galaxy: builds items[%d].link: %w", index, err)
 	}
 	return int(gen), link, nil
@@ -508,22 +504,22 @@ func buildEntry(items []any, index int) (generation int, link string, err error)
 
 // endpointNames collects the non-empty endpoint names of a secure link
 // document.
-func endpointNames(doc map[string]any) ([]string, error) {
+func endpointNames(doc map[string]jsontext.Value) ([]string, error) {
 	raw, ok := doc["urls"]
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	urls, err := jsonval.Array(raw)
+	urls, err := memberArray(raw)
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: secure link urls: %w", err)
 	}
 	var names []string
 	for i, rawEntry := range urls {
-		entry, err := jsonval.Object(rawEntry)
+		entry, err := memberObject(rawEntry)
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: secure link urls[%d]: %w", i, err)
 		}
-		name, err := jsonval.Str(entry["endpoint_name"])
+		name, err := memberText(entry["endpoint_name"])
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: secure link urls[%d].endpoint_name: %w", i, err)
 		}

@@ -8,10 +8,10 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"encoding/json/jsontext"
 	"github.com/nekrozis/goggo/internal/catalog"
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/gamedetails"
-	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -279,12 +279,12 @@ func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[st
 // serialsFromDetails reads the cdKey member — a missing or null member is no
 // serials, a wrong shape is a diagnostic — and hands the text to the
 // extraction, whose fail-closed result travels as the second return value.
-func serialsFromDetails(details map[string]any) (text, diag string) {
+func serialsFromDetails(details map[string]jsontext.Value) (text, diag string) {
 	raw, ok := details["cdKey"]
 	if !ok || raw == nil {
 		return "", ""
 	}
-	cdKey, err := jsonval.Str(raw)
+	cdKey, err := memberText(raw)
 	if err != nil {
 		return "", "game details: cdKey: " + err.Error()
 	}

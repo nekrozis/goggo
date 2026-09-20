@@ -2,6 +2,8 @@ package webapi
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -397,9 +399,16 @@ func (c *Client) exchangeCode(ctx context.Context, code string) error {
 		// rendered without it (see httpx.SafeError).
 		return fmt.Errorf("webapi: token exchange: %s", httpx.SafeError(err))
 	}
-	token, err := decodeJSONObject(tokenBody)
-	if err != nil {
+	// The token response is the one document here that is NOT navigated member
+	// by member: auth.Store persists it as a credential payload whose bytes are
+	// a locked contract, so it is decoded straight into the Go value tree that
+	// seam stores rather than kept as raw member text.
+	var token map[string]any
+	if err := jsonv2.Unmarshal([]byte(tokenBody), &token); err != nil {
 		return fmt.Errorf("webapi: parse token response: %w", err)
+	}
+	if token == nil {
+		return fmt.Errorf("webapi: parse token response: %w: got %s", ErrNotJSON, jsonKind(jsontext.Value(tokenBody)))
 	}
 	c.galaxy.StoreLoginResponse(token)
 	return nil

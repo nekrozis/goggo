@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/nekrozis/goggo/internal/jsonval"
+	"encoding/json/jsontext"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -39,12 +39,12 @@ const GalaxyPathPlaceholder = "{path}"
 //
 // A document whose "urls" is missing or null produces no templates; a section
 // present in another shape is reported, as elsewhere in this package.
-func CdnURLTemplatesFromJSON(json map[string]any, cdnPriority []string) ([]string, error) {
+func CdnURLTemplatesFromJSON(json map[string]jsontext.Value, cdnPriority []string) ([]string, error) {
 	raw, ok := json["urls"]
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	entries, err := jsonval.Array(raw)
+	entries, err := memberArray(raw)
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: link document urls: %w", err)
 	}
@@ -55,11 +55,11 @@ func CdnURLTemplatesFromJSON(json map[string]any, cdnPriority []string) ([]strin
 	}
 	rankedURLs := make([]ranked, 0, len(entries))
 	for i, element := range entries {
-		entry, err := jsonval.Object(element)
+		entry, err := memberObject(element)
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: link document urls[%d]: %w", i, err)
 		}
-		name, err := jsonval.Str(entry["endpoint_name"])
+		name, err := memberText(entry["endpoint_name"])
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: link document urls[%d].endpoint_name: %w", i, err)
 		}
@@ -96,8 +96,8 @@ func cdnRank(endpointName string, cdnPriority []string, index int) int {
 // The keys are collected and sorted before the replacements run, because the
 // order is observable when one parameter's value contains another parameter's
 // placeholder.
-func urlTemplate(entry map[string]any) (string, error) {
-	format, err := jsonval.Str(entry["url_format"])
+func urlTemplate(entry map[string]jsontext.Value) (string, error) {
+	format, err := memberText(entry["url_format"])
 	if err != nil {
 		return "", fmt.Errorf("url_format: %w", err)
 	}
@@ -107,7 +107,7 @@ func urlTemplate(entry map[string]any) (string, error) {
 		// A null parameters object means "nothing to replace".
 		return format, nil
 	}
-	parameters, err := jsonval.Object(raw)
+	parameters, err := memberObject(raw)
 	if err != nil {
 		return "", fmt.Errorf("parameters: %w", err)
 	}
@@ -119,7 +119,7 @@ func urlTemplate(entry map[string]any) (string, error) {
 	sort.Strings(keys)
 
 	for _, name := range keys {
-		value, err := jsonval.Str(parameters[name])
+		value, err := memberText(parameters[name])
 		if err != nil {
 			return "", fmt.Errorf("parameters[%q]: %w", name, err)
 		}

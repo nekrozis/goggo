@@ -3,7 +3,8 @@ package galaxy
 import (
 	"compress/zlib"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -11,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/nekrozis/goggo/internal/httpx"
-	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // DefaultContentSystemHost serves builds, secure links and dependency
@@ -97,7 +97,7 @@ func (c *Client) getResponse(ctx context.Context, target string) (string, error)
 
 // ResponseJSON fetches a Galaxy API document as JSON over an authenticated
 // GET. The website path resolves its downlink documents through it.
-func (c *Client) ResponseJSON(ctx context.Context, target string) (map[string]any, error) {
+func (c *Client) ResponseJSON(ctx context.Context, target string) (map[string]jsontext.Value, error) {
 	return c.getResponseJSON(ctx, target)
 }
 
@@ -109,7 +109,7 @@ func (c *Client) Response(ctx context.Context, target string) (string, error) {
 
 // getResponseJSON fetches target and decodes the body as a JSON object,
 // including the zlib retry described on decodeJSONObject.
-func (c *Client) getResponseJSON(ctx context.Context, target string) (map[string]any, error) {
+func (c *Client) getResponseJSON(ctx context.Context, target string) (map[string]jsontext.Value, error) {
 	body, err := c.getResponse(ctx, target)
 	if err != nil {
 		return nil, err
@@ -127,44 +127,50 @@ func (c *Client) getResponseJSON(ctx context.Context, target string) (map[string
 // header, so ordinary malformed JSON is never inflated and its error stays a
 // single ErrNotJSON; inflation failures are not reported separately, since the
 // first error already describes what the caller asked for.
-func decodeJSONObject(body string) (map[string]any, error) {
-	v, err := decodeDocument(body)
+//
+// Members are kept as raw JSON text rather than decoded Go values: a number
+// then keeps the literal the server sent, and nothing is paid for the parts of
+// a document this program never reads.
+func decodeJSONObject(body string) (map[string]jsontext.Value, error) {
+	doc, err := decodeDocument(body)
 	if err != nil {
 		return nil, err
 	}
-	obj, ok := v.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonval.Kind(v))
+	obj, err := memberObject(doc)
+	if err != nil || obj == nil {
+		// A body of "null" is not an object either: memberObject reports it as
+		// "not present", which is not what the caller asked for.
+		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonKind(doc))
 	}
 	return obj, nil
 }
 
 // decodeDocument decodes any JSON document — object, array or scalar — with the
-// zlib retry. It exists because two Galaxy product documents are top-level
-// arrays: the responses of dlcs.expanded_all_products_url and products?ids=….
-// Callers that need an object assert one on the result (decodeJSONObject does
-// that), so the assertion lives there and not here.
-func decodeDocument(body string) (any, error) {
-	v, err := decodeAny(body)
+// zlib retry, and returns its raw text. It exists because two Galaxy product
+// documents are top-level arrays: the responses of dlcs.expanded_all_products_url
+// and products?ids=…. Callers that need an object assert one on the result
+// (decodeJSONObject does that), so the assertion lives there and not here.
+func decodeDocument(body string) (jsontext.Value, error) {
+	v, err := decodeRaw(body)
 	if err == nil {
 		return v, nil
 	}
 	if plain, ok := inflateZlibBody(body); ok {
-		if v, retryErr := decodeAny(string(plain)); retryErr == nil {
+		if v, retryErr := decodeRaw(string(plain)); retryErr == nil {
 			return v, nil
 		}
 	}
 	return nil, err
 }
 
-// decodeAny decodes one JSON document of any type, with no compression
+// decodeRaw decodes one JSON document of any type, with no compression
 // handling and no shape opinion.
-func decodeAny(body string) (any, error) {
+func decodeRaw(body string) (jsontext.Value, error) {
 	if strings.TrimSpace(body) == "" {
 		return nil, fmt.Errorf("%w: empty body", ErrNotJSON)
 	}
-	var v any
-	if err := json.Unmarshal([]byte(body), &v); err != nil {
+	var v jsontext.Value
+	if err := jsonv2.Unmarshal([]byte(body), &v); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNotJSON, err)
 	}
 	return v, nil

@@ -2,13 +2,13 @@ package gamedetails
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
 	"github.com/nekrozis/goggo/internal/config"
-	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -54,7 +54,7 @@ const httpsPrefix = "https:"
 // values are never coerced.
 //
 // owned is the set of owned product ids; an EMPTY set means no filtering.
-func ProductInfoToGameDetails(ctx context.Context, product map[string]any, cfg config.DownloadConfig,
+func ProductInfoToGameDetails(ctx context.Context, product map[string]jsontext.Value, cfg config.DownloadConfig,
 	owned map[string]bool, resolve DownlinkResolver) (GameDetails, error) {
 	gd, err := convertProduct(ctx, product, cfg, owned, resolve)
 	if err != nil {
@@ -68,7 +68,7 @@ func ProductInfoToGameDetails(ctx context.Context, product map[string]any, cfg c
 
 // convertProduct is the recursive body: a DLC subtree is converted by this same
 // function.
-func convertProduct(ctx context.Context, product map[string]any, cfg config.DownloadConfig,
+func convertProduct(ctx context.Context, product map[string]jsontext.Value, cfg config.DownloadConfig,
 	owned map[string]bool, resolve DownlinkResolver) (GameDetails, error) {
 	var gd GameDetails
 
@@ -167,7 +167,7 @@ func convertProduct(ctx context.Context, product map[string]any, cfg config.Down
 		return GameDetails{}, wrap("gamedetails", err)
 	}
 	for i, node := range dlcs {
-		dlc, err := jsonval.Object(node)
+		dlc, err := memberObject(node)
 		if err != nil {
 			return GameDetails{}, wrap(fmt.Sprintf("gamedetails: expanded_dlcs[%d]", i), err)
 		}
@@ -196,14 +196,14 @@ func convertProduct(ctx context.Context, product map[string]any, cfg config.Down
 
 // gameFiles converts one downloads vector: the platform/language filter, the
 // empty-node skip and the per-file resolution.
-func gameFiles(ctx context.Context, gamename, title, label string, nodes []any, typeValue uint32,
+func gameFiles(ctx context.Context, gamename, title, label string, nodes []jsontext.Value, typeValue uint32,
 	cfg config.DownloadConfig, resolve DownlinkResolver) ([]GameFile, error) {
 	var out []GameFile
 	// Extras carry no platform or language and are exempt from both filters.
 	isExtra := typeValue&config.GFBaseExtra != 0
 
 	for i, node := range nodes {
-		info, err := jsonval.Object(node)
+		info, err := memberObject(node)
 		if err != nil {
 			return nil, wrap(fmt.Sprintf("gamedetails: %s[%d]", label, i), err)
 		}
@@ -251,7 +251,7 @@ func gameFiles(ctx context.Context, gamename, title, label string, nodes []any, 
 			return nil, wrap(fmt.Sprintf("gamedetails: %s[%d]", label, i), err)
 		}
 		for j, fileNode := range files {
-			entry, err := jsonval.Object(fileNode)
+			entry, err := memberObject(fileNode)
 			if err != nil {
 				return nil, wrap(fmt.Sprintf("gamedetails: %s[%d].files[%d]", label, i, j), err)
 			}
@@ -348,20 +348,16 @@ func wrap(where string, err error) error {
 // The four readers below share one rule: a missing member (or a JSON null) is the
 // zero value; a present member of the wrong JSON type is an error.
 //
-// The shape gate is a Go-side type assertion, not jsonval's conversion: jsonval
-// deliberately coerces (a number is readable as a string), and that leniency must not
-// decide what a field is.
+// The shape gate is this package's own reader, not a coercion: a number is NOT
+// readable as a string here, and that strictness must not be relaxed by accident.
 
 // fieldString reads a string field.
-func fieldString(obj map[string]any, name string) (string, error) {
-	raw, ok := obj[name]
-	if !ok || raw == nil {
-		return "", nil
+func fieldString(obj map[string]jsontext.Value, name string) (string, error) {
+	value, err := stringOnly(obj[name])
+	if err != nil {
+		return "", wrap(name, err)
 	}
-	if _, isString := raw.(string); !isString {
-		return "", fmt.Errorf("%s: expected a JSON string, got %s", name, jsonval.Kind(raw))
-	}
-	return jsonval.Str(raw)
+	return value, nil
 }
 
 // idString reads one of the API's identifier fields — the product id, a DLC id, a
@@ -369,45 +365,34 @@ func fieldString(obj map[string]any, name string) (string, error) {
 // ids as JSON numbers, and the same vector even mixes the shapes — an installer's id
 // is the string "en1installer0" while a bonus-content file's id is the number 13403.
 //
-// Accepted shapes: string as-is, number stringified the way jsonval.Str does it, bool
-// as "true"/"false", missing and null as "", object or array as an error. The split is
-// deliberate and narrow: slug, title, changelog, os, language, name, version and
-// downlink stay free strings under fieldString's strict gate, and `id` is the one
-// family read through a conversion.
-func idString(obj map[string]any, name string) (string, error) {
-	raw, ok := obj[name]
-	if !ok {
-		return "", nil
-	}
-	value, err := jsonval.Str(raw)
+// Accepted shapes: a string as itself and a number as the literal the document
+// carried; missing and null are "". A boolean, an object and an array are errors.
+// The number keeps its own text so an identifier wider than 2^53 does not lose
+// digits. The split is deliberate and narrow: slug, title, changelog, os, language,
+// name, version and downlink stay free strings under fieldString's strict gate, and
+// `id` is the one family read through a conversion.
+func idString(obj map[string]jsontext.Value, name string) (string, error) {
+	value, err := identifierText(obj[name])
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", name, err)
 	}
 	return value, nil
 }
 
-// fieldObject reads an object field. jsonval.Object is itself a shape
-// assertion, so it needs no separate gate. A missing member yields a nil map,
-// which every reader below treats as empty.
-func fieldObject(obj map[string]any, name string) (map[string]any, error) {
-	raw, ok := obj[name]
-	if !ok || raw == nil {
-		return nil, nil
-	}
-	value, err := jsonval.Object(raw)
+// fieldObject reads an object field. memberObject is itself a shape assertion, so
+// it needs no separate gate. A missing member yields a nil map, which every reader
+// below treats as empty.
+func fieldObject(obj map[string]jsontext.Value, name string) (map[string]jsontext.Value, error) {
+	value, err := memberObject(obj[name])
 	if err != nil {
 		return nil, wrap(name, err)
 	}
 	return value, nil
 }
 
-// fieldArray reads an array field; jsonval.Array is the shape assertion.
-func fieldArray(obj map[string]any, name string) ([]any, error) {
-	raw, ok := obj[name]
-	if !ok || raw == nil {
-		return nil, nil
-	}
-	value, err := jsonval.Array(raw)
+// fieldArray reads an array field; memberArray is the shape assertion.
+func fieldArray(obj map[string]jsontext.Value, name string) ([]jsontext.Value, error) {
+	value, err := memberArray(obj[name])
 	if err != nil {
 		return nil, wrap(name, err)
 	}
@@ -416,20 +401,24 @@ func fieldArray(obj map[string]any, name string) ([]any, error) {
 
 // fieldInt reads an integer field under the same rule as fieldString: a number,
 // never a numeric string.
-func fieldInt(obj map[string]any, name string) (int64, error) {
-	raw, ok := obj[name]
-	if !ok || raw == nil {
+func fieldInt(obj map[string]jsontext.Value, name string) (int64, error) {
+	raw := obj[name]
+	if raw.Kind() == jsontext.KindInvalid || raw.Kind() == jsontext.KindNull {
 		return 0, nil
 	}
-	if !jsonval.IsNumber(raw) {
-		return 0, fmt.Errorf("%s: expected a JSON number, got %s", name, jsonval.Kind(raw))
+	if raw.Kind() != jsontext.KindNumber {
+		return 0, fmt.Errorf("%s: expected a JSON number, got %s", name, jsonKind(raw))
 	}
-	value, err := jsonval.Int(raw)
+	value, err := memberInt(raw)
 	if err != nil {
 		return 0, wrap(name, err)
 	}
 	return value, nil
 }
+
+// maxUint64Exclusive is 2^64 — the first value past uint64. sizeString compares
+// its float fallback against it.
+const maxUint64Exclusive = float64(1 << 64)
 
 // sizeString renders a file entry's size as the decimal text GameFile.Size carries: a
 // string value is taken verbatim, and any other value becomes its unsigned decimal text
@@ -437,39 +426,32 @@ func fieldInt(obj map[string]any, name string) (int64, error) {
 // boolean have no unsigned form and render as "" — a missing size must not turn into a
 // plausible-looking number.
 //
-// Values arrive decoded, so the shapes below are what encoding/json produces (float64,
-// json.Number) plus native integers.
-func sizeString(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	var u uint64
-	switch n := v.(type) {
-	case float64:
-		if n < 0 || n != float64(uint64(n)) {
+// The member is a JSON number, so the token form answers for a whole value in
+// uint64 range and the float fallback covers a literal such as "1024.0".
+func sizeString(v jsontext.Value) string {
+	switch v.Kind() {
+	case jsontext.KindString:
+		tok, err := tokenOf(v)
+		if err != nil {
 			return ""
 		}
-		u = uint64(n)
-	case json.Number:
-		i, err := n.Int64()
-		if err != nil || i < 0 {
+		return tok.String()
+	case jsontext.KindNumber:
+		tok, err := tokenOf(v)
+		if err != nil {
 			return ""
 		}
-		u = uint64(i)
-	case int:
-		if n < 0 {
+		if u, err := tok.Uint(); err == nil {
+			return strconv.FormatUint(u, 10)
+		}
+		f, err := tok.Float()
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f < 0 || f != math.Trunc(f) || f >= maxUint64Exclusive {
 			return ""
 		}
-		u = uint64(n)
-	case int64:
-		if n < 0 {
-			return ""
-		}
-		u = uint64(n)
-	case uint64:
-		u = n
+		return strconv.FormatUint(uint64(f), 10)
 	default:
+		// A boolean, a container, a missing member and a null all have no
+		// unsigned size.
 		return ""
 	}
-	return strconv.FormatUint(u, 10)
 }

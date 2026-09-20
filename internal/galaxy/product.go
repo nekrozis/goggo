@@ -2,10 +2,9 @@ package galaxy
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"fmt"
 	"strings"
-
-	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // Both product endpoints carry the same expand list.
@@ -29,7 +28,7 @@ const (
 // A member this function reads is validated against the JSON type it must have:
 // an absent member is the zero value and a present member of the wrong type is
 // an error. Nothing is coerced into something plausible.
-func (c *Client) Product(ctx context.Context, productID string) (map[string]any, error) {
+func (c *Client) Product(ctx context.Context, productID string) (map[string]jsontext.Value, error) {
 	body, err := c.getResponse(ctx, c.ep.api+"/products/"+productID+"?expand="+productExpand)
 	if err != nil {
 		return nil, err
@@ -53,11 +52,14 @@ func (c *Client) Product(ctx context.Context, productID string) (map[string]any,
 // really does send the non-object shapes: a majority of one probed account's
 // products carry "dlcs": []. Inside an object the fields stay strict, because a
 // lenient read has no observed sample to justify widening them.
-func (c *Client) expandDLCs(ctx context.Context, product map[string]any) error {
-	raw, present := product["dlcs"]
-	dlcs, isObject := raw.(map[string]any)
-	if !present || raw == nil || !isObject {
+func (c *Client) expandDLCs(ctx context.Context, product map[string]jsontext.Value) error {
+	// Only an object is expanded; absent, null and every other shape skip.
+	if product["dlcs"].Kind() != jsontext.KindBeginObject {
 		return nil
+	}
+	dlcs, err := memberObject(product["dlcs"])
+	if err != nil {
+		return fmt.Errorf("dlcs: %w", err)
 	}
 	products, err := dlcProducts(dlcs)
 	if err != nil {
@@ -72,12 +74,8 @@ func (c *Client) expandDLCs(ctx context.Context, product map[string]any) error {
 // dlcProducts reads dlcs.products. An absent or null member is the empty list,
 // which takes the single-request branch; a present member that is not an array
 // is an error.
-func dlcProducts(dlcs map[string]any) ([]any, error) {
-	raw, present := dlcs["products"]
-	if !present || raw == nil {
-		return nil, nil
-	}
-	items, err := jsonval.Array(raw)
+func dlcProducts(dlcs map[string]jsontext.Value) ([]jsontext.Value, error) {
+	items, err := memberArray(dlcs["products"])
 	if err != nil {
 		return nil, fmt.Errorf("dlcs.products: %w", err)
 	}
@@ -85,34 +83,30 @@ func dlcProducts(dlcs map[string]any) ([]any, error) {
 }
 
 // expandDLCsInOneRequest is the branch for at most maxDLCBatchSize DLCs.
-func (c *Client) expandDLCsInOneRequest(ctx context.Context, product, dlcs map[string]any) error {
+func (c *Client) expandDLCsInOneRequest(ctx context.Context, product, dlcs map[string]jsontext.Value) error {
 	url, err := dlcExpandedURL(dlcs)
 	if err != nil {
 		return err
 	}
 	if url == "" {
 		// An empty url means "no request, empty result".
-		product[expandedDLCsKey] = []any{}
+		product[expandedDLCsKey] = jsontext.Value("[]")
 		return nil
 	}
 	docs, err := c.fetchDLCBatch(ctx, url)
 	if err != nil {
 		return err
 	}
-	product[expandedDLCsKey] = docs
+	product[expandedDLCsKey] = rawArray(docs)
 	return nil
 }
 
 // dlcExpandedURL reads dlcs.expanded_all_products_url: absent or null is the
 // empty string, a present non-string is an error.
-func dlcExpandedURL(dlcs map[string]any) (string, error) {
-	raw, present := dlcs["expanded_all_products_url"]
-	if !present || raw == nil {
-		return "", nil
-	}
-	url, ok := raw.(string)
-	if !ok {
-		return "", fmt.Errorf("dlcs.expanded_all_products_url: expected a JSON string, got %s", jsonval.Kind(raw))
+func dlcExpandedURL(dlcs map[string]jsontext.Value) (string, error) {
+	url, err := stringOnly(dlcs["expanded_all_products_url"])
+	if err != nil {
+		return "", fmt.Errorf("dlcs.expanded_all_products_url: %w", err)
 	}
 	return url, nil
 }
@@ -122,8 +116,8 @@ func dlcExpandedURL(dlcs map[string]any) (string, error) {
 // A batch goes out when it is full OR when the list ends. The second condition
 // keeps a count that is an exact multiple of maxDLCBatchSize from sending a
 // trailing empty request.
-func (c *Client) expandDLCsInBatches(ctx context.Context, product map[string]any, products []any) error {
-	expanded := make([]any, 0, len(products))
+func (c *Client) expandDLCsInBatches(ctx context.Context, product map[string]jsontext.Value, products []jsontext.Value) error {
+	expanded := make([]jsontext.Value, 0, len(products))
 	ids := make([]string, 0, maxDLCBatchSize)
 	for i, entry := range products {
 		id, err := dlcID(entry, i)
@@ -141,24 +135,20 @@ func (c *Client) expandDLCsInBatches(ctx context.Context, product map[string]any
 			ids = ids[:0]
 		}
 	}
-	product[expandedDLCsKey] = expanded
+	product[expandedDLCsKey] = rawArray(expanded)
 	return nil
 }
 
 // dlcID reads one dlcs.products entry's id. It is the identifier family, not a
 // string test: an absent or null member is the empty string, and a number —
-// which is what the live API actually sends here — is stringified. Only a
-// structured value is an error.
-func dlcID(entry any, index int) (string, error) {
-	obj, err := jsonval.Object(entry)
+// which is what the live API actually sends here — is read as its literal text.
+// A structured value, or a boolean, is an error.
+func dlcID(entry jsontext.Value, index int) (string, error) {
+	obj, err := memberObject(entry)
 	if err != nil {
 		return "", fmt.Errorf("dlcs.products[%d]: %w", index, err)
 	}
-	raw, present := obj["id"]
-	if !present || raw == nil {
-		return "", nil
-	}
-	id, err := jsonval.Str(raw)
+	id, err := identifierText(obj["id"])
 	if err != nil {
 		return "", fmt.Errorf("dlcs.products[%d].id: %w", index, err)
 	}
@@ -170,7 +160,7 @@ func dlcID(entry any, index int) (string, error) {
 //
 // The failure names the member rather than the url: the url is part of the
 // document, and this package keeps urls out of error strings.
-func (c *Client) fetchDLCBatch(ctx context.Context, url string) ([]any, error) {
+func (c *Client) fetchDLCBatch(ctx context.Context, url string) ([]jsontext.Value, error) {
 	body, err := c.getResponse(ctx, url)
 	if err != nil {
 		return nil, err
@@ -179,7 +169,7 @@ func (c *Client) fetchDLCBatch(ctx context.Context, url string) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	docs, err := jsonval.Array(doc)
+	docs, err := memberArray(doc)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", expandedDLCsKey, err)
 	}

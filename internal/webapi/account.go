@@ -2,14 +2,14 @@ package webapi
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/nekrozis/goggo/internal/jsonval"
+	"encoding/json/jsontext"
+	"fmt"
 )
 
 // GameDetailsJSON fetches the per-game details document. A response that is not
 // a JSON object is an error; the caller decides what to do with it.
-func (c *Client) GameDetailsJSON(ctx context.Context, gameID string) (map[string]any, error) {
+func (c *Client) GameDetailsJSON(ctx context.Context, gameID string) (map[string]jsontext.Value, error) {
 	return c.getResponseJSON(ctx, c.ep.www+"/account/gameDetails/"+gameID+".json")
 }
 
@@ -21,13 +21,17 @@ func (c *Client) OwnedGameIDs(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	ids := []string{}
-	owned, ok := root["owned"].([]any)
-	if !ok {
-		// Missing or not an array: no ids and no error.
+	raw := root["owned"]
+	if raw.Kind() != jsontext.KindBeginArray {
+		// Missing, null or not an array: no ids and no error.
 		return ids, nil
 	}
+	owned, err := memberArray(raw)
+	if err != nil {
+		return nil, fmt.Errorf("webapi: owned: %w", err)
+	}
 	for i, el := range owned {
-		s, err := jsonval.Str(el)
+		s, err := memberText(el)
 		if err != nil {
 			return nil, fmt.Errorf("webapi: owned[%d]: %w", i, err)
 		}
@@ -48,25 +52,25 @@ func (c *Client) Tags(ctx context.Context) (map[string]string, error) {
 		return nil, err
 	}
 	tags := map[string]string{}
-	v, ok := root["tags"]
-	if !ok || v == nil {
+	raw := root["tags"]
+	if raw.Kind() == jsontext.KindInvalid || raw.Kind() == jsontext.KindNull {
 		return tags, nil
 	}
-	children, err := jsonval.Children(v)
+	children, err := containerValues(raw)
 	if err != nil {
 		return nil, fmt.Errorf("webapi: tags: %w", err)
 	}
 	for i, child := range children {
-		node, err := jsonval.Object(child)
+		node, err := memberObject(child)
 		if err != nil {
 			return nil, fmt.Errorf("webapi: tags[%d]: %w", i, err)
 		}
 		// A missing id/name member reads as "".
-		id, err := jsonval.Str(node["id"])
+		id, err := memberText(node["id"])
 		if err != nil {
 			return nil, fmt.Errorf("webapi: tags[%d].id: %w", i, err)
 		}
-		name, err := jsonval.Str(node["name"])
+		name, err := memberText(node["name"])
 		if err != nil {
 			return nil, fmt.Errorf("webapi: tags[%d].name: %w", i, err)
 		}

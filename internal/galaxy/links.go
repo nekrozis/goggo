@@ -2,10 +2,9 @@ package galaxy
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
-
-	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // SecureLink fetches the CDN link document that a product's chunks are served
@@ -14,7 +13,7 @@ import (
 // The path is interpolated without URL encoding: the download path passes "/"
 // here and builds the rest from the document, and encoding would produce a
 // different request.
-func (c *Client) SecureLink(ctx context.Context, productID, path string) (map[string]any, error) {
+func (c *Client) SecureLink(ctx context.Context, productID, path string) (map[string]jsontext.Value, error) {
 	target := c.ep.contentSystem + "/products/" + productID +
 		"/secure_link?generation=2&path=" + path + "&_version=2"
 	return c.getResponseJSON(ctx, target)
@@ -23,7 +22,7 @@ func (c *Client) SecureLink(ctx context.Context, productID, path string) (map[st
 // DependencyLink fetches the CDN link document for one dependency path. The
 // path is the already-expanded galaxy path, and it is interpolated without
 // encoding for the same reason as SecureLink's.
-func (c *Client) DependencyLink(ctx context.Context, path string) (map[string]any, error) {
+func (c *Client) DependencyLink(ctx context.Context, path string) (map[string]jsontext.Value, error) {
 	target := c.ep.contentSystem + "/open_link?generation=2&_version=2&path=/dependencies/store/" + path
 	return c.getResponseJSON(ctx, target)
 }
@@ -40,21 +39,21 @@ func (c *Client) DependencyLink(ctx context.Context, path string) (map[string]an
 //
 // Any other failure is returned: an HTTP or transport error on either step, or a
 // "repository_manifest" that is not a scalar.
-func (c *Client) DependenciesJSON(ctx context.Context) (map[string]any, error) {
+func (c *Client) DependenciesJSON(ctx context.Context) (map[string]jsontext.Value, error) {
 	repository, err := c.getResponseJSON(ctx, c.ep.contentSystem+"/dependencies/repository?generation=2")
 	if err != nil {
 		if errors.Is(err, ErrNotJSON) {
-			return map[string]any{}, nil
+			return map[string]jsontext.Value{}, nil
 		}
 		return nil, err
 	}
 
-	manifestURL, err := jsonval.Str(repository["repository_manifest"])
+	manifestURL, err := memberText(repository["repository_manifest"])
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: dependencies: repository_manifest: %w", err)
 	}
 	if manifestURL == "" {
-		return map[string]any{}, nil
+		return map[string]jsontext.Value{}, nil
 	}
 	return c.getResponseJSON(ctx, manifestURL)
 }

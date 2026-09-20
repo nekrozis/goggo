@@ -1,12 +1,10 @@
 package model
 
-// GalaxyDepotItemChunk is one chunk of a depot entry: its byte range inside
-// the compressed stream and inside the uncompressed file.
+// GalaxyDepotItemChunk is one chunk of a depot entry: its byte range inside the
+// compressed stream and inside the uncompressed file.
 //
-// The bare names are the UNCOMPRESSED side (MD5, Size, Offset) and the
-// Compressed prefix is the compressed one (CompressedMD5, CompressedSize,
-// CompressedOffset). The reader rejects values that do not fit a uint64 (see
-// uint64Value in internal/galaxy).
+// The bare names are the UNCOMPRESSED side (MD5, Size, Offset) and the Compressed
+// prefix is the compressed one (CompressedMD5, CompressedSize, CompressedOffset).
 type GalaxyDepotItemChunk struct {
 	CompressedMD5 string
 	MD5           string

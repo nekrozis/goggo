@@ -14,14 +14,12 @@ import (
 // on Windows no equivalent ACL behaviour is claimed (D4).
 const tokenFileMode = 0o600
 
-// SaveTokenFile persists g's token store to path as compact JSON, with the
-// stored fields written back unchanged. An empty store writes nothing and returns
-// nil.
+// SaveTokenFile persists g's token store to path as compact JSON, with the stored
+// fields written back unchanged. An empty store writes nothing and returns nil.
 //
-// The write is atomic: content goes to a temp file in the same directory,
-// created with mode 0600 from the start, synced, and renamed over path. A crash
-// never leaves a truncated token file, and the secret never exists with looser
-// permissions.
+// The write is atomic (temp file in the same directory, 0600 from creation, synced,
+// renamed over path): a crash never leaves a truncated token file, and the secret
+// never exists with looser permissions.
 func SaveTokenFile(g *config.GalaxyConfig, path string) error {
 	store := g.GetJSON()
 	if len(store) == 0 {

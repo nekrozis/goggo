@@ -11,12 +11,9 @@ import (
 )
 
 // This file is the JSON conversion of the GameDetails domain: a Galaxy product
-// document becomes a GameDetails tree. It reads only the fields the model needs.
-//
-// The network is not here: resolving each file entry's downlink inside the
-// conversion would drag the API client, its token handling and its cache into
-// this package. Instead the one capability the conversion needs is injected, so
-// this package keeps depending on config/util alone and stays testable offline.
+// document becomes a GameDetails tree. It reads only the fields the model needs, and
+// the one capability it lacks — resolving a file entry's downlink — is injected as a
+// DownlinkResolver, so no network code lives here.
 
 // ResolvedFile is what the resolver reports about one file entry.
 //
@@ -50,12 +47,9 @@ const (
 const httpsPrefix = "https:"
 
 // ProductInfoToGameDetails converts one Galaxy product document into the domain
-// model.
-//
-// Type checking follows one rule: a field the conversion reads is validated
-// against the JSON type it must have — absent is the zero value, present with
-// the wrong shape is an error. Values are never coerced into something
-// plausible. Fields the conversion does not read are not validated at all.
+// model: a field the conversion reads is validated against the JSON type it must
+// have — absent is the zero value, present with the wrong shape is an error — and
+// values are never coerced.
 //
 // owned is the set of owned product ids; an EMPTY set means no filtering.
 func ProductInfoToGameDetails(ctx context.Context, product map[string]any, cfg config.DownloadConfig,
@@ -349,13 +343,12 @@ func wrap(where string, err error) error {
 	return fmt.Errorf("%s: %w", where, err)
 }
 
-// The four readers below share one rule: a missing member (or a JSON null) is
-// the zero value; a present member of the wrong JSON type is an error.
+// The four readers below share one rule: a missing member (or a JSON null) is the
+// zero value; a present member of the wrong JSON type is an error.
 //
 // The shape gate is a Go-side type assertion, not jsonval's conversion: jsonval
-// deliberately coerces (a number is readable as a string, "true" comes out of a
-// bool), and that leniency is exactly what must not decide what a field is.
-// Shape first, then jsonval for the value.
+// deliberately coerces (a number is readable as a string), and that leniency must not
+// decide what a field is.
 
 // fieldString reads a string field.
 func fieldString(obj map[string]any, name string) (string, error) {
@@ -369,22 +362,16 @@ func fieldString(obj map[string]any, name string) (string, error) {
 	return jsonval.Str(raw)
 }
 
-// idString reads one of the API's identifier fields — the product id, a DLC id,
-// a file id. It is a conversion, not a type test: the live product documents
-// send these ids as JSON numbers, and the same vector even mixes the shapes — an
-// installer's id is the string "en1installer0" while a bonus-content file's id
-// is the number 13403. The accepted shapes are:
+// idString reads one of the API's identifier fields — the product id, a DLC id, a
+// file id. It is a conversion, not a type test: the live product documents send these
+// ids as JSON numbers, and the same vector even mixes the shapes — an installer's id
+// is the string "en1installer0" while a bonus-content file's id is the number 13403.
 //
-//	string → as-is
-//	number → stringified the way jsonval.Str stringifies it
-//	bool → "true" / "false"
-//	missing → ""
-//	null → ""
-//	object / array → error
-//
-// The split is deliberate and narrow: slug, title, changelog, os, language,
-// name, version and downlink stay free strings under fieldString's strict gate;
-// `id` is the one family read through a conversion.
+// Accepted shapes: string as-is, number stringified the way jsonval.Str does it, bool
+// as "true"/"false", missing and null as "", object or array as an error. The split is
+// deliberate and narrow: slug, title, changelog, os, language, name, version and
+// downlink stay free strings under fieldString's strict gate, and `id` is the one
+// family read through a conversion.
 func idString(obj map[string]any, name string) (string, error) {
 	raw, ok := obj[name]
 	if !ok {

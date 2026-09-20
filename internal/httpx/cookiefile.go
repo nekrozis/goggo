@@ -49,17 +49,15 @@ type cookieEntry struct {
 // LoadCookies restores cookie state from the configured CookieFile.
 //
 // It is an initialisation-time API, not a merge or snapshot-replacement API:
-// the decoded cookies are fed through the same SetCookies event path the
-// runtime uses, so the jar and the persistence state are rebuilt identically
-// and the file's rows are treated as "this cookie still exists" (deletion
-// events never appear in a cookies.txt file). cookiejar.Jar has no public
-// "remove all cookies" API, so an existing jar is never cleared — call this
-// on a fresh Client.
+// the decoded cookies go through the same SetCookies event path the runtime
+// uses, so jar and persistence state are rebuilt identically, and a file's rows
+// read as "this cookie still exists" (deletion events never appear in a
+// cookies.txt file). cookiejar.Jar has no public "remove all cookies" API, so an
+// existing jar is never cleared — call this on a fresh Client.
 //
-// Error layers are kept distinct: an unconfigured CookieFile is a no-op; a
-// caller-provided HTTPClient yields ErrCookieFileUnsupported; a missing file
-// is an empty state (normal on first run); any other I/O failure is wrapped
-// with the path. Malformed rows are skipped by the codec, never by this layer.
+// A missing file is an empty state, not an error; a caller-provided HTTPClient
+// yields ErrCookieFileUnsupported; any other I/O failure is wrapped with the
+// path.
 func (c *Client) LoadCookies() error {
 	if c.cookieFile == "" {
 		return nil
@@ -203,10 +201,9 @@ func fileCookies(snap []cookieEntry, now time.Time) []cookiefile.PersistentCooki
 
 // writeCookieFile writes rows to path atomically: a temp file in the same
 // directory (created 0600 before any content is written) is written, synced,
-// closed and renamed over path. The same-directory temp keeps the rename on
-// one filesystem. As with the token-file writer, this prevents a truncated
-// file on the normal path but claims no cross-platform crash durability; on
-// Windows the replace semantics of os.Rename apply as-is.
+// closed and renamed over path. This prevents a truncated file on the normal
+// path but claims no cross-platform crash durability; on Windows the replace
+// semantics of os.Rename apply as-is.
 func writeCookieFile(path string, cookies []cookiefile.PersistentCookie) (int, error) {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".goggo-cookies-*")

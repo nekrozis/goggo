@@ -11,9 +11,7 @@ import (
 )
 
 // chunkURLProvider resolves the URL of one chunk through the Galaxy CDN
-// machinery: hashToGalaxyPath -> secure/dependency link -> CDN template ->
-// placeholder substitution, refreshing the Galaxy token before a chunk when it
-// has expired.
+// machinery, refreshing the Galaxy token before a chunk when it has expired.
 //
 // Workers call URL concurrently, so the per-product template cache and the
 // token refresh are mutex-guarded. Dependency chunks re-resolve on every call

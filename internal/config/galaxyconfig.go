@@ -20,19 +20,16 @@ const (
 // carries no usable expires_in.
 const defaultExpiresIn int64 = 3600
 
-// GalaxyConfig is a thread-safe store for the Galaxy token JSON plus the
-// semantic accessors around it.
+// GalaxyConfig is a thread-safe store for the Galaxy token JSON plus the semantic
+// accessors around it.
 //
-// Use it through a pointer created with NewGalaxyConfig: never copy a
-// GalaxyConfig by value and never accept one as a value parameter, because
-// sharing the pointer IS the design and a silent copy would duplicate the lock
-// and the state. Do not add a String or formatting method that can dump the raw
-// token — the store holds credentials.
-//
-// GetJSON/SetJSON copy deeply and SetJSON never modifies its argument, so a
-// caller cannot alias the store. Unknown JSON fields are preserved verbatim: the
-// store is a JSON tree, not a fixed record, so a field the server sends is
-// written back unchanged.
+// Use it through a pointer created with NewGalaxyConfig: never copy one by value
+// and never accept one as a value parameter, because sharing the pointer IS the
+// design and a silent copy would duplicate the lock and the state. Do not add a
+// String or formatting method that can dump the raw token — the store holds
+// credentials. GetJSON/SetJSON copy deeply and SetJSON never modifies its argument,
+// so a caller cannot alias the store, and unknown JSON fields survive verbatim
+// because the store is a JSON tree, not a fixed record.
 type GalaxyConfig struct {
 	mu          sync.RWMutex
 	filepath    string

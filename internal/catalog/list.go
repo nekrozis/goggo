@@ -1,12 +1,11 @@
 // Package catalog assembles the account game list from the website listings: it
-// drives the paginated product fetches, maps each product to a
-// model.GameItem, applies the name/platform/new filters and optionally
-// enriches entries with their DLC names.
+// drives the paginated product fetches, maps each product to a model.GameItem,
+// applies the name/platform/new filters and optionally enriches entries with their
+// DLC names.
 //
-// The HTTP primitives stay in internal/webapi; this package holds the business
-// filtering, so the transport layer never learns about --game-regex, --new or
-// --include. The per-game configuration file override of the DLC-count rule is
-// not implemented here.
+// The HTTP primitives stay in internal/webapi and the business filtering lives here,
+// so the transport layer never learns about --game-regex, --new or --include. The
+// per-game configuration file override of the DLC-count rule is not implemented here.
 package catalog
 
 import (
@@ -227,16 +226,12 @@ func productID(v any) (string, error) {
 	return intShapedString(v)
 }
 
-// intShapedString renders a value with the `isInt ? to_string(asInt): asString`
-// rule used for product ids and for the wishlist discount percentage.
+// intShapedString renders a value with the `isInt ? to_string(asInt): asString` rule
+// used for product ids and for the wishlist discount percentage.
 //
-// Only integer-shaped values enter the integer branch: a boolean, a string or
-// null must stringify instead. Do not widen this gate — jsonval.Int alone would
-// coerce true to "1".
-//
-// The integer branch accepts the whole int64 range, so only a value beyond 2^31
-// (or a real whose text form uses an exponent) could differ from the reference
-// behaviour; neither a product id nor a percentage reaches that.
+// Only integer-shaped values enter the integer branch: a boolean, a string or null
+// must stringify instead. Do not widen this gate — jsonval.Int alone would coerce
+// true to "1".
 func intShapedString(v any) (string, error) {
 	switch v.(type) {
 	case int, int64, uint64, float64:

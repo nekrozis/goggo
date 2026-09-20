@@ -44,14 +44,8 @@ type Client struct {
 	hx     *httpx.Client
 }
 
-// New builds a Client on a caller-provided transport and token store.
-//
-// The transport is owned by the caller: galaxy never creates one, so retry
-// policy, timeouts, the low-speed guard and the cookie jar are configured in
-// exactly one place, and the same handle can serve the website API and the
-// content API.
-//
-// Both arguments are required; a nil one is an error.
+// New builds a Client on a caller-provided transport and token store. Both
+// arguments are required; a nil one is an error.
 func New(hx *httpx.Client, galaxy *config.GalaxyConfig) (*Client, error) {
 	if galaxy == nil {
 		return nil, errors.New("galaxy: nil galaxy config")
@@ -67,12 +61,8 @@ func New(hx *httpx.Client, galaxy *config.GalaxyConfig) (*Client, error) {
 }
 
 // ErrNotJSON reports that a response body did not form a JSON object. It covers
-// the SHAPE of a response only: HTTP failures surface as *httpx.StatusError and
+// the SHAPE of a response only: HTTP failures surface as *httpx.StatusError, and
 // field-level problems are wrapped with context by the caller.
-//
-// It is this package's own sentinel rather than a shared one, because the
-// website API in internal/webapi draws the same distinction for its own
-// responses.
 var ErrNotJSON = errors.New("galaxy: response was not JSON")
 
 // bearer returns the token to attach, or "" when no Authorization header must
@@ -132,18 +122,12 @@ func (c *Client) getResponseJSON(ctx context.Context, target string) (map[string
 // body looks like a compressed stream.
 //
 // The shape contract is single-entry and explicit: an empty, malformed or
-// non-object body is ErrNotJSON. A JSON array is therefore a failure, not a
-// success with the wrong type, so the steps that consume these documents
-// work against a known object boundary.
-//
-// The zlib retry is attempted strictly AFTER the first decode failed, and only
-// when the first two bytes are a zlib stream header. Ordinary malformed JSON is
-// never inflated, so its error stays a single ErrNotJSON. Inflation failures are
-// not reported separately — the body was not a usable JSON object either way,
-// and the first error describes what the caller asked for.
-//
-// The object assertion is what makes this the object-shaped entry point;
-// decodeDocument below is the same pipeline without it.
+// non-object body is ErrNotJSON, so a JSON array is a failure rather than a
+// success with the wrong type. The zlib retry is attempted strictly AFTER the
+// first decode failed and only when the first two bytes are a zlib stream
+// header, so ordinary malformed JSON is never inflated and its error stays a
+// single ErrNotJSON; inflation failures are not reported separately, since the
+// first error already describes what the caller asked for.
 func decodeJSONObject(body string) (map[string]any, error) {
 	v, err := decodeDocument(body)
 	if err != nil {
@@ -157,13 +141,10 @@ func decodeJSONObject(body string) (map[string]any, error) {
 }
 
 // decodeDocument decodes any JSON document — object, array or scalar — with the
-// zlib retry decodeJSONObject used to own.
-//
-// It exists because the Galaxy product documents carry a top-level ARRAY in two
-// places: the response of dlcs.expanded_all_products_url and that of
-// products?ids=…. Callers that need an object assert one on the result
-// (decodeJSONObject does exactly that); the assertion lives there rather than
-// here, so the value-typed half stays reachable.
+// zlib retry. It exists because two Galaxy product documents are top-level
+// arrays: the responses of dlcs.expanded_all_products_url and products?ids=….
+// Callers that need an object assert one on the result (decodeJSONObject does
+// that), so the assertion lives there and not here.
 func decodeDocument(body string) (any, error) {
 	v, err := decodeAny(body)
 	if err == nil {
@@ -193,12 +174,10 @@ func decodeAny(body string) (any, error) {
 // inflateZlibBody inflates body when it starts with a zlib stream header, and
 // reports whether it did.
 //
-// The header check is what limits the fallback to the compressed case: 0x78
-// followed by 0x01, 0x5e, 0x9c or 0xda is a zlib stream with a 32 KiB window
-// and the usual compression levels. It is written as two byte tests rather than
-// through a shared uint16 reader, because nothing else needs one.
-//
-// compress/zlib handles the zlib wrapper itself, so no header is parsed out.
+// The header check limits the fallback to the compressed case: 0x78 followed by
+// 0x01, 0x5e, 0x9c or 0xda is a zlib stream with a 32 KiB window and the usual
+// compression levels. compress/zlib handles the zlib wrapper itself, so no header
+// is parsed out here.
 func inflateZlibBody(body string) ([]byte, bool) {
 	if len(body) < 2 || body[0] != 0x78 {
 		return nil, false

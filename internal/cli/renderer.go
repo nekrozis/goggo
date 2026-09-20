@@ -14,11 +14,9 @@ import (
 
 // progressSource is the sampling surface the renderer polls, declared here
 // because this is where it is consumed: transfer's *Progress satisfies it
-// structurally, so the front end never depends on a transfer interface. It is
-// the ONLY numeric progress authority of the display: the bytes, the totals,
-// the percentages and the pending side all come from here, never from the
-// progress events. Queue is the run-level snapshot the pending side derives
-// from; its false means "no snapshot", never "empty queue".
+// structurally, so the front end never depends on a transfer interface.
+//
+// Queue's false means "no snapshot", never "empty queue".
 type progressSource interface {
 	Bytes(task string) (int64, bool)
 	Total(task string) (int64, bool)
@@ -42,9 +40,8 @@ const (
 // finished. A zero-transfer run shows no count line — the plan's "Nothing to
 // download." already said it.
 //
-// subject names what the run was: an install closes as "Installation failed.",
-// a download as "Download failed." — the closing line must not misname the
-// command it closes. An empty subject keeps the install wording.
+// subject names what the run was, so the closing line cannot misname the command
+// it closes; an empty subject keeps the install wording.
 func finalLines(reason stopReason, st runStats, subject string) []string {
 	switch reason {
 	case stopCompleted:

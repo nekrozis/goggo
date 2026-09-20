@@ -32,19 +32,14 @@ func (c *Client) DependencyLink(ctx context.Context, path string) (map[string]an
 // two-step fetch: the repository endpoint names a manifest URL, and that second
 // document is what the caller wants.
 //
-// "No repository" is a normal result rather than a failure:
+// "No repository" is a normal result rather than a failure: an empty or
+// non-object repository document (this package's ErrNotJSON) and a missing
+// "repository_manifest" both yield an empty document and no error, and a
+// manifest URL that reads as "" skips the second request — which keeps "there is
+// no manifest" distinguishable from "the request failed".
 //
-//   - a repository document that is empty or not a JSON object — this package's
-//     ErrNotJSON — yields an empty document and no error;
-//   - so does a document whose "repository_manifest" is absent.
-//
-// A "repository_manifest" that reads as "" also yields an empty document, and
-// the second request is skipped: that keeps "there is no manifest"
-// distinguishable from "the request failed".
-//
-// Everything else is a real fetch failure and is returned: an HTTP or transport
-// error on either step, a "repository_manifest" that is not a scalar, and any
-// failure of the manifest request itself.
+// Any other failure is returned: an HTTP or transport error on either step, or a
+// "repository_manifest" that is not a scalar.
 func (c *Client) DependenciesJSON(ctx context.Context) (map[string]any, error) {
 	repository, err := c.getResponseJSON(ctx, c.ep.contentSystem+"/dependencies/repository?generation=2")
 	if err != nil {

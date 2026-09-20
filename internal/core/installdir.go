@@ -44,35 +44,14 @@ func InstallSubdirNeedsProductInfo(template string) bool {
 
 // ResolveInstallSubdir expands one install subdirectory template.
 //
-// The template is matched WHOLE: it must be exactly one of the names below, and
-// anything else comes back unchanged, so "--install-dir %install_dir%/data"
-// keeps its literal text rather than gaining an expanded prefix.
-//
-//	%install_dir% manifest.installDirectory
-//	%product_id% manifest.baseProductId, not the requested id
-//	%install_dir_stripped% %install_dir% with everything but letters, digits,
-//	                       spaces and - _. [ ] { } removed
-//	%gamename% product.slug
-//	%title% product.title
-//	%title_stripped% %title% stripped, registered only with %title%
-//
-// product is the document of manifest.baseProductId, or nil when the caller
-// did not need it (see InstallSubdirNeedsProductInfo) or could not name the
-// product. The three templates that read it are registered only when the
-// document actually carries a non-empty value, so a missing or empty slug or
-// title leaves the NAME ITSELF as the result: "%title%/setup" must not collapse
-// to "/setup". The two stripped names are keyed off the unstripped entry rather
-// than off a value test — %title_stripped% appears exactly when %title% does,
-// so it is a literal again when there is no title.
-//
-// A name that was never registered falls through unchanged. That covers an
-// unknown name, a template embedded in a longer path, and the empty-value cases
-// above.
-//
-// This function is pure — it issues no request — which is why the predicate
-// above exists next to it: the caller decides whether to fetch the document,
-// and this function only reads it. The caller also owns the subdirectories
-// test: installing without subdirectories leaves the install directory empty.
+// The template is matched WHOLE: it must be exactly one of the names in
+// InstallSubdirTemplates, so "--install-dir %install_dir%/data" keeps its
+// literal text rather than gaining an expanded prefix, and %product_id% is the
+// manifest's baseProductId rather than the id the caller requested. product may
+// be nil: a template that reads it is registered only when the document carries
+// a non-empty value, so a missing slug or title leaves the NAME ITSELF as the
+// result — "%title%/setup" must not collapse to "/setup". The function issues
+// no request; the caller decides whether to fetch the document.
 func ResolveInstallSubdir(template string, manifest, product map[string]any) (string, error) {
 	installDir, err := documentString(manifest, "installDirectory")
 	if err != nil {

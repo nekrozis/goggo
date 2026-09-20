@@ -14,8 +14,6 @@ import (
 // structurally, so orchestration never imports the front end (internal/cli
 // imports this package, not the other way round). A test provides its own
 // implementation instead of a terminal.
-//
-// Stream policy: prompts and status lines go to ErrOut, program output to Out.
 type Console interface {
 	// Out carries program output: the product list a selection is made from,
 	// for instance.
@@ -59,10 +57,8 @@ type transferEventSink interface {
 // installRootSetter is the optional ability of a front end that renders task
 // rows to receive the plan's semantic install root, so it can display task
 // paths relative to it. The install run hands res.InstallPath over after
-// BuildPlan — the ONE root with the right semantics (the %install_dir%
-// template resolved; not cfg.Directories.Directory, which a subdir template
-// can differ from). Like transferEventSink the interface itself stays
-// unexported; the method is exported so the CLI can satisfy it structurally.
+// BuildPlan — the ONE root with the right semantics (%install_dir% resolved;
+// not cfg.Directories.Directory, which a subdir template can differ from).
 type installRootSetter interface {
 	SetInstallRoot(path string)
 }

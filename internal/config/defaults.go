@@ -3,16 +3,14 @@ package config
 import "runtime"
 
 // NewConfig returns the configuration defaults applied before any command-line
-// flag is parsed, plus the option defaults that belong to the config domain
-// rather than the CLI.
+// flag is parsed, plus the option defaults that belong to the config domain rather
+// than the CLI.
 //
-// It is a pure constructor: it opens no files, creates no directories and reads
-// no environment. The two XDG roots are passed in rather than looked up here,
-// both to keep this function free of side effects and to avoid a config -> util
-// dependency: util already depends on config for the option tables, so
-// importing it here would close an import cycle. Callers resolve the roots
-// through util.ConfigHome/util.CacheHome, which remain the single entry point
-// for path resolution.
+// It is a pure constructor: it opens no files, creates no directories and reads no
+// environment. The two XDG roots are passed in rather than looked up here to keep
+// that property and to avoid a config -> util import cycle (util already depends on
+// config for the option tables). Callers resolve the roots through
+// util.ConfigHome/util.CacheHome.
 func NewConfig(configHome, cacheHome string) Config {
 	var cfg Config
 

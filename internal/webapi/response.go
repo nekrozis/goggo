@@ -13,11 +13,8 @@ import (
 // ErrNotJSON reports that a response body did not form the expected JSON
 // document. It covers the SHAPE of a response only: HTTP failures surface as
 // *httpx.StatusError and field-level problems are wrapped with context, so a
-// caller can map ErrNotJSON onto its own hint ("response was not JSON; cookies
-// have most likely expired — try --login first").
-//
-// It stays here rather than in internal/jsonval because it describes an HTTP
-// response shape, not a JSON value conversion.
+// caller can map ErrNotJSON onto its own hint (the CLI renders the "--login"
+// advice).
 var ErrNotJSON = errors.New("webapi: response was not JSON")
 
 // getResponse fetches url and returns the body. Transport and HTTP errors are

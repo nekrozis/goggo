@@ -4,12 +4,6 @@
 // Run, so nothing touches the real terminal and tests can drive the whole front
 // end.
 //
-// The command tree in command.go is the product surface — only commands this
-// build supports appear there. The option parser is table-driven, so acceptance,
-// help and diagnostics come from the same tables. Every leaf declares what it
-// needs from the session and whether it may create one, and the dispatcher
-// applies that declaration rather than deciding for itself.
-//
 // Exit codes: 0 success, 1 operational failure, 2 usage failure, 130
 // interrupted (run.go owns the mapping).
 package cli
@@ -71,11 +65,10 @@ func (c *console) ErrOut() io.Writer {
 
 // attachInstallUI builds the renderer for one transferring run. The sink is
 // chosen by the OUTPUT side — stdout is a terminal ⇒ live TTY frames through a
-// coordinator; otherwise the append-only log sink (D8). The width and height
-// come from the stdout descriptor, the side actually being drawn on — not
-// stdin, which stays reserved for the prompts. subject names the command for
-// the closing line ("Installation", "Download"), so the frame cannot misname
-// what it just ran.
+// coordinator; otherwise the append-only log sink (D8) — and the width and
+// height come from that same descriptor, not from stdin, which stays reserved
+// for the prompts. subject names the command for the closing line
+// ("Installation", "Download"), so the frame cannot misname what it just ran.
 func (c *console) attachInstallUI(cfg config.Config, source progressSource, subject string) {
 	bar := progress.NewBar(cfg.Unicode, cfg.Color)
 	interval := time.Duration(cfg.ProgressInterval) * time.Millisecond
@@ -143,9 +136,8 @@ func (c *console) SetInstallRoot(path string) {
 // real terminal. It is the single place that answers "can a prompt be answered
 // here?", so the password prompt and the login flow cannot disagree.
 //
-// rawIn is the reader exactly as it was handed in: io.Reader never exposes a
-// descriptor, so anything that is not an *os.File — tests, pipes, redirection —
-// is not a terminal.
+// io.Reader exposes no descriptor, so anything that is not an *os.File — tests,
+// pipes, redirection — is not a terminal.
 func (c *console) terminalFd() (int, bool) {
 	f, ok := c.rawIn.(interface{ Fd() uintptr })
 	if !ok {

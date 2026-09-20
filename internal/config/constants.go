@@ -38,13 +38,11 @@ const (
 	UnitStringMSI  = "MB"
 )
 
-// ProgramName is this implementation's identity: the binary name, the CLI name
-// and the product token of the User-Agent.
-//
-// Version is this implementation's own version; it advances independently of the
-// compatibility baseline below. UpstreamCompatibilityVersion is the LGOGDownloader
-// release whose behaviour this program follows — a compatibility baseline, not
-// this program's identity, so the CLI never presents it as our version.
+// ProgramName is this implementation's identity: the binary name, the CLI name and
+// the User-Agent product token. Version is this implementation's own version, and
+// UpstreamCompatibilityVersion is the LGOGDownloader release whose behaviour this
+// program follows — a compatibility baseline, not this program's identity, so the
+// CLI never presents it as our version.
 const (
 	ProgramName                  = "goggo"
 	Version                      = "0.1.0"

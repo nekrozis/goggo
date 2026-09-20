@@ -53,11 +53,8 @@ type PlanResult struct {
 	// It differs from the transfer tasks in both directions: a skipped
 	// destination is in it without a task, and the small-files containers are
 	// NOT in it — they are unpacked into their members and deleted while the
-	// install runs (see ExtractSmallFilesContainers), so they are not part of
-	// the finished installation. Like the orphan check's ledger it describes
-	// which paths the installation owns (D44), and it is
-	// independent of the container decision: whether a member arrives inside a
-	// container or on its own, the finished tree has the same files.
+	// install runs (see ExtractSmallFilesContainers). Like the orphan check's
+	// ledger it describes which paths the installation owns (D44).
 	Expected []InstalledFile
 }
 
@@ -85,12 +82,10 @@ func (r *PlanResult) addMessage(text string) {
 
 // planMode says what a plan is built for.
 //
-// The two modes share everything that defines WHICH files the installation
-// owns — the product and build resolution, the depot expansion, the include
-// mask, the dependency handling, the blacklist filter, the small-files
-// container decision and the install root. They differ only in the parts that
-// exist for the install's own display and pre-flight, which a read-only
-// verification neither wants nor should pay for.
+// Both modes define WHICH files the installation owns identically — product and
+// build resolution, depot expansion, include mask, dependencies, blacklist, SFC
+// decision and install root — and differ only in the install-shaped display and
+// pre-flight, which a read-only verification should not pay for.
 type planMode uint8
 
 const (
@@ -298,12 +293,9 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 
 	// Differences from the previously installed build. The comparison runs
 	// after the SFC decision, so a file that moved into the container counts as
-	// deleted (D55).
-	//
-	// Only an install uses this: those paths are what it removes, and finding
-	// them costs a second manifest fetch plus a second depot expansion. A
-	// verification has no use for either. It stays a closure so the
-	// skipped work reads as one guarded block instead of a second code path.
+	// deleted (D55). Only an install uses this: the deletes are what it
+	// performs, and finding them costs a second manifest fetch plus a second
+	// depot expansion, which a verification has no use for.
 	previousBuildDeletes := func() ([]string, error) {
 		var deletes []string
 		infoPath := installPath + "/goggame-" + id + ".info"
@@ -362,13 +354,11 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 		}
 	}
 
-	// The expected file set: what the finished installation must
-	// have, whatever route the bytes take. A small-files container is
-	// transport-only in every shape — it is unpacked into its members and then
-	// removed — so it never belongs to the set, while its members do: they come
-	// from the container side of the split when the container is used and from
-	// the ordinary side when it is not. Fixed order, by path, so the order a
-	// consumer reports in is part of the plan rather than a renderer's choice.
+	// The expected file set: what the finished installation must have, whatever
+	// route the bytes take. A small-files container is transport-only — it is
+	// unpacked and removed — so it never belongs to the set, while its members
+	// do. Fixed order, by path: the order a consumer reports in is part of the
+	// plan, not a renderer's choice.
 	expected := make([]model.GalaxyDepotItem, 0, len(planItems)+len(sfcItems))
 	expected = append(expected, planItems...)
 	expected = append(expected, sfcItems...)
@@ -403,10 +393,9 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 
 		// The plan-level reconciliation: a destination that already satisfies
 		// the item — same uncompressed size and whole-file md5 — leaves the
-		// queue here, so the transfer only sees real work. This classification
-		// is an observation and an optimisation: the transfer re-checks the
-		// destination authoritatively at task start, and the success of the
-		// whole install is gated by revalidating the skipped set at the end. An
+		// queue here, so the transfer only sees real work. The transfer
+		// re-checks the destination authoritatively at task start, and the
+		// install is gated by revalidating the skipped set at the end. An
 		// observation failure fails the plan; it is never turned into a
 		// destructive action (D43).
 		complete, err := reconcile.IsComplete(it, destination)

@@ -10,21 +10,11 @@ import (
 
 var integerRE = regexp.MustCompile(`^[+-]?\d+$`)
 
-// OptionValue resolves a command-line option value against options. The match
-// order is fixed and must not be reordered:
-//
-//  1. str == "all" -> OR of every option ID
-//  2. allowInt and an integer literal -> parsed with 32-bit bounds; an in-range
-//     value is stored into uint32, so a negative literal wraps (e.g. -1 ->
-//     0xFFFFFFFF); a literal outside the int32 range maps to 0
-//  3. walk options in table order and for each entry:
-//     a. if the entry has a non-empty Regexp and str matches it as a whole
-//     (case-insensitive, anchored) -> that ID wins
-//     b. otherwise if str == entry.Code -> that ID wins
-//  4. no match -> 0
-//
-// Steps 3a/3b are evaluated per entry sequentially: an earlier entry's Code
-// takes priority over a later entry's Regexp only through this order.
+// OptionValue resolves a command-line option value against options: "all", an
+// integer literal when allowInt is set, then a table walk matching each entry's
+// Regexp (anchored, case-insensitive) before its Code. The order is fixed and must
+// not be reordered: an earlier entry's Code outranks a later entry's Regexp only
+// through it.
 func OptionValue(str string, options []config.Option, allowInt bool) uint32 {
 	if str == "all" {
 		var value uint32
@@ -92,13 +82,11 @@ func OptionByID(value uint32, options []config.Option) (config.Option, bool) {
 	return config.Option{}, false
 }
 
-// ParseOptionString parses a priority expression: "," separates priority groups
-// and "+" combines values inside one group.
+// ParseOptionString parses a priority expression: "," separates priority groups and
+// "+" combines values inside one group.
 //
-// Duplicates: entries inside one "+" group collapse (the group value is the
-// OR of its parts, so "a+a" yields a single "a"); duplicates across ","
-// groups are preserved in the returned priority list ("a,a" yields [a, a]).
-// The returned mask is the OR of all group values.
+// Duplicates inside one "+" group collapse (the group value is the OR of its parts),
+// while duplicates across "," groups are preserved in the returned priority list.
 func ParseOptionString(s string, options []config.Option) (priority []uint32, mask uint32) {
 	groups := Split(s, ",")
 	for _, g := range groups {

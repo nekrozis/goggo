@@ -33,35 +33,29 @@ type Config struct {
 	CACertPath string
 
 	// CookieFile enables cookie-file persistence when non-empty: New installs
-	// a cookieStore as the transport's jar and LoadCookies/SaveCookies read
-	// and write this Netscape cookies.txt path. New performs no file I/O
-	// itself — loading is an explicit initialisation step so the caller can
-	// order it before session checks.
+	// a cookieStore as the transport's jar, and LoadCookies/SaveCookies read and
+	// write this Netscape cookies.txt path. New performs no file I/O itself, so
+	// the caller loads the state explicitly, before its session checks.
 	//
-	// A non-empty CookieFile together with a caller-provided HTTPClient is a
-	// configuration error reported by LoadCookies/SaveCookies
+	// A non-empty CookieFile with a caller-provided HTTPClient is an error
 	// (ErrCookieFileUnsupported): the caller's jar cannot be replaced.
 	CookieFile string
 
 	// Transport optionally replaces the network exit of the client this
-	// package builds. Everything else about that client stays what this
-	// package decides — the cookie jar and CookieFile persistence, the retry
-	// policy and the low-speed guard — so a caller that swaps it (a test
-	// pointing the production hosts at a local server) exercises the same
-	// configuration production runs.
+	// package builds: the cookie jar and CookieFile persistence, the retry
+	// policy and the low-speed guard all stay this package's decisions.
 	//
-	// It is ignored when HTTPClient is set: that client already carries its
-	// own transport. TLS settings and the connect timeout describe the
-	// default transport and are therefore not applied to a replacement.
+	// It is ignored when HTTPClient is set, and the TLS settings and connect
+	// timeout describe the default transport only, so they are not applied to a
+	// replacement.
 	Transport http.RoundTripper
 
-	// HTTPClient optionally overrides the underlying client (useful for
-	// tests and callers that bring their own transport). When nil a client
-	// is built from the other settings.
+	// HTTPClient optionally overrides the underlying client; nil builds one
+	// from the other settings.
 	//
 	// Prefer Transport when only the network exit has to change: a
 	// caller-provided client also decides the jar, so it cannot be combined
-	// with CookieFile (see above).
+	// with CookieFile.
 	HTTPClient *http.Client
 
 	// Timeout bounds the TCP connect; the zero value leaves the default dial
@@ -70,12 +64,9 @@ type Config struct {
 
 	// LowSpeedLimit is the rate in bytes per second below which a transfer
 	// may be aborted with ErrLowSpeed; LowSpeedTime is how long the average
-	// rate may stay below the limit before that happens.
-	//
-	// Zero values select the transport defaults (DefaultLowSpeedLimit /
-	// DefaultLowSpeedTime) — the same "zero means default" rule the retry
-	// policy follows — so the guard cannot be switched off by an accidental
-	// zero; DisableLowSpeedGuard is the explicit off switch.
+	// rate may stay below it. A zero value selects the transport default, so
+	// the guard cannot be switched off by an accidental zero;
+	// DisableLowSpeedGuard is the explicit off switch.
 	LowSpeedLimit int64
 	LowSpeedTime  time.Duration
 
@@ -90,14 +81,12 @@ type Config struct {
 	DisableLowSpeedGuard bool
 }
 
-// Client is the transport layer. The embedded *http.Client carries
-// connection pooling, redirect handling, TLS, timeouts and a cookie jar that
-// lives for the whole Client lifetime, so cookies received by one request
-// (e.g. a login) are sent with later ones.
-//
-// When Config.CookieFile is set the jar is a *cookieStore, which additionally
-// maintains a reconstructable persistence state; store is nil otherwise (and
-// also when the caller supplied its own HTTPClient).
+// Client is the transport layer. The embedded *http.Client carries connection
+// pooling, redirect handling, TLS, timeouts and a cookie jar that lives for the
+// whole Client lifetime, so a cookie received by one request (a login) is sent
+// with later ones. store is non-nil only when Config.CookieFile is set and the
+// client was built here; then the jar is a *cookieStore, which also maintains
+// reconstructable persistence state.
 type Client struct {
 	policy        RetryPolicy
 	ua            string
@@ -220,12 +209,10 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 }
 
 // DoNoRedirect performs a single request (no retry) and returns the response
-// WITHOUT following redirects: a 3xx response is returned as-is so the caller
-// can inspect the Location header and drive the redirect chain itself.
-//
-// This is a per-call behaviour, not a client-wide mode switch: other requests
-// through the same Client keep the default redirect-following behaviour. The
-// underlying transport and cookie jar are shared with the Client.
+// WITHOUT following redirects: a 3xx is returned as-is so the caller can
+// inspect the Location header and drive the chain itself. This is a per-call
+// behaviour, not a client-wide mode switch — other requests through the same
+// Client still follow redirects.
 func (c *Client) DoNoRedirect(ctx context.Context, req *http.Request) (*http.Response, error) {
 	req = req.WithContext(ctx)
 	if c.ua != "" && req.Header.Get("User-Agent") == "" {
@@ -292,16 +279,13 @@ func (c *Client) GetBytesWithRetry(ctx context.Context, url string) ([]byte, err
 }
 
 // DoBytesWithRetry runs req under the client's default RetryPolicy and reads
-// the final body. It is the request-carrying counterpart of
-// GetBytesWithRetry: a caller that needs its own headers (the Galaxy content
-// endpoints send "Authorization: Bearer <token>") still gets the transport's
-// retry policy, User-Agent and low-speed guard.
+// the final body: the request-carrying counterpart of GetBytesWithRetry, for a
+// caller that needs its own headers (the Galaxy content endpoints send
+// "Authorization: Bearer <token>").
 //
-// Every attempt goes through Do, so nothing in the request path is bypassed and
-// no existing behaviour changes. The caller owns req and must not reuse it
-// afterwards; it must be re-issuable, because the policy may send it more than
-// once — a nil body (or a request carrying GetBody) is fine, a one-shot stream
-// is not. Statuses >= 400 on the final response produce a *StatusError.
+// req must be re-issuable, because the policy may send it more than once: a nil
+// body or a request carrying GetBody is fine, a one-shot stream is not. A final
+// status >= 400 produces a *StatusError.
 func (c *Client) DoBytesWithRetry(ctx context.Context, req *http.Request) ([]byte, error) {
 	if req == nil {
 		return nil, errors.New("httpx: nil request")

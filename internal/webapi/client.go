@@ -40,15 +40,13 @@ type Client struct {
 	hx     *httpx.Client
 }
 
-// New builds a Client on a caller-provided transport.
+// New builds a Client on a caller-provided transport. galaxy is required, and so
+// is the client: a nil one is an error.
 //
-// The transport is owned by the caller: webapi never creates one, so the same
-// *httpx.Client (and therefore the same cookie jar) is used for the login flow
-// and for persisting that session through LoadCookies/SaveCookies. Retry
-// behaviour is configured by the caller too — see RetryPolicyFor for the policy
-// the website endpoints need.
-//
-// galaxy is required; a nil galaxy or a nil client is an error.
+// The transport is owned by the caller, so the same *httpx.Client — and with it
+// the same cookie jar — serves the login flow and session persistence
+// (LoadCookies/SaveCookies). Retry behaviour is the caller's too, see
+// RetryPolicyFor.
 func New(hx *httpx.Client, galaxy *config.GalaxyConfig) (*Client, error) {
 	if galaxy == nil {
 		return nil, errors.New("webapi: nil galaxy config")

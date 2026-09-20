@@ -45,16 +45,11 @@ type VerifyResult struct {
 
 // Verify reports the fact for every file the installation is expected to have.
 //
-// It is read-only in the strictest sense: it builds the
-// plan in verify mode, which neither downloads nor deletes nor answers for disk
-// space, and then only observes — no file is written, replaced, removed or
-// touched, and a mismatch is never repaired. The file set it reports on is
-// PlanResult.Expected alone, so a verification and an install cannot disagree
-// about which files the installation owns.
-//
-// An observation failure does not stop the run: one unreadable file must not
-// hide the state of the rest, so it is reported as a fact with an error and the
-// walk continues.
+// It is read-only: no file is written, replaced, removed or touched, and a
+// mismatch is never repaired. It reports on PlanResult.Expected alone, so a
+// verification and an install cannot disagree about which files the installation
+// owns. An observation failure does not stop the run — one unreadable file must
+// not hide the state of the rest — so it becomes a fact with an error.
 func (d *Downloader) Verify(ctx context.Context, req InstallRequest) (VerifyResult, error) {
 	res, err := d.buildPlan(ctx, req, planForReadOnly)
 	out := VerifyResult{InstallPath: res.InstallPath, Notices: res.Messages}

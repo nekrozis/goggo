@@ -42,22 +42,15 @@ type GameDetailsRequest struct {
 }
 
 // GameDetails fetches and converts the download face of every requested
-// product.
-//
-// The chain per product: refresh the credentials when they have expired, read
-// the product document (which expands its DLCs), convert it through the
-// injected downlink resolver, then apply the priority and the type filter.
-// This is the acquisition engine: it writes nothing to disk and reports no
-// progress, because the display belongs to whoever consumes the result.
+// product. It writes nothing to disk and reports no progress: the display
+// belongs to whoever consumes the result.
 //
 // The answer is COMPLETE OR NOTHING. A failure anywhere — a name that matches
 // no product, a request, the conversion — cancels the remaining workers and
 // returns an error with no results, rather than a shorter list a caller could
-// mistake for "this product has no files".
-//
-// The result is ordered by gamename, so it does not depend on how the workers
-// were scheduled. An entry that is legitimately empty stays in the result: it
-// says "this product has no matching files", which is an answer.
+// mistake for "this product has no files". Results are ordered by gamename, and
+// an entry that is legitimately empty stays: it says "this product has no
+// matching files", which is an answer.
 func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([]gamedetails.GameDetails, error) {
 	if len(req.Products) == 0 {
 		return nil, errors.New("galaxy: no products requested")
@@ -197,13 +190,11 @@ func (d *Downloader) infoThreadCount(requested int) int {
 }
 
 // ownedGameIDs reads the account's owned product ids when the include mask asks
-// for DLC content, and returns nil otherwise — an empty set means no filtering
-// at all in the conversion (gamedetails.ProductInfoToGameDetails).
-//
-// The owned set is fetched explicitly rather than read from whatever a previous
-// listing left behind, so the filter behaves the same whether or not the run
-// listed first. A failure to read it fails the run rather than reporting an
-// account that owns nothing.
+// for DLC content, and returns nil otherwise — nil means no filtering at all in
+// the conversion (gamedetails.ProductInfoToGameDetails). The set is fetched
+// explicitly rather than reused from a previous listing, so the filter behaves
+// the same whether or not the run listed first; a failure to read it fails the
+// run rather than reporting an account that owns nothing.
 func (d *Downloader) ownedGameIDs(ctx context.Context, include uint32) (map[string]bool, error) {
 	if include&config.GFDLC == 0 {
 		return nil, nil

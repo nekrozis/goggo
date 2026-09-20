@@ -17,24 +17,14 @@ import (
 )
 
 // ExtractSmallFilesContainers unpacks the plan's small-files containers: each
-// member file is cut out of its container by offset and size, and the container
-// is removed afterwards. It runs after the transfer has completed successfully
-// (D73), because the containers are downloaded by transfer.Run as ordinary
-// tasks.
+// member is cut out of its container by offset and size, and the container is
+// removed afterwards. It runs after the transfer completes successfully (D73).
 //
-// Every member that declares a hash is checked against the bytes its region
-// actually holds, BEFORE anything is written (D49). A member whose region
-// does not hold its content is not written at all and comes back to the caller
-// as a task to download directly: the manifest's sfcRef cannot describe such a
-// member, so the container path would leave bytes in the installation that do
-// not match what the manifest declares — and a clean install has to reach the
-// manifest state on its first run (D4, D48).
-//
-// A container that is not on disk is passed over silently; its members are then
-// simply absent, which is a convergence gap of its own (registered, not fixed
-// here). That exemption covers "not there" only: a container that IS there and
-// cannot be opened is an observation failure like a failed read, and fails the
-// run (D43, D49).
+// A member that declares a hash is checked against the bytes its region holds
+// before anything is written (D49); a mismatch is not written and comes back as
+// a task to download directly, because the manifest's sfcRef cannot describe
+// such a member (D4, D48). A container that is not on disk is passed over
+// silently, but one that IS there and cannot be opened fails the run (D43, D49).
 func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanResult) ([]model.FileTask, error) {
 	var pending []model.FileTask
 	for _, group := range res.Plan.SFC {
@@ -76,9 +66,8 @@ func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanRe
 //
 // The container is read once, forward: the distinct regions are visited in
 // ascending offset order and the buffer keeps only the tail the next region can
-// still share. That is what keeps a container from costing one read per member —
-// the Terraria container carries 14,088 members in 13,475 distinct regions, and
-// 463 regions are claimed by several members at once (D49).
+// still share, which is what keeps a container from costing one read per member
+// (D49).
 func (d *Downloader) extractContainer(ctx context.Context, src io.Reader, group model.SFCGroup, installPath string) (int, []model.FileTask, error) {
 	// The verbose listing keeps the plan's order, as it did before the members
 	// were grouped by region.

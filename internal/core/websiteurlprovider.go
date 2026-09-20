@@ -36,15 +36,12 @@ func (t *tokenRefresher) refreshIfExpired(ctx context.Context) error {
 
 // checksumPolicy decides when the provider reads a downlink document's
 // "checksum" url. The two chains have DIFFERENT gates and must not borrow each
-// other's:
-//
-//   - checksumGated is the batch worker's rule — installers and patches only,
-//     and only with remote XML enabled. Extras carry a checksum url on the real
-//     API and are still not read.
-//   - checksumAlways is the single-file rule — any matched file whose document
-//     carries a non-empty checksum url is read, with no type gate and no
-//     remote-XML gate. A failed or empty fetch is not a failure: the download
-//     continues with no document.
+// other's: checksumGated is the batch worker's rule — installers and patches
+// only, and only with remote XML enabled; extras carry a checksum url on the
+// real API and are still not read. checksumAlways is the single-file rule — any
+// matched file whose document carries a non-empty checksum url, with no type or
+// remote-XML gate; a failed or empty fetch is not a failure and the download
+// continues without a document.
 type checksumPolicy int
 
 const (

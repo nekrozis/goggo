@@ -23,11 +23,8 @@ const (
 // ui/log.Message or a ui/progress.Bar fraction; transfer knows neither, and it
 // carries no verbosity level — filtering by level is the front end's decision.
 //
-// ChunkIndex is -1 for file-level events (a run starting or finishing) and
-// 0-based inside a chunk loop; ChunkCount is the file's chunk count. Current
-// and Total are byte counts, with Current advancing while Total stays the
-// file's size. Path is the file the event belongs to and Text is the message
-// text of the message kinds, empty for progress.
+// ChunkIndex is -1 for file-level events (a run starting or finishing) and 0-based
+// inside a chunk loop; Path and Text identify the file and the message.
 type Event struct {
 	Path       string
 	Text       string

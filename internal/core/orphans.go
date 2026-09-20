@@ -15,10 +15,9 @@ import (
 // root that no expected path accounts for, plus the diagnostics the walk and the
 // plan produced.
 //
-// Files is the whole contract of the walk: a caller lists it, shows
-// it, and — when the user authorizes it — hands exactly this value back for
-// deletion. Nothing re-derives the set afterwards, so what was shown is what is
-// removed.
+// Files is the whole contract of the walk: a caller lists it, shows it, and
+// hands exactly this value back for deletion — nothing re-derives the set, so
+// what was shown is what is removed.
 type OrphansResult struct {
 	// InstallPath is the root the walk covered and the base Relative uses.
 	InstallPath string
@@ -41,17 +40,12 @@ func (r OrphansResult) Relative(path string) string { return orphanDisplayPath(r
 // CheckOrphans builds the read-only plan for one install request, walks the
 // installation and reports the files no expected path accounts for.
 //
-// The walk is the one the install tail has always run — every entry under the
-// install root, the ignorelist and then the blacklist consulted before the
-// ledger, directories never orphans, symlinks never followed, no special case
-// for the install metadata file. Only the ledger's SOURCE changed:
-// it is the plan's Expected set, the same one a verification reads, instead of a
-// set rebuilt from the tasks, the containers and the skipped destinations.
-//
-// A consequence is deliberate: a small-files container that outlived its
-// extraction is now reported as an orphan. It is not part of the finished
-// installation, so a leftover copy is exactly the kind of unexplained file this
-// command is for.
+// The walk is the one the install tail has always run; only the ledger's SOURCE
+// changed: it is the plan's Expected set, the same one a verification reads,
+// instead of a set rebuilt from the tasks, the containers and the skipped
+// destinations. A consequence is deliberate: a small-files container that
+// outlived its extraction is reported as an orphan, since it is not part of the
+// finished installation.
 func (d *Downloader) CheckOrphans(ctx context.Context, req InstallRequest) (OrphansResult, error) {
 	res, err := d.buildPlan(ctx, req, planForReadOnly)
 	out := OrphansResult{InstallPath: res.InstallPath, Notices: res.Messages}
@@ -104,13 +98,10 @@ func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) err
 	if !d.cfg.DownloadConfig.DeleteOrphans {
 		return nil
 	}
-	// A deletion is a destructive action, so its objects stay auditable by
-	// default: a header states the scale, then
-	// one indented line names each file actually removed — a "deleted N"
-	// summary alone would hide WHICH mods or patches disappeared. The lines
-	// are relative to the install root; a failed delete stays its own
-	// diagnostic. The header only appears when there is something to delete:
-	// the count line above already said "0 orphaned files".
+	// A deletion is a destructive action, so its objects stay auditable: a
+	// header states the scale, then one indented line names each file actually
+	// removed — a "deleted N" summary alone would hide WHICH mods or patches
+	// disappeared. The header only appears when there is something to delete.
 	if len(files) > 0 {
 		fmt.Fprintf(d.ui.Out(), "Deleting %d orphaned files\n", len(files))
 	}
@@ -130,13 +121,10 @@ func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) err
 // the plan's tasks or containers, which is what keeps the ledger single.
 //
 // The filter files are consulted with the same absolute-path matching the plan
-// builder uses, ignorelist first: a path they exclude is neither reported nor
-// deleted, and the verbose notice lands on the error stream.
-//
-// It takes no context on purpose: this step replaces the ledger and nothing
-// else, and an install's orphan walk has never been interruptible. Cancellation
-// stops the deletion loop below, which is where an interruption has something to
-// preserve.
+// builder uses, ignorelist first; an excluded path is neither reported nor
+// deleted. It takes no context on purpose: an install's orphan walk has never
+// been interruptible, and cancellation stops the deletion loop instead, which is
+// where an interruption has something to preserve.
 func (d *Downloader) walkOrphans(root string, expected []InstalledFile) ([]string, []Notice, error) {
 	installed := make(map[string]bool, len(expected))
 	for _, file := range expected {

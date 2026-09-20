@@ -57,10 +57,9 @@ func copyEntry(r io.Reader, w io.Writer, method uint16) error {
 // ExtractStream consumes one entry from r and writes its data to w.
 //
 // Contract: r must begin at a local-file header (ParseCDEntry also accepts a
-// central-directory record, in which case data is read from directly after
-// it). The header is consumed first; the entry data is then copied to EOF for
-// stored entries or until the raw deflate stream ends. The declared compressed
-// size is never used to truncate, and no CRC or size validation is performed.
+// central-directory record, in which case data is read from directly after it). The
+// declared compressed size is never used to truncate, and no CRC or size validation
+// is performed.
 func ExtractStream(r io.Reader, w io.Writer) error {
 	cd, err := readEntry(r)
 	if err != nil {

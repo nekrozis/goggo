@@ -16,16 +16,12 @@ import (
 )
 
 // SessionRequest is what a run needs from the session before its command can
-// work.
+// work. The two fields are independent on purpose: a read-only command needs a
+// session but must never create one, while an explicit login creates one
+// without needing anything first.
 //
-// The two fields are independent on purpose: a read-only command needs a session
-// but must never create one, while an explicit login creates one without needing
-// anything first. Keeping them apart is what makes "this command may log in" a
-// declared property of the command rather than a side effect of how it was
-// called.
-//
-// The zero value is what a command that runs without a session asks for: no
-// missing-session failure, no login attempt.
+// The zero value asks for no session at all: no missing-session failure, no
+// login attempt.
 type SessionRequest struct {
 	// Required makes a missing session fatal: instead of handing back a run
 	// that cannot work, OpenWith reports ErrSessionRequired.
@@ -46,18 +42,13 @@ type SessionRequest struct {
 // so every command reports the same sentence instead of inventing its own.
 var ErrSessionRequired = errors.New("not logged in; run `goggo auth login`")
 
-// Open prepares the run with production dependencies: it creates the
-// directories, the transport, the cookie jar, the two protocol clients and the
-// Galaxy credential store, loads the persisted cookies and token, refreshes the
-// token when it has expired and then answers what req asks for — it runs the
-// login flow when req.AllowLogin allows one and the account is not usable, and
-// it fails with ErrSessionRequired when req.Required says the command cannot
-// work without a session and none exists.
+// Open prepares the run with production dependencies and then answers what req
+// asks for.
 //
 // req exists because callers have different needs: --check-login-status is
-// answered before logging in is ever considered, and a command that is not
-// allowed to log in must fail instead of starting an interactive login on a
-// machine that cannot answer it.
+// answered before logging in is considered, and a command that may not log in
+// must fail rather than start an interactive login on a machine that cannot
+// answer it.
 func Open(ctx context.Context, cfg config.Config, ui Console, req SessionRequest) (*Downloader, error) {
 	return OpenWith(ctx, cfg, ui, req, Dependencies{})
 }
@@ -173,15 +164,12 @@ func (d *Downloader) checkLoggedIn(ctx context.Context) bool {
 }
 
 // ensureDirectories creates the per-user directories the program writes to: the
-// XML, configuration and cache directories.
+// XML, configuration and cache directories. The token, cookie and configuration
+// files all live under the configuration directory and their writers create
+// temporary files there, so it has to exist before the first persistence.
 //
-// The token, cookie and configuration files all live under the configuration
-// directory and their writers create temporary files there, so it has to exist
-// before the first persistence.
-//
-// The mode is Unix semantics. On Windows the permission bits carry no
-// filesystem meaning; there the requirement is simply that the directory gets
-// created.
+// The mode is Unix semantics: on Windows the permission bits carry no filesystem
+// meaning, only that the directory gets created.
 func ensureDirectories(cfg config.Config) error {
 	for _, dir := range []string{cfg.XMLDirectory, cfg.ConfigDirectory, cfg.CacheDirectory} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -191,21 +179,14 @@ func ensureDirectories(cfg config.Config) error {
 	return nil
 }
 
-// credentials resolves the credentials the login flow needs:
-//
-//   - a supplied pair (flags or configuration) is used as it is;
-//   - with --browser-login the credentials are irrelevant, so nothing is asked
-//     for and an empty pair is not an error;
-//   - otherwise a non-terminal input takes the headless branch, which names the
-//     files it expects instead of prompting. A PARTIALLY supplied pair takes
-//     that branch too: a lone --login-email is not used without a terminal
-//     either;
-//   - otherwise each MISSING value is asked for on demand;
-//   - and a value still empty is reported as an error.
-//
-// interactive is passed in rather than read from the console here so the branch
-// structure is testable without a terminal; the decision itself lives in one
-// place, Console.IsTerminal.
+// credentials resolves the credentials the login flow needs: a supplied pair
+// (flags or configuration) is used as it is; with --browser-login the
+// credentials are irrelevant, so an empty pair is not an error; otherwise a
+// non-terminal input takes the headless branch, which names the files it
+// expects instead of prompting — and a PARTIALLY supplied pair takes that
+// branch too, since a lone --login-email is not used without a terminal;
+// otherwise each MISSING value is asked for on demand, and a value still empty
+// is an error.
 func credentials(cfg config.Config, ui Console, interactive bool) (email, password string, err error) {
 	email, password = cfg.Email, cfg.Password
 	if email != "" && password != "" {
@@ -235,16 +216,10 @@ func credentials(cfg config.Config, ui Console, interactive bool) (email, passwo
 
 // headlessCredentials is the non-terminal branch of the login flow: with no
 // terminal there is nobody to prompt, so the cookie file and the token file it
-// would have used are printed to stdout and the login gives up.
-//
-// An empty credential pair is never posted, so this branch always ends in an
-// explicit failure. The failure message is the same whether or not the two
-// files exist, because both cases leave the caller with the same job — supply
-// credentials. The hint names `goggo auth login` only: the login flags of the
-// original CLI are not part of this one, so a diagnostic naming them would send
-// the user straight into a usage error. "in a terminal" is the part of the hint
-// the reader can act on, since there is no configuration-file credential source
-// yet.
+// would have used are printed to stdout and the login gives up. An empty
+// credential pair is never posted, so the branch always ends in an explicit
+// failure; the message is the same whether or not the two files exist, because
+// both cases leave the caller with the same job — supply credentials.
 //
 // Only an explicit login request reaches this branch: an implicit login is
 // allowed solely when a terminal can answer it (see SessionRequest.AllowLogin).

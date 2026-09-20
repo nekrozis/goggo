@@ -44,13 +44,11 @@ func StrippedString(s string) string {
 }
 
 // ManualURLsFromJSON collects every "manualUrl" value reachable from v: a
-// "manualUrl" member is taken without recursing into it, any other value is
-// walked.
+// "manualUrl" member is taken without recursing into it, any other value is walked.
 //
-// Ordering: JSON arrays keep their element order. Go's map[string]any does not
-// preserve the document order of object members, so object members are visited in
-// sorted key order to keep the result deterministic. That affects only degenerate
-// object-shaped responses, not the array shape the account API returns.
+// Ordering: JSON arrays keep their element order, while object members are visited
+// in sorted key order, because Go's map[string]any does not preserve document order
+// and the result must be deterministic.
 func ManualURLsFromJSON(v any) ([]string, error) {
 	var urls []string
 	if err := collectManualURLs(v, &urls); err != nil {

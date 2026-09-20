@@ -76,19 +76,16 @@ var (
 	ErrChallengeClientMismatch = errors.New("webapi: login challenge belongs to a different client")
 )
 
-// LoginChallenge describes an interaction the login flow needs. It carries
-// opaque state (CSRF token, submit endpoint, code kind) that the caller must
-// NOT interpret; the caller only reads Kind/CodeLength/BrowserURL to prompt
-// the user, then passes the obtained string to ContinueLogin.
+// LoginChallenge describes an interaction the login flow needs. Its opaque state
+// (CSRF token, submit endpoint, code kind) must NOT be interpreted: the caller
+// reads Kind/CodeLength/BrowserURL to prompt the user, then passes the obtained
+// string to ContinueLogin.
 //
-// Lifecycle (enforced at runtime, not just documented): a challenge is bound
-// to the Client that produced it (its state belongs to that client's session
-// and cookie jar), and ContinueLogin consumes it exactly once — a second
-// call returns ErrChallengeConsumed. It is not serialisable and must not be
-// used concurrently.
-//
-// It deliberately has no String/fmt.Stringer method: the state holds an
-// authentication CSRF token that must never leak into logs.
+// A challenge is bound to the Client that produced it, and ContinueLogin consumes
+// it exactly once — a second call returns ErrChallengeConsumed. It is not
+// serialisable and must not be used concurrently, and it deliberately has no
+// String method: the state holds an authentication CSRF token that must never leak
+// into logs.
 type LoginChallenge struct {
 	// state is the opaque continuation state owned by Client.
 	state challengeState
@@ -142,14 +139,12 @@ type loginStep struct {
 	challenge *LoginChallenge
 }
 
-// Login performs the website OAuth login up to the first interaction it needs.
-// It resets the client credentials, fetches the login form, tries the form login
-// unless ForceBrowser is set, and then either completes the token exchange or
-// returns a LoginChallenge:
+// Login performs the website OAuth login up to the first interaction it needs,
+// and returns:
 //
-//   - nil challenge, nil error: login completed; tokens are in the
-//     GalaxyConfig passed at construction.
-//   - challenge, nil error: user interaction is required; call ContinueLogin.
+//   - nil challenge, nil error: login completed; tokens are in the GalaxyConfig
+//     passed at construction;
+//   - challenge, nil error: user interaction is required — call ContinueLogin;
 //   - nil challenge, error: login failed.
 //
 // The session cookie jar lives inside the httpx Client; persisting it is the
@@ -386,11 +381,9 @@ func (c *Client) finishWithCode(ctx context.Context, code string) error {
 
 // exchangeCode performs the token exchange.
 //
-// Deliberately separate from auth.Client.Refresh: this is the
-// authorization_code grant, while Refresh performs the refresh_token grant.
-// They are different protocols that may diverge further (error handling,
-// endpoints, client credentials), so they are not merged behind a shared
-// helper.
+// Deliberately separate from auth.Client.Refresh: this is the authorization_code
+// grant, while Refresh performs the refresh_token grant, and the two may diverge
+// further (error handling, endpoints, client credentials).
 func (c *Client) exchangeCode(ctx context.Context, code string) error {
 	q := url.Values{}
 	q.Set("client_id", c.galaxy.GetClientID())
@@ -413,12 +406,10 @@ func (c *Client) exchangeCode(ctx context.Context, code string) error {
 }
 
 // walkRedirectChain follows 3xx redirects manually and extracts the auth code
-// from the callback URL. Each step performs a GET
-// without auto-redirect. When the response is 3xx the chain continues with
-// the new Location; the code is checked on the current URL after each step.
-// consumeURL is the final URL for the trailing consume-GET. A 3xx without a
-// Location, a non-3xx without a code, and a self-referential redirect all end
-// the walk (the last is the only cycle guard; no hop limit is imposed).
+// from the callback URL, also returning the URL that carried it for the trailing
+// consume-GET. The walk ends on a 3xx without a Location, a non-3xx without a
+// code, or a self-referential redirect — the last is the only cycle guard, and no
+// hop limit is imposed.
 func (c *Client) walkRedirectChain(ctx context.Context, redirectURL string) (code, consumeURL string, err error) {
 	cur := redirectURL
 	for cur != "" {

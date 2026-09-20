@@ -219,10 +219,9 @@ var optionTable = append([]optionSpec{
 		parse: func(inv *invocation, v string) error {
 			// A value carrying a placeholder must be one of the templates the
 			// installer actually resolves. The list comes from core so the
-			// whitelist cannot drift from the resolver;
-			// anything else with a "%" in it would be a half-exposed template
-			// language, and the resolver would keep it as a literal directory
-			// name.
+			// whitelist cannot drift from the resolver; anything else with a "%"
+			// would be a half-exposed template language, kept as a literal
+			// directory name by the resolver.
 			if strings.ContainsRune(v, '%') && !core.IsInstallSubdirTemplate(v) {
 				return usagef("--install-dir takes a directory name or one of the known templates (%q)", v)
 			}
@@ -667,11 +666,10 @@ func isUsageError(err error) bool {
 //
 // Options may appear anywhere on the line; the first bare token starts the
 // command path, and the tokens after it are subcommands while the tree has a
-// matching child, then the command's arguments. The parse is
-// deliberately two-phase: the command path is resolved first, and only then are
-// the options checked against what that command accepts (D15) — so
-// "goggo list --threads 8" fails as an unaccepted option rather than being
-// quietly ignored.
+// matching child, then the command's arguments. The parse is deliberately
+// two-phase — path first, then the options checked against what that command
+// accepts (D15) — so "goggo list --threads 8" fails as an unaccepted option
+// rather than being quietly ignored.
 func parseArgs(args []string, cfg config.Config) (invocation, error) {
 	inv := invocation{cfg: cfg}
 	applyParseDefaults(&inv.cfg)
@@ -964,12 +962,10 @@ func commandArity(id commandID) (string, int) {
 
 // parseTarget splits "<product id or gamename>[/<build id or index>]".
 //
-// The split is done here rather than through util.Split: that helper DROPS
-// empty tokens, which is exactly what would hide a malformed argument ("/2"
-// would silently become the game "2"). The shape is therefore checked on the
-// raw string. More than two parts, or an empty game, is a usage error rather
-// than a silently ignored tail (D2). An empty build is read as "no build
-// given".
+// The split is done here rather than through util.Split: that helper DROPS empty
+// tokens, which would hide a malformed argument ("/2" would silently become the
+// game "2"). More than two parts, or an empty game, is a usage error rather than
+// a silently ignored tail (D2). An empty build is read as "no build given".
 func parseTarget(arg string) (target, error) {
 	parts := strings.SplitN(arg, "/", 3)
 	if len(parts) > 2 {
@@ -999,8 +995,7 @@ func parseTarget(arg string) (target, error) {
 //	nothing resolvable → usage error: unknown command
 //
 // The alternative — printing the root help for anything unrecognised — would
-// answer a question the user did not ask while looking like success, which is
-// exactly what D2 refuses.
+// answer a question the user did not ask while looking like success (D2).
 func resolveHelpTopic(words []string) ([]string, error) {
 	if len(words) == 0 {
 		return nil, nil
@@ -1075,8 +1070,7 @@ func optionName(id optionID) string {
 
 // applyParseDefaults installs the defaults the option parser owns.
 //
-// They are the values the parser itself declares. One of them is a decision of
-// its own rather than an inherited value: the download worker count, settled by
+// One of them is a decision of its own: the download worker count, settled by
 // measurement (D9/D46) and documented on defaultThreads.
 //
 // This runs before any option is read, so an option on the command line simply
@@ -1091,10 +1085,8 @@ func applyParseDefaults(cfg *config.Config) {
 	cfg.DownloadConfig.GalaxyCDNPriority = util.Split(defaultGalaxyCDNPriority, ",")
 	// The installer platform/language the website conversion gates on. Each is
 	// parsed into the priority list AND the installer mask; leaving them zero
-	// makes every non-extras vector drop silently. The parser declares the
-	// defaults from the same constants config.NewConfig installs, and the
-	// --installer-platform/--installer-language closures are the single
-	// override path.
+	// makes every non-extras vector drop silently. The defaults come from the
+	// same constants config.NewConfig installs.
 	platformPriority, installerPlatform := util.ParseOptionString(config.DefaultPlatformPriority, config.Platforms)
 	cfg.DownloadConfig.PlatformPriority = platformPriority
 	cfg.DownloadConfig.InstallerPlatform = installerPlatform

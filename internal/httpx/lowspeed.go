@@ -9,14 +9,9 @@ import (
 )
 
 // ErrLowSpeed reports that a transfer was aborted because it stayed below the
-// configured rate.
-//
-// The sentinel carries the identity, the wrap carries the numbers:
-//
-//	errors.Is(err, httpx.ErrLowSpeed) // true
-//	err.Error() == "httpx: transfer stalled: below 200 B/s for 30s"
-//
-// The message never contains the request URL (see SafeError).
+// configured rate. The sentinel carries the identity and the wrap the numbers,
+// e.g. "httpx: transfer stalled: below 200 B/s for 30s"; the message never
+// contains the request URL (see SafeError).
 var ErrLowSpeed = errors.New("httpx: transfer stalled")
 
 // Low-speed guard defaults. They are owned by the transport layer: a caller that
@@ -41,32 +36,20 @@ func belowLimit(bytes int64, elapsed time.Duration, limit int64) bool {
 
 // lowSpeedBody is a response body with a low-speed watchdog.
 //
-// The semantics are defined by observable behaviour, not by an internal
-// algorithm:
+// The clock starts on the FIRST Read, so a body that is never read is never
+// judged slow. The average rate is evaluated when the window elapses: on a Read
+// that carried data, and on the watchdog timer for the case no Read can observe
+// — a body that stopped producing bytes, where the timer closes the body to
+// unblock the pending Read. A window that meets the limit restarts, so an early
+// burst cannot mask a later stall the way a whole-transfer average would; EOF
+// and underlying errors pass through untouched.
 //
-//   - the clock starts on the FIRST Read, so a response whose headers arrived
-//     but whose body is never read is never judged slow;
-//   - the average rate over the current window is evaluated once the window has
-//     elapsed: on a Read that carried data, and — for the case no Read can ever
-//     observe, a body that stops producing bytes — on the watchdog timer, which
-//     closes the body to unblock the pending Read;
-//   - a window that meets the limit restarts, so an early burst cannot mask a
-//     later stall the way a whole-transfer average would;
-//   - EOF and other underlying errors pass through untouched: a short tail
-//     window is not a stall, and (0, nil) keeps its usual meaning.
-//
-// Race outcome (whoever commits first wins, and the loser cannot overwrite it):
-//
-//   - a Read that ends the transfer (EOF or any underlying error) marks the body
-//     finished and retires the watchdog, so a late timer can never turn a
-//     completed transfer into a stall on a later Read;
-//   - an abort records ErrLowSpeed BEFORE closing the body, so the Read it
-//     unblocks — and every Read after it — reports ErrLowSpeed even though the
-//     underlying reader may now fail with a close-induced error.
-//
-// Reads run on the caller's goroutine while the timer fires on the runtime
-// timer goroutine, so the state is mutex-guarded. Close is idempotent and safe
-// while a Read is in flight.
+// A Read that ends the transfer retires the watchdog, so a late timer cannot
+// turn a completed transfer into a stall. An abort records ErrLowSpeed BEFORE
+// closing the body, so the Read it unblocks reports ErrLowSpeed even if the
+// underlying reader now fails with a close-induced error. State is mutex-guarded
+// (Read on the caller's goroutine, the timer on the runtime's); Close is
+// idempotent.
 type lowSpeedBody struct {
 	winStart time.Time
 	body     io.ReadCloser

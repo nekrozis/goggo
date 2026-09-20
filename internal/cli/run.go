@@ -81,9 +81,7 @@ func newConfig() (config.Config, error) {
 //
 // It performs no process-level work: all input and output goes through the
 // streams it is given, so the whole front end is testable and nothing can reach
-// the real terminal. The command vocabulary, the option acceptance and the exit
-// codes are the ones the parser and the command tree define; this function only
-// decides which command runs.
+// the real terminal. This function only decides which command runs.
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return runWithDeps(args, stdin, stdout, stderr, core.Dependencies{})
 }
@@ -112,16 +110,14 @@ func fail(w io.Writer, err error) int {
 }
 
 // sessionRequest is the ONE place a command's declared session class becomes the
-// request core acts on: the tree declares the class, the parser copies it into
-// the invocation, and this function turns it into what OpenWith enforces.
+// request core acts on.
 //
-// interactive is the terminal answer (ui.IsTerminal), and it conditions only the
-// implicit login: without a terminal there is nobody to answer its prompts, so
-// such a run must fail with the actionable error instead. An explicit login is
-// not conditioned on it — its flow has a non-interactive branch of its own, and
-// stdin may still carry the browser callback URL.
+// interactive conditions only the implicit login: without a terminal nobody can
+// answer its prompts, so such a run must fail with the actionable error. An
+// explicit login has a non-interactive branch of its own (stdin may still carry
+// the browser callback URL), so it is never conditioned on the terminal.
 //
-// An undeclared class is a broken tree, not user input. It panics rather than
+// An undeclared class is a broken tree, not user input: it panics rather than
 // silently becoming "no session needed", which would let a command that needs
 // the account run unauthenticated.
 func sessionRequest(class sessionClass, interactive bool) core.SessionRequest {
@@ -236,15 +232,13 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 	case cmdAuthLogin:
 		// The login already happened: the tree declares sessionExplicitLogin,
 		// sessionRequest turned that into AllowLogin, and OpenWith ran the flow
-		// before this switch was reached. Reaching here therefore means the
-		// session is usable, so the command's work is done.
+		// before this switch was reached, so the command's work is done.
 		//
-		// This case exists because its absence was invisible: `auth login`
-		// completed the login, stored the credentials, and then fell through
-		// to the no-handler default below — reporting failure for a command
-		// that had just succeeded. The
-		// coverage test in dispatch_coverage_test.go now walks the tree so no
-		// command can reach that default again.
+		// Its absence was invisible: `auth login` completed the login, stored
+		// the credentials, and then fell through to the no-handler default,
+		// reporting failure for a command that had just succeeded. The coverage
+		// test in dispatch_coverage_test.go now walks the tree so no command can
+		// reach that default again.
 		return outcomeOK
 
 	case cmdListGames, cmdListTags, cmdListWishlist:
@@ -297,11 +291,9 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 
 	case cmdVerify:
 		// A verification reads the same installation an install writes, so it
-		// resolves its target exactly like one — and then only
-		// observes: the plan is built in verify mode (no destructive work, no
-		// free-space answer) and every expected file is classified. The plan's
-		// own messages are rendered first, the way an install emits them as it
-		// goes; on a plan failure that is all there is to show.
+		// resolves its target exactly like one — but only observes: the plan is
+		// built in verify mode (no destructive work, no free-space answer) and
+		// every expected file is classified.
 		req := core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build)
 		res, err := d.Verify(ctx, req)
 		for _, notice := range res.Notices {

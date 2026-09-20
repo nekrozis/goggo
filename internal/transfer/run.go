@@ -26,16 +26,9 @@ import (
 //
 // A task that fails — a URL that cannot be resolved, a chunk that exhausts its
 // retries — reports itself as an EventMessageError and the remaining tasks
-// continue. Run returns nil once every task has ended, even if some failed;
-// only a cancelled context makes it return an error.
-//
-// Each chunk is buffered in memory while it is fetched and verified, then
-// decompressed and appended, and the server's Last-Modified moves onto the file
-// (D72, D77).
-//
-// The scheduling itself lives in schedule: worker fan-out, the single
-// deliverer and the cancellation handling are shared with the website path
-// (D67).
+// continue. Run returns nil once every task has ended, even if some failed; only
+// a cancelled context makes it return an error. The scheduling itself lives in
+// schedule, shared with the website path (D67).
 func Run(ctx context.Context, tasks []model.FileTask, opts Options, deps RunDeps) error {
 	if deps.HTTP == nil || deps.URL == nil || deps.Observer == nil {
 		return errors.New("transfer: run needs an http client, a url provider and an observer")
@@ -274,11 +267,9 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 // fetchChunkBody performs one GET and returns the response body, the response
 // code and the Last-Modified timestamp. It uses the non-retrying Do on purpose:
 // the retry loop above owns the retry policy. When resumeLen is positive the
-// request carries a Range header from that offset; the code is returned so the
-// caller can fold a 200 answer to a ranged request.
-//
-// sink reports the bytes as they arrive; its zero value reports nothing, which
-// is what a run without a Progress uses.
+// request carries a Range header from that offset, and the code is returned so
+// the caller can fold a 200 answer to a ranged request. sink reports the bytes as
+// they arrive; its zero value reports nothing.
 func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bool, resumeLen int, sink progressSink) ([]byte, time.Time, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -310,17 +301,15 @@ func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bo
 }
 
 // appendChunk decompresses the zlib stream, verifies the decompressed content
-// against the chunk's uncompressed md5, and only then appends the whole chunk
-// to the task's file. The file handle has a single owner: the Close whose error
-// is returned is the only one.
+// against the chunk's uncompressed md5, and only then appends the whole chunk to
+// the task's file. The file handle has a single owner: the Close whose error is
+// returned is the only one.
 //
 // The verification-before-write order is the chunk transaction invariant
-// (decisions D16/D24): the destination is never touched by a partial or
-// failed decompression, so a chunk on disk is always a complete uncompressed
-// chunk — which is what makes the next run's boundary reconcile reliable. An
-// uncompressed md5 mismatch is not retried: the compressed bytes already
-// passed their hash, so re-fetching the same chunk would produce the same
-// result (D1).
+// (decisions D16/D24): a chunk on disk is always a complete uncompressed chunk,
+// which is what makes the next run's boundary reconcile reliable. An uncompressed
+// md5 mismatch is not retried: the compressed bytes already passed their hash, so
+// re-fetching the same chunk would produce the same result (D1).
 func appendChunk(ctx context.Context, destination string, compressed []byte, wantMD5 string) error {
 	zr, err := zlib.NewReader(bytes.NewReader(compressed))
 	if err != nil {

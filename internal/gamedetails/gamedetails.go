@@ -1,11 +1,9 @@
 // Package gamedetails is the pure data layer of the website download face: the
-// GameFile/GameDetails model, the priority and type filters, the filepath
-// template derivation, and the conversion of a Galaxy product document into
-// that model.
+// GameFile/GameDetails model, the priority and type filters, the filepath template
+// derivation, and the conversion of a Galaxy product document into that model.
 //
-// The package performs no I/O of its own: the conversion resolves each file
-// entry's downlink through an injected DownlinkResolver, so the network and the
-// cache stay with the caller.
+// The package performs no I/O of its own: downlink resolution is injected, so the
+// network and the cache stay with the caller.
 package gamedetails
 
 import (
@@ -35,12 +33,10 @@ type GameDetails struct {
 	Changelog        string
 	Logo             string
 
-	// The rendered JSON documents the save-* flags request, and the diagnostics
-	// the extraction refused to guess at. ProductJson is rendered from the
-	// document acquisition already holds; GameDetailsJson is the rendered
-	// per-game details document; SerialsDiag says why serials stayed empty when
-	// the cdKey shape is unsupported; MetadataDiag carries a failed details
-	// fetch, so a swallowed fetch cannot hide a failure from the exit code.
+	// The rendered JSON documents the save-* flags request, and the diagnostics record
+	// what the extraction refused to guess at: SerialsDiag why serials stayed empty, and
+	// MetadataDiag a failed details fetch, so a swallowed fetch cannot hide a failure
+	// from the exit code.
 	ProductJson     string
 	GameDetailsJson string
 	SerialsDiag     string
@@ -156,15 +152,12 @@ func filterWithType(list []GameFile, typeMask uint32) []GameFile {
 	return out
 }
 
-// FilterWithType drops the files the type mask excludes, in place, and does the
-// same for the DLC subtree.
+// FilterWithType drops the files the type mask excludes, in place, and does the same
+// for the DLC subtree. It replaces the four vectors rather than collecting a new one,
+// unlike GetGameFileVectorFiltered.
 //
-// It replaces the four vectors rather than collecting a new one — that is what
-// makes it different from GetGameFileVectorFiltered, which gathers the matching
-// files of a product and leaves the tree alone.
-//
-// Acquisition calls it with the include mask; the conversion has already gated
-// each vector by the same mask, so in practice it removes nothing.
+// Acquisition calls it with the include mask; the conversion has already gated each
+// vector by the same mask, so in practice it removes nothing.
 func (gd *GameDetails) FilterWithType(typeMask uint32) {
 	gd.Installers = filterWithType(gd.Installers, typeMask)
 	gd.Extras = filterWithType(gd.Extras, typeMask)

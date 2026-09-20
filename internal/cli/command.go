@@ -4,12 +4,9 @@ import "github.com/nekrozis/goggo/internal/config"
 
 // The command tree the CLI is built on (D1, D13, D14).
 //
-// This file is the parser's data and vocabulary: which commands exist, how they
-// nest, what each node accepts, and what a resolved command carries. It holds no
-// behaviour — no core calls, no rendering — so the tree can be read as the
-// product surface it is: only commands this build actually supports appear here
-// (D14), namespaces exist only where several natural actions share a stable
-// domain (D13: auth, orphans). A verb that is not in the tree is absent, never
+// This file is the parser's data and vocabulary — which commands exist, how they
+// nest, what each node accepts — and holds no behaviour. Only commands this build
+// supports appear here: a verb that is not in the tree is absent, never
 // present-and-unimplemented.
 
 // sessionClass is what a command needs from the session before it can run, and
@@ -147,15 +144,13 @@ type invocation struct {
 // commandNode is one node of the tree.
 //
 // options lists what the node ADDS to the shared set (sharedOptions): the parser
-// checks an option against common ∪ node, so "global" means shared semantics,
-// not "every command accepts it" (D15). id is cmdNone for pure namespaces;
-// "download" is the one node that is both a leaf and a namespace — a first
-// word matching a child dispatches the subcommand, anything else is an
-// argument of the leaf itself.
+// checks an option against common ∪ node, so "global" means shared semantics, not
+// "every command accepts it" (D15). id is cmdNone for pure namespaces; "download"
+// is the one node that is both a leaf and a namespace — a first word matching a
+// child dispatches the subcommand, anything else is an argument of the leaf.
 //
-// session is what the command needs from the session before it can run. Every
-// leaf declares one; namespaces and the meta commands do not, because nothing
-// dispatches them.
+// Every leaf declares a session class; namespaces and meta commands do not,
+// because nothing dispatches them.
 type commandNode struct {
 	name     string
 	summary  string
@@ -199,8 +194,7 @@ var installTargetOptions = []optionID{
 //
 // The installer filters are the listing side of platform/language. They are
 // accepted by `list games` — the listing that shows installers — and not by the
-// other list resources, where they would filter nothing; that is the same
-// "shared semantics, per-command acceptance" rule as everywhere else (D15).
+// other list resources, where they would filter nothing (D15).
 var listGamesOptions = []optionID{
 	optTag,
 	optGame,

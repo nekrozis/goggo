@@ -223,9 +223,6 @@ func (d *Downloader) showBuildsFor(ctx context.Context, productID, buildID strin
 //
 // A non-empty Notice means the caller prints that message and stops; the
 // returned error is reserved for a real failure of the product list itself.
-//
-// The pattern is passed to the one listing call rather than stored anywhere
-// shared.
 func (d *Downloader) selectProductID(ctx context.Context, productID string) (string, Notice, error) {
 	if numericIDRE.MatchString(productID) {
 		return productID, Notice{}, nil

@@ -6,25 +6,22 @@ import (
 	"strconv"
 )
 
-// MojoSetup markers found in the shell-script preamble of MojoSetup
-// self-extracting installers. The offset line declares how many leading lines
-// of the file form the script (consumed by `head -n N "$0"`); the filesizes
-// line declares the inner archive byte count. The patterns match
-// case-insensitively and take the leftmost match; \x60 is the literal
-// backtick.
+// MojoSetup markers found in the shell-script preamble of MojoSetup self-extracting
+// installers: the offset line declares how many leading lines of the file form the
+// script (consumed by `head -n N "$0"`), the filesizes line the inner archive byte
+// count. \x60 is the literal backtick.
 var (
 	mojoOffsetPattern = regexp.MustCompile(`(?i)offset=\x60head -n (\d+?) "\$0"`)
 	mojoFilesizePat   = regexp.MustCompile(`(?i)filesizes="(\d+?)"`)
 )
 
 // MojoSetupScriptSize returns the byte length of the installer's leading shell
-// script: it searches data for the offset marker and, on a match, counts N
-// lines from data[0], each contributing its content length plus a trailing
-// newline.
+// script: N lines counted from the offset marker, each contributing its content
+// length plus a trailing newline.
 //
-// API contract: the count is always taken from data[0], so callers with a
-// non-zero cursor must slice data themselves. When the pattern does not match,
-// zero is returned.
+// API contract: the count is always taken from data[0], so callers with a non-zero
+// cursor must slice data themselves. When the pattern does not match, zero is
+// returned.
 func MojoSetupScriptSize(data []byte) int64 {
 	m := mojoOffsetPattern.FindSubmatch(data)
 	if m == nil {

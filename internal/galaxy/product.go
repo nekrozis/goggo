@@ -20,28 +20,15 @@ const (
 
 // Product fetches a product document and expands its DLCs into it.
 //
-// The result is the RAW document — the one the API answered, plus the
-// expanded_dlcs member — and deliberately not a domain object. Assembling
-// GameDetails belongs to the conversion layer (internal/gamedetails), and
-// keeping acquisition and conversion apart is what lets this function be tested
-// against request shapes alone.
+// The result is the RAW document the API answered, plus the expanded_dlcs
+// member, and deliberately not a domain object: assembling GameDetails belongs
+// to internal/gamedetails, and keeping acquisition and conversion apart is what
+// lets this function be tested against request shapes alone. A document without
+// DLCs gets no such member.
 //
-// Field reading follows the package's usual split: a member this function
-// reads is validated against the JSON type it must have, so an absent member is
-// the zero value and a present member of the wrong type is an error. Nothing is
-// coerced into something plausible.
-//
-// The DLC expansion has two branches:
-//
-//	dlcs.products holds at most 45 ids
-//	    → one request to dlcs.expanded_all_products_url, whose response is the
-//	      array of DLC documents
-//	dlcs.products holds more
-//	    → ids are accumulated and sent in batches of maxDLCBatchSize through
-//	      products?ids=…, each response array appended in order
-//
-// Either way the collected array is stored under expanded_dlcs. A document
-// without DLCs gets no such member.
+// A member this function reads is validated against the JSON type it must have:
+// an absent member is the zero value and a present member of the wrong type is
+// an error. Nothing is coerced into something plausible.
 func (c *Client) Product(ctx context.Context, productID string) (map[string]any, error) {
 	body, err := c.getResponse(ctx, c.ep.api+"/products/"+productID+"?expand="+productExpand)
 	if err != nil {
@@ -61,22 +48,13 @@ func (c *Client) Product(ctx context.Context, productID string) (map[string]any,
 
 // expandDLCs fetches the DLC documents of a product document and injects them.
 //
-// The dlcs member decides whether anything happens at all:
-//
-//	absent → nothing to expand, nothing injected
-//	null → same; a null is how an optional member is commonly spelled
-//	object → expand (one request, or batches above maxDLCBatchSize)
-//	non-object → skipped: no request, no expanded_dlcs, the document returned
-//
-// The live API really does send the non-object shapes — a majority of one
-// probed account's products carry "dlcs": [] (D52, evidence in
-// dev/audit/evidence/D52-dlcs-census.txt). A string, number or boolean is data
-// this package has never observed, and an answer that cannot be expanded is
-// skipped, not reported.
-//
-// Inside an object the fields stay strict (D52): dlcs.products and
-// dlcs.expanded_all_products_url keep their field-shape gates, because a
-// lenient read has no observed sample to justify widening them.
+// A dlcs member that is absent, null or not an object is skipped — no request,
+// no expanded_dlcs, the document returned as the API answered it. The live API
+// really does send the non-object shapes: a majority of one probed account's
+// products carry "dlcs": [] (D52, evidence in
+// dev/audit/evidence/D52-dlcs-census.txt). Inside an object the fields stay
+// strict (D52), because a lenient read has no observed sample to justify
+// widening them.
 func (c *Client) expandDLCs(ctx context.Context, product map[string]any) error {
 	raw, present := product["dlcs"]
 	dlcs, isObject := raw.(map[string]any)

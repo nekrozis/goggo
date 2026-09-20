@@ -82,20 +82,17 @@ func (c *Client) DepotItems(ctx context.Context, hash string, opts DepotOptions)
 	return items, nil
 }
 
-// FilteredDepotItems expands the depot entry of a manifest into items, keeping it
-// only when the language and the architecture select it.
+// FilteredDepotItems expands the depot entry of a manifest into items, keeping
+// only the entries the language and the architecture select.
 //
-// languageRegex comes from the language table (config.Languages[].Regexp, whose
-// default entry is "en|eng|english|en[_-]US") and arch from the architecture
-// table (config.GalaxyArchs[].Code, e.g. "64"); both are chosen by the caller.
+// The language test: an entry matches when the depot lists "*" or a language the
+// anchored, case-insensitive regex finds, so an empty or missing "languages" list
+// selects nothing (D7). The architecture test: a missing or null "osBitness" means
+// the entry is not architecture-specific and is selected, otherwise the list must
+// contain "*" or the requested arch.
 //
-// The language test is: an entry matches when the depot lists "*" or a language
-// the regex finds inside an anchored, case-insensitive match. An empty or
-// missing "languages" list therefore selects nothing (D7).
-//
-// The architecture test is: "osBitness" missing or null means the entry is not
-// architecture-specific and is selected; otherwise the list must contain "*" or
-// the requested arch.
+// languageRegex and arch are chosen by the caller, from config.Languages[].Regexp
+// and config.GalaxyArchs[].Code.
 func (c *Client) FilteredDepotItems(ctx context.Context, depotJSON map[string]any, languageRegex, arch string, opts DepotOptions) ([]model.GalaxyDepotItem, error) {
 	languageRE, err := regexp.Compile("(?i)^(" + languageRegex + ")$")
 	if err != nil {
@@ -344,14 +341,10 @@ func arrayField(obj map[string]any, key string) ([]any, error) {
 
 // uint64Value reads one of a manifest's byte counts, sizes or offsets.
 //
-// The values arrive as whatever encoding/json produced, so a JSON number reaches
-// this helper as a float64: it accepts non-negative whole values and checks the
-// uint64 range, and it cannot recover integer precision that the float64
-// representation already lost above 2^53.
-//
-// It is deliberately strict (D10, D11): a string or a boolean is a protocol
-// error for a byte count, not a value to coerce. An absent or null member reads
-// as 0.
+// A JSON number arrives as a float64, so precision above 2^53 is already lost;
+// the helper accepts non-negative whole values in the uint64 range. It is
+// deliberately strict (D10, D11): a string or a boolean is a protocol error for a
+// byte count, not a value to coerce. An absent or null member reads as 0.
 func uint64Value(v any) (uint64, error) {
 	switch t := v.(type) {
 	case nil:

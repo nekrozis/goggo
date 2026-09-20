@@ -82,16 +82,12 @@ type WebsiteDeps struct {
 // RunWebsite executes the website download path: the single-file downloads with
 // their version checks, resume handling and failure cleanup.
 //
-// Failure semantics are the website worker's own (D68): per-item
-// problems — blacklisted files, missing directories, unusable downlink
-// documents, renames that fail — are reported and skipped without failing the
-// run, and a download that exhausts its retries is cleaned up according to the
-// failure class (a transport break or a resume attempt keeps the partial file,
-// anything else removes it). RunWebsite returns nil when every task has ended;
-// only a cancelled context makes it return an error.
-//
-// The scheduling is shared with the Galaxy path (D67); everything below
-// the fan-out is this worker's own.
+// Failure semantics are the website worker's own (D68): per-item problems —
+// blacklisted files, missing directories, unusable downlink documents, renames
+// that fail — are reported and skipped without failing the run, while a download
+// that exhausts its retries is cleaned up according to its failure class.
+// RunWebsite returns nil when every task has ended; only a cancelled context makes
+// it return an error. The scheduling is shared with the Galaxy path (D67).
 func RunWebsite(ctx context.Context, tasks []model.WebsiteTask, opts Options, deps WebsiteDeps) error {
 	if deps.HTTP == nil || deps.URL == nil || deps.Observer == nil {
 		return errors.New("transfer: website run needs an http client, a url provider and an observer")
@@ -344,12 +340,10 @@ func downloadWithRetries(ctx context.Context, task model.WebsiteTask, opts Optio
 	return lastErr
 }
 
-// websiteDownloadAttempt performs one attempt of the file download: open, GET
-// with the resume position, stream, close. A nil downloadError means the
-// attempt succeeded; otherwise keep decides the cleanup and retryable whether
-// another attempt may follow. The classification happens where each error is
-// produced — network-side failures keep the partial file, local-side failures
-// remove it (D71).
+// websiteDownloadAttempt performs one attempt of the file download. A nil
+// downloadError means the attempt succeeded. The failure classification happens
+// where each error is produced — network-side failures keep the partial file,
+// local-side failures remove it (D71).
 func websiteDownloadAttempt(ctx context.Context, task model.WebsiteTask, deps WebsiteDeps, url string, resume bool, emit func(Event)) (lastModified time.Time, derr *downloadError) {
 	var f *os.File
 	var err error

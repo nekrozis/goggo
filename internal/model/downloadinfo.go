@@ -26,12 +26,9 @@ type ProgressInfo struct {
 // DownloadInfo is the shared state between a download worker and the progress
 // renderer, so every accessor takes a mutex.
 //
-// Always use the pointer returned by NewDownloadInfo: the struct embeds a
-// sync.Mutex and must not be copied once in use.
-//
-// The lock is an exclusive sync.Mutex rather than an RWMutex because polling
-// runs at much the same rate as updating, so readers would not gain from
-// sharing.
+// Always use the pointer returned by NewDownloadInfo: the struct embeds a sync.Mutex
+// and must not be copied once in use. The lock is exclusive rather than an RWMutex
+// because polling runs at much the same rate as updating.
 type DownloadInfo struct {
 	progress ProgressInfo
 	filename string

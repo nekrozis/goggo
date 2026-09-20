@@ -7,23 +7,20 @@ import (
 	"sync"
 )
 
-// terminalCoordinator is the single terminal-visible writer for an install
-// run's TTY lifetime: every byte that reaches the
-// terminal while the run is live goes through one of its three transactions —
-// Frame, Diagnostic, Stop — so the cursor always has exactly one owner.
+// terminalCoordinator is the single terminal-visible writer for an install run's
+// TTY lifetime: every byte that reaches the terminal while the run is live goes
+// through one of its three transactions — Frame, Diagnostic, Stop — so the
+// cursor always has exactly one owner.
 //
-// The mutex alone is not the ownership: the coordinator is the ownership. It
-// works because the console routes ALL of its output through it for the
-// install's lifetime (console.Out/ErrOut hand back coordinator writers, and
-// every core write flows through core.Console → those methods), so no third
-// path can interleave a write between the erase and the redraw. Login prompts
-// and non-install commands run outside that lifetime and write directly.
+// That holds only because the console routes ALL of its output through it for
+// the install's lifetime (console.Out/ErrOut hand back coordinator writers);
+// login prompts and non-install commands run outside that lifetime and write
+// directly, so no third path can interleave a write between erase and redraw.
 //
-// Each transaction ends at a known cursor state: the frame is on screen and
-// the cursor sits just below it. The next transaction erases from there, so
-// the row arithmetic never depends on where an earlier write left the cursor.
-// Layout guarantees the frame never wraps (layout.go), which is what makes
-// the erase's row count trustworthy.
+// Each transaction ends at a known cursor state: the frame is on screen and the
+// cursor sits just below it, so the row arithmetic never depends on where an
+// earlier write left the cursor. Layout guarantees the frame never wraps
+// (layout.go), which is what makes the erase's row count trustworthy.
 type terminalCoordinator struct {
 	mu      sync.Mutex
 	out     io.Writer

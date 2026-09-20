@@ -52,9 +52,8 @@ func (q ProductQuery) queryString(page int) string {
 // productPage decodes one listing page.
 //
 // Shape rules (D3):
-//   - page and totalPages must be present integers; a missing or malformed
-//     value is an error, so a schema change cannot masquerade as "no results"
-//     (a lenient read would end the walk silently);
+//   - page and totalPages must be present integers; a missing or malformed value
+//     is an error, so a schema change cannot masquerade as "no results";
 //   - totalPages == 0 is a legitimate empty listing;
 //   - a missing or non-array products field yields no products without an error;
 //   - a product that is not an object is an error.

@@ -6,33 +6,16 @@ import (
 	"sync/atomic"
 )
 
-// Progress is the running state of one run, in two layers.
+// Progress is the running state of one run, in two layers: the run-level queue
+// snapshot (the tasks Run was handed and their summed compressed size, published
+// once before the first dispatch) and the per-task slots (the bytes a task has
+// downloaded and its total, dropped when the task ends). A reader learns what is
+// still pending by subtracting what it has seen start from the queue snapshot,
+// and what is active from the slots.
 //
-// The queue layer is the run-level fact: the tasks Run was handed and their
-// summed compressed size, published once before the first dispatch and never
-// decremented. The slot layer is the per-task lifecycle state: the bytes a task
-// has downloaded and its total, published as the transfer proceeds and dropped
-// when the task ends. A reader therefore learns what is still *pending* by
-// subtracting what it has seen start from the queue snapshot, and what is
-// *active* from the slots — the pending/active split stays explicit and nothing
-// is counted twice.
-//
-// The asymmetry between the two layers is deliberate: Queue keeps answering
-// after Run returns, while Bytes and Total answer false once a task's slot is
-// gone.
-//
-// transfer publishes into it as bytes arrive from the network and the front end
-// polls it. It carries no front-end concept of its own: no method calls out to a
-// renderer or an observer, and the counts are maintained whether or not anyone
-// reads them.
-//
-// A nil *Progress is a usable no-op: readers get "no sampling state" and the
-// run loop builds no wrapper around the response bodies, so a run without a
-// registry behaves exactly as it did before this type existed.
-//
-// The registry is task-keyed rather than galaxy-specific, so the website path
-// can publish into it without a change to this type; only the chunk path does
-// so today.
+// The asymmetry is deliberate: Queue keeps answering after Run returns, while
+// Bytes and Total answer false once a task's slot is gone. A nil *Progress is a
+// usable no-op.
 type Progress struct {
 	mu    sync.Mutex
 	slots map[string]*progressSlot
@@ -94,13 +77,9 @@ func (p *Progress) Total(task string) (int64, bool) {
 }
 
 // Queue returns the run-level queue snapshot: how many tasks the last run was
-// handed and their summed compressed size. ok is false when no run has
-// published a snapshot yet — never "the queue is empty", which is what an empty
-// run publishes instead.
-//
-// The snapshot outlives the run: it is a static fact about the queue, while
-// Bytes and Total describe a task's lifecycle and stop answering once the task
-// ends.
+// handed and their summed compressed size. ok is false when no run has published
+// a snapshot yet — never "the queue is empty", which is what an empty run
+// publishes instead.
 func (p *Progress) Queue() (tasks int, bytes int64, ok bool) {
 	if p == nil {
 		return 0, 0, false
@@ -177,17 +156,15 @@ type progressSink struct {
 }
 
 // progressReader publishes the bytes a response body yields as they arrive, so
-// the sampler sees a transfer that is still in flight rather than only the
-// chunk boundaries the events report. The value is absolute — the attempt's
-// base plus everything read so far — which keeps a retry that resumes from the
-// bytes already in memory monotone without any accumulator to get wrong, and it
-// is bounded by the chunk's logical end: a server that ignores the Range and
-// re-sends the whole chunk cannot push the sample past the end, which would
-// otherwise turn the caller's 200-fold into an artificial decrease.
+// the sampler sees a transfer in flight rather than only the chunk boundaries the
+// events report. The value is absolute (the attempt's base plus everything read
+// so far), which keeps a retry that resumes from the bytes already in memory
+// monotone, and it is clamped to the chunk's logical end so a server that ignores
+// the Range cannot push the sample past it.
 //
-// A decrease is still possible and deliberate: when a failed hash discards the
-// chunk buffer, the next attempt starts from the chunk's offset again. The
-// window that consumes these samples treats any decrease as a restart.
+// A decrease is deliberate: when a failed hash discards the chunk buffer, the
+// next attempt starts from the chunk's offset again, and the window that consumes
+// these samples treats any decrease as a restart.
 type progressReader struct {
 	r    io.Reader
 	slot *progressSlot

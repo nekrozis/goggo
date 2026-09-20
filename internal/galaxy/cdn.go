@@ -14,39 +14,31 @@ import (
 // template where the caller has to insert the expanded galaxy path.
 //
 // It is a contract between this package and the download layer, not wire text:
-// the API never sends it, and callers substitute it before a request is built.
-// The API's url_format spells the path parameter "{path}", and this package
-// keeps that spelling as the internal marker.
-//
-// The shared spelling is safe because the parameter pass replaces "{path}" with
-// the parameter value plus the re-attached marker in ONE pass, so the final
-// consumer's replacement only ever hits the re-attached marker. Should a
-// url_format carry "{path}" without a matching parameter, this package fills it
-// with the galaxy path, which is the useful reading of that template.
+// the API never sends it. The API's url_format spells the path parameter
+// "{path}", and keeping that spelling is safe because the parameter pass replaces
+// "{path}" with the parameter value plus the re-attached marker in ONE pass, so
+// the final consumer's replacement only ever hits the re-attached marker. A
+// url_format carrying "{path}" with no matching parameter keeps the marker,
+// which is the useful reading of that template.
 const GalaxyPathPlaceholder = "{path}"
 
 // CdnURLTemplatesFromJSON builds the ordered list of CDN URL templates from a
 // link document.
 //
-// Every entry of "urls" contributes one template. Its place in the result comes
-// from the endpoint's rank in cdnPriority: the index of the first match, or
-// len(cdnPriority)+i, which puts an endpoint that is not listed behind every
-// listed one and keeps unlisted endpoints in document order. The list is sorted
-// by rank, lowest first, with a STABLE sort, so equally ranked endpoints (the
-// same name twice) keep document order.
+// Every entry of "urls" contributes one template, ranked by the endpoint's
+// position in cdnPriority: the index of the first match, or len(cdnPriority)+i
+// for an unlisted endpoint, so unlisted endpoints sort behind every listed one in
+// document order. The sort is stable, so equally ranked endpoints keep document
+// order.
 //
 // Inside url_format every "{parameter}" is replaced by that member of
-// "parameters". The members are visited in ascending key order, which is
-// observable: a value may itself contain another parameter's placeholder.
+// "parameters", visited in ascending key order — observable, because a value may
+// contain another parameter's placeholder. "{path}" is special: the marker is
+// APPENDED to its value for the caller to fill in later. No normalisation is done
+// here: no slash folding, no cleaning, no URL parsing.
 //
-// "{path}" is special: the marker is APPENDED to its value instead of replacing
-// it, so the caller can fill in the path later. No normalisation is done here —
-// no slash folding, no cleaning, no URL parsing.
-//
-// A document whose "urls" is missing or null produces no templates. A section
-// that is present in another shape is reported, as elsewhere in this package: an
-// entry that is not an object, a "parameters" that is not an object, or a scalar
-// field of the wrong type. Missing or null scalar fields read as "".
+// A document whose "urls" is missing or null produces no templates; a section
+// present in another shape is reported, as elsewhere in this package.
 func CdnURLTemplatesFromJSON(json map[string]any, cdnPriority []string) ([]string, error) {
 	raw, ok := json["urls"]
 	if !ok || raw == nil {
@@ -139,27 +131,19 @@ func urlTemplate(entry map[string]any) (string, error) {
 	return format, nil
 }
 
-// PathFromDownlinkURL derives the depot-relative path from a downlink URL.
+// PathFromDownlinkURL derives the depot-relative path from a downlink URL: the
+// URL is percent-decoded, one trailing slash is removed, the path starts at the
+// last "/<gamename>/" when that is present (otherwise after the last "/"), ends
+// before the query string, and always carries the "/<gamename>/" prefix.
 //
-// The URL is percent-decoded, one trailing slash is removed, the path starts at
-// the last "/<gamename>/" when that is present (otherwise after the last "/"),
-// ends before the query string, and always carries the "/<gamename>/" prefix. A
-// "?" after the last "/" means the URL format was unexpected, so the path is cut
-// there; a path with no slash at all is left alone.
+// It returns a string rather than an error because nothing here can fail
+// usefully: the input is a URL, not a document, so there is no shape to validate,
+// and the caller decides whether the result is usable (the download path rejects
+// one that ends in "/secure").
 //
-// It returns a string rather than an error because there is nothing here that can
-// fail usefully: the input is a URL, not a document, so there is no shape to
-// validate, and the purpose is to recover a path — the caller decides whether the
-// result is usable (the download path rejects one that ends in "/secure").
-//
-// The corner cases are defined here:
-//
-//   - percent-decoding uses url.PathUnescape, which decodes %XX but does not turn
-//     "+" into a space (QueryUnescape would). An invalid escape reports an error,
-//     in which case the original text is kept.
-//   - an empty URL skips the trailing-slash step; an empty result becomes
-//     "/<gamename>/".
-//   - an end position before the start position is clamped.
+// Two traps: percent-decoding uses url.PathUnescape, which decodes %XX but does
+// not turn "+" into a space (QueryUnescape would) and keeps the original text on
+// an invalid escape; and an end position before the start position is clamped.
 func PathFromDownlinkURL(downlinkURL, gameName string) string {
 	decoded, err := url.PathUnescape(downlinkURL)
 	if err != nil {

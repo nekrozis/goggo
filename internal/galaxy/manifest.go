@@ -15,15 +15,13 @@ func (c *Client) ManifestV1(ctx context.Context, manifestURL string) (map[string
 
 // ManifestV2 fetches a generation-2 manifest by hash.
 //
-// A non-empty hash is expanded to the content-system layout first; a hash that
-// already carries a "/" comes back unchanged from HashToGalaxyPath, and an
-// empty one is left alone. isDependency selects the dependency repository
-// instead of the product one.
+// A non-empty hash is expanded to the content-system layout first, and a hash
+// that already carries a "/" comes back unchanged from HashToGalaxyPath;
+// isDependency selects the dependency repository instead of the product one.
 //
-// Note that, for a BARE hash, the URL has no ".json" suffix and no query string,
-// unlike generation 1; a hash that already contains a "/" is interpolated as it
-// is, so its content — query string included — is whatever the caller passed.
-// An empty hash still produces a request: it goes to ".../v2/meta/" and the
+// For a BARE hash the URL carries no ".json" suffix and no query string, unlike
+// generation 1; a hash containing a "/" is interpolated as it is, query string
+// included. An empty hash still produces a request (".../v2/meta/"), and the
 // server's answer decides the outcome.
 func (c *Client) ManifestV2(ctx context.Context, manifestHash string, isDependency bool) (map[string]any, error) {
 	hash := manifestHash
@@ -43,16 +41,13 @@ func (c *Client) ManifestV2(ctx context.Context, manifestHash string, isDependen
 }
 
 // HashToGalaxyPath expands a bare hash into the content-system path layout: the
-// first two characters, then the next two, then the whole hash — "ab" + "/" +
-// "cd" + "/" + "abcd…".
+// first two characters, then the next two, then the whole hash — "ab/cd/abcd…".
 //
-// A hash that already contains a "/" is returned unchanged, and so is a hash
-// shorter than four characters: it cannot be split, and the request that follows
-// is what reports a problem. Returning it unchanged keeps a short hash from
-// becoming a slice panic.
-//
-// It is exported because the download layer, which lives outside this package,
-// calls it directly on a chunk's compressed md5.
+// A hash that already contains a "/" is returned unchanged, and so is one shorter
+// than four characters: it cannot be split, and returning it unchanged keeps it
+// from becoming a slice panic (the request that follows reports the problem). It
+// is exported because the download layer, outside this package, calls it on a
+// chunk's compressed md5.
 func HashToGalaxyPath(hash string) string {
 	if strings.Contains(hash, "/") {
 		return hash

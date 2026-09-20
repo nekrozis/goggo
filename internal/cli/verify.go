@@ -44,16 +44,13 @@ func (c verifyCounts) parts() []string {
 
 // renderVerify writes one verification report and returns the run's outcome.
 //
-// The report follows the output architecture: the shared context (the
-// installation root) once in a header, the abnormal objects one line each with
-// their absolute path, and the routine state — the files that are exactly right
-// — as a count. A verification of a healthy tree is therefore one line, and the
-// arithmetic of that line is what makes "no per-file line" unambiguous: every
-// file is either counted or named.
+// The installation root is printed once, the abnormal objects one line each with
+// their absolute path, and the routine state as a count. The arithmetic of that
+// line is what makes "no per-file line" unambiguous: every file is either
+// counted or named.
 //
-// The exit code carries the answer, the way `auth status` reports its state:
-// everything OK → 0, anything else → the operation failure code. A verification
-// is meant to be usable from a script.
+// The exit code carries the answer: a verification is meant to be usable from a
+// script.
 func renderVerify(out, errOut io.Writer, res core.VerifyResult) outcome {
 	if res.InstallPath != "" {
 		fmt.Fprintf(out, "Verifying → %s\n", res.InstallPath)

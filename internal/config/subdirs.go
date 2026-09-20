@@ -3,21 +3,15 @@ package config
 import "strings"
 
 // This file is the single source of truth for the six website subdirectory
-// options: the field each one fills, its default and the whole values carrying
-// a placeholder that it accepts. The CLI parser and the help text both read this
+// options: the field each one fills, its default and the whole values carrying a
+// placeholder that it accepts. The CLI parser and the help text both read this
 // table, so the whitelist cannot drift from it.
 //
-// The subdir template family and the install-dir template family are two
-// DIFFERENT languages and deliberately share no table:
-// --install-dir resolves through core.ResolveInstallSubdir (a document-backed
-// lookup), while these values are expanded by gamedetails.makeFilepath's
-// placeholder pass over each file's own fields. Only placeholders that render
-// meaningfully for the file class of a field are accepted by that field, and
-// only as a WHOLE value — a placeholder embedded in a longer path is refused,
-// exactly like the install-dir whitelist refuses half-exposed templates the
-// resolver would keep literal. The transformed-gamename placeholders are
-// absent everywhere: their backing transformations JSON is not implemented, so
-// they would render empty.
+// These values are expanded by gamedetails.makeFilepath's placeholder pass, not by
+// the install-dir resolver: the two template families share no table, and a
+// placeholder is accepted only when it renders meaningfully for the field's file
+// class, and only as a WHOLE value. The transformed-gamename placeholders are
+// absent because their backing transformations JSON is not implemented.
 
 // SubdirOption describes one --subdir-* option.
 type SubdirOption struct {

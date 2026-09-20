@@ -8,11 +8,7 @@
 // Resume semantics (decisions D6/D15): a partial file is resumable only when its
 // size lands exactly on an uncompressed chunk boundary AND the chunk before that
 // boundary matches its uncompressed md5; anything else is replaced. Whole-file
-// correctness is backstopped by the Item.MD5 check on the next reconcile, never
-// by a full-prefix rehash.
-//
-// ClassifyExistingFile answers the other question — not "what must an install do"
-// but "what is there" (OK/ND/MD5/FS) — and returns a fact, never an action.
+// correctness is backstopped by the Item.MD5 check on the next reconcile.
 package reconcile
 
 import (
@@ -26,14 +22,13 @@ import (
 	"github.com/nekrozis/goggo/internal/model"
 )
 
-// FileStatus is the FACT a read-only observation finds about one destination:
-// not an action (that is Decision), just what is there. It exists because the
-// two questions are different — DecisionReplace covers both "the hash differs"
-// and "the size differs", while a verification has to report which one it saw.
+// FileStatus is the FACT a read-only observation finds about one destination: not
+// an action (that is Decision), just what is there. The two questions are
+// different — DecisionReplace covers both "the hash differs" and "the size
+// differs", while a verification has to report which one it saw.
 //
-// The four codes are the vocabulary of the status report. The
-// zero value is deliberately NOT StatusOK: a value that was never observed must
-// not read as a healthy file (the same rule the CLI's session class follows).
+// The zero value is deliberately NOT StatusOK: a value that was never observed must
+// not read as a healthy file.
 type FileStatus uint8
 
 const (
@@ -93,15 +88,13 @@ const (
 	DecisionResume
 )
 
-// IsComplete reports whether the destination already satisfies the item:
-// the uncompressed size matches and the whole-file md5 matches.
+// IsComplete reports whether the destination already satisfies the item: the
+// uncompressed size matches and the whole-file md5 matches. A zero-size item is its
+// own special case — missing ⇒ false, size == 0 ⇒ true — so a plan never marks an
+// absent empty file as skipped.
 //
-// A zero-size item is its own special case — missing ⇒ false, size == 0 ⇒
-// true, size > 0 ⇒ false — so a plan never marks an absent empty file as
-// skipped.
-//
-// The returned error signals an observation failure (unreadable file): it is
-// an installation error, never "the content does not match".
+// A non-nil error signals an observation failure (unreadable file): it is an
+// installation error, never "the content does not match".
 func IsComplete(item model.GalaxyDepotItem, path string) (bool, error) {
 	if item.TotalSize == 0 {
 		fi, err := os.Stat(path)
@@ -201,25 +194,15 @@ func ReconcileExistingFile(item model.GalaxyDepotItem, path string) (Decision, i
 	return DecisionReplace, 0, nil
 }
 
-// ClassifyExistingFile reports the observed fact about the destination against
-// the item, without modifying anything. It answers the question a verification
-// asks, which is not the question ReconcileExistingFile answers: the latter
-// decides what an install must DO (and folds "hash differs" and "size differs"
-// into DecisionReplace), this one reports WHAT IS THERE.
+// ClassifyExistingFile reports the observed fact about the destination against the
+// item, without modifying anything. The order of the checks gives the four codes
+// their meaning, and a size mismatch outranks a hash mismatch: the comparison never
+// reads the file.
 //
-// The order of the checks gives the four codes their meaning:
-//
-//	absent (or not a regular file) → StatusND
-//	size differs → StatusFS (a size mismatch outranks a hash mismatch: the
-//	               comparison never reads the file)
-//	hash differs → StatusMD5
-//	otherwise → StatusOK
-//
-// A zero-size item needs no special case: it is OK when an empty file is there,
-// ND when the path is absent, and FS when something non-empty occupies it. An
-// observation failure (stat/open/read) comes back as a non-nil error and never
-// as a status: "the file could not be read" is not a fact about its content
-// (D43).
+// A zero-size item needs no special case: it is OK when an empty file is there, ND
+// when the path is absent, and FS when something non-empty occupies it. An
+// observation failure (stat/open/read) comes back as a non-nil error and never as a
+// status: "the file could not be read" is not a fact about its content (D43).
 func ClassifyExistingFile(item model.GalaxyDepotItem, path string) (FileStatus, error) {
 	fi, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {

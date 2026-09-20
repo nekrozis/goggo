@@ -10,22 +10,18 @@ import (
 )
 
 // cookieStore is the http.CookieJar handed to http.Client when cookie-file
-// persistence is configured. It has two independent responsibilities:
+// persistence is configured.
 //
-//   - Request behaviour: s.jar, a standard cookiejar.Jar, is the single
-//     authority for cookie matching and sending. Cookies(u) delegates to it
-//     and never reads the persistence state.
-//   - Persistence: SetCookies additionally records each cookie event into
-//     s.persist so the state can be reconstructed across processes
-//     (LoadCookies/SaveCookies). persist records the cookie EVENT for reconstruction; it is
-//     NOT a copy of the jar's accepted state — cookies the jar rejects may
-//     still be recorded, and no acceptance probing or domain/path matching is
-//     implemented here. On reload the jar filters them again.
+// s.jar is the single authority for cookie matching and sending: Cookies(u)
+// delegates to it and never reads the persistence state. SetCookies additionally
+// records each cookie EVENT into s.persist so the state can be reconstructed
+// across processes (LoadCookies/SaveCookies). persist is NOT a copy of the jar's
+// accepted state — cookies the jar rejects may still be recorded, and on reload
+// the jar filters them again.
 //
-// Lock order: s.mu serialises the WHOLE SetCookies
-// event so jar and persist advance together and persist never regresses to an
-// earlier event. Cookies takes the jar lock only (no mu), Save will take mu
-// only — there is no jar→mu path, hence no mutex inversion.
+// Lock order: mu serialises the whole SetCookies event so jar and persist
+// advance together and persist never regresses. Cookies takes the jar lock only
+// and Save takes mu only, so there is no jar→mu path and no inversion.
 type cookieStore struct {
 	jar *cookiejar.Jar
 	mu  sync.Mutex
@@ -153,14 +149,12 @@ func persistExpiry(c *http.Cookie, now time.Time) time.Time {
 	return time.Time{}
 }
 
-// defaultPath implements RFC 6265 section 5.1.4 (the default path of a cookie
-// whose Set-Cookie carried no Path attribute). It is an RFC helper written
-// independently (not copied from the standard library) and locked against the
-// current cookiejar behaviour by on-record tests. Input is u.EscapedPath:
-// the raw (undecoded) URI path representation, matching the request-target
-// semantics the RFC's uri-path refers to.
+// defaultPath implements RFC 6265 section 5.1.4: the default path of a cookie
+// whose Set-Cookie carried no Path attribute. The input is u.EscapedPath, the
+// raw (undecoded) URI path, matching the request-target semantics the RFC's
+// uri-path refers to.
 //
-// It is attribute completion for persistence, NOT request matching — the jar
+// This is attribute completion for persistence, NOT request matching — the jar
 // applies its own path matching when sending cookies.
 func defaultPath(u *url.URL) string {
 	p := u.EscapedPath()

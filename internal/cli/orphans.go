@@ -13,11 +13,10 @@ import (
 
 // runOrphansCheck lists the files the installation does not account for.
 //
-// Finding them is not a failure, however many there are: a save file, a mod and a
-// settings file all live under an installation root and none of them is explained
-// by the manifest. The exit code therefore reports whether the CHECK worked, the
-// way `check` does in a shell script — unlike `verify`,
-// whose mismatch means the installation does not match what it should be.
+// Finding them is not a failure, however many there are: a save file or a mod
+// under the installation root is not explained by the manifest. The exit code
+// therefore reports whether the CHECK worked — unlike `verify`, whose mismatch
+// means the installation does not match what it should be.
 func (c *console) runOrphansCheck(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer) outcome {
 	res, err := d.CheckOrphans(ctx, core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build))
 	renderNotices(stdout, stderr, res.Notices)
@@ -31,15 +30,12 @@ func (c *console) runOrphansCheck(ctx context.Context, d *core.Downloader, inv i
 // runOrphansRemove walks the installation, shows the list, obtains the
 // authorization for exactly that list and removes it.
 //
-// The authorization is the front end's business — the terminal, `--yes` and the
-// answer are all front-end facts — while core's is deleting the paths it was
-// handed. The list is printed before the question, so what the user approves is
-// what they just read (D10).
+// The authorization is the front end's business (the terminal, `--yes` and the
+// answer), while core's is deleting the paths it was handed. The list is printed
+// before the question, so what the user approves is what they just read (D10).
 //
-// The interrupt context is set up here because a destructive batch has something
-// to preserve: a cancelled removal stops and still reports what it deleted
-// (D33, D20). A second Ctrl+C gets the default treatment, as it does during an
-// install.
+// The interrupt context is set up here because a cancelled removal stops and
+// still reports what it deleted (D33, D20).
 func (c *console) runOrphansRemove(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer) outcome {
 	ctx, stopSignal := signal.NotifyContext(ctx, os.Interrupt)
 	defer stopSignal()
@@ -101,11 +97,10 @@ func (c *console) removeOrphans(ctx context.Context, d *core.Downloader, res cor
 
 // authorized reports whether a removal may go ahead.
 //
-// An explicit --yes IS the authorization: the flag exists so a script — or a
-// person who has just read the list above — can say "do not ask", and asking
-// anyway would make it meaningless on a terminal, which is precisely where a
-// destructive command is normally run (D16). Without it the
-// terminal is asked, and anything short of a clear yes is a no.
+// An explicit --yes IS the authorization — asking anyway would make the flag
+// meaningless on a terminal, which is where a destructive command is normally
+// run (D16). Without it the terminal is asked, and anything short of a clear yes
+// is a no.
 func (c *console) authorized(yes bool, count int) bool {
 	if yes {
 		return true

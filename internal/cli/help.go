@@ -19,10 +19,8 @@ func renderVersion(w io.Writer) {
 //
 // Every layer is generated from the parser's own tables — the command tree and
 // the option table — so the help cannot describe a command the parser does not
-// have, an option the parser does not accept, or a per-command option set the
-// tree does not declare. The topic path arrives already resolved and validated
-// (parseArgs owns that rule, shared by -h/--help and the help command), so this
-// layer only renders.
+// have or an option it does not accept. The topic path arrives already resolved
+// and validated (parseArgs owns that rule), so this layer only renders.
 func usage(w io.Writer, path []string) {
 	node, ok := resolveTopic(path)
 	if !ok {

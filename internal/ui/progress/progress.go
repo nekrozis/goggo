@@ -1,13 +1,10 @@
-// Package progress renders download progress bars: an eighth-graded Unicode bar
-// and a plain ASCII fallback, each with an optional ANSI color.
+// Package progress renders download progress bars: an eighth-graded Unicode bar and
+// a plain ASCII fallback, each with an optional ANSI color.
 //
-// Bar.Create is a pure computation; Bar.Draw writes it to a caller-supplied
-// io.Writer and emits no trailing newline. With useColor set, Create produces
-// the ANSI-colored form; without it, no escape codes at all.
-//
-// The package does no terminal handling: no TTY detection, NO_COLOR, TERM
-// handling, Windows ANSI setup or terminal-width queries — those belong to the
-// front end.
+// Bar.Create is a pure computation; Bar.Draw writes it to a caller-supplied io.Writer
+// and emits no trailing newline, and without useColor it emits no escape codes at all.
+// The package does no terminal handling — no TTY detection, NO_COLOR, TERM handling,
+// Windows ANSI setup or width queries; those belong to the front end.
 package progress
 
 import (

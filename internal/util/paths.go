@@ -20,28 +20,21 @@ func HomeDir() (string, error) {
 	return home, nil
 }
 
-// usesStdlibRoots reports whether the per-user roots follow the platform
-// convention (standard library) instead of the XDG convention.
+// usesStdlibRoots reports whether the per-user roots follow the platform convention
+// (Windows %AppData%/%LocalAppData%, macOS ~/Library) instead of the XDG rules.
 //
-// Windows: %AppData% / %LocalAppData%. macOS: ~/Library/Application Support and
-// ~/Library/Caches. Linux and the BSDs keep the XDG rules.
-//
-// os.UserConfigDir must NOT be used on Linux: it falls back to $HOME/.config
-// when an XDG variable is set but empty, whereas an empty-but-set variable must
-// yield "".
+// os.UserConfigDir must NOT be used on Linux: it falls back to $HOME/.config when an
+// XDG variable is set but empty, whereas an empty-but-set variable must yield "".
 func usesStdlibRoots() bool {
 	return runtime.GOOS == "windows" || runtime.GOOS == "darwin"
 }
 
-// ConfigHome returns the per-user configuration root.
+// ConfigHome returns the per-user configuration root, following the platform split
+// documented on usesStdlibRoots.
 //
-// Platform split:
-//
-//   - Windows: %AppData% (roaming).
-//   - macOS: ~/Library/Application Support.
-//   - Linux/BSD: XDG_CONFIG_HOME when the variable is set — even when it is
-//     empty, which yields "" — otherwise $HOME/.config; a missing HOME is an
-//     error.
+// On Linux/BSD an XDG_CONFIG_HOME that is set but empty yields "", not a fallback;
+// $HOME/.config is used only when the variable is unset, and a missing HOME is an
+// error.
 func ConfigHome() (string, error) {
 	if usesStdlibRoots() {
 		return os.UserConfigDir()

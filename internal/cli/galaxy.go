@@ -21,15 +21,11 @@ func renderBuilds(w io.Writer, rows []core.BuildRow) error {
 
 // renderManifest prints the fetched manifest as styled JSON.
 //
-// Three properties matter and are the reason this is not a bare Marshal:
-//
-//   - keys come out in byte order, which is what Go's map marshalling gives;
-//   - HTML escaping is OFF: the default would turn the "&" and "<" of a URL
-//     into \u0026 and \u003c;
-//   - the indentation is a tab and the document ends with a newline.
-//
-// Numbers are re-serialised from Go's float64 values, so values beyond 2^53 are
-// not reproduced exactly.
+// Three properties matter, which is why this is not a bare Marshal: keys come out
+// in byte order (Go's map marshalling), HTML escaping is OFF (the default would
+// turn a URL's "&" and "<" into \u0026 and \u003c), and the indentation is a tab
+// with a trailing newline. Numbers are re-serialised from Go's float64 values, so
+// values beyond 2^53 are not reproduced exactly.
 func renderManifest(w io.Writer, doc map[string]any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "\t")

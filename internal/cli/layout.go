@@ -90,17 +90,12 @@ func truncateVisible(s string, maxCells int) string {
 	return b.String()
 }
 
-// layoutFrame composes the frame's physical lines from the view model: the
-// two summary rows first, then the transient message row, then one row per
-// active task and — when the tasks do not fit — an overflow notice.
+// layoutFrame composes the frame's physical lines from the view model.
 //
-// The hard invariant: every returned line satisfies
-// visibleWidth <= width-1, and the row count never exceeds height-1 (the one
-// safety row keeps the last newline from scrolling, which would shift the
-// coordinator's row arithmetic). ALL rows — summary, message, tasks and the
-// overflow notice alike — draw from one budget, so the invariant holds at any
-// terminal height; a terminal too small even for the summary simply shows the
-// highest-priority rows that fit.
+// The hard invariant: every returned line satisfies visibleWidth <= width-1, and
+// the row count never exceeds height-1 (the one safety row keeps the last
+// newline from scrolling, which would shift the coordinator's row arithmetic).
+// ALL rows draw from one budget, so the invariant holds at any terminal height.
 func layoutFrame(vm viewModel, width, height int, bar func(cells int, fraction float64) string, unit uint32) []string {
 	maxCells := width - 1
 	maxRows := height - 1
@@ -169,9 +164,6 @@ func layoutFrame(vm viewModel, width, height int, bar func(cells int, fraction f
 //	…/Campaign/Shadow of Death/foo.h3m three components, full names
 //	…/Shadow of Death/foo.h3m deepest dir + name
 //	foo.h3m last escape only; then truncated
-//
-// Compaction exists only because of width — a wide row never loses directory
-// semantics for looks, and a basename is never a normal-width result.
 func compactPath(path string, maxCells int) string {
 	if maxCells <= 0 {
 		return ""

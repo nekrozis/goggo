@@ -20,12 +20,10 @@ const totpCodeLength = 6
 
 // confirm asks a yes/no question on the error stream and reads one line.
 //
-// Only "y"/"Y"/"yes" — trimmed, case-insensitive — is a yes. A destructive run
-// must not be authorized by a stray keystroke or an empty line, which is what the
-// [y/N] default in the question says, and an answer that cannot be read at all is
-// a no for the same reason: when the front end cannot tell what the user meant,
-// the safe reading is "do not delete". That is also why this
-// returns no error: there is nothing to report that changes the outcome.
+// Only "y"/"Y"/"yes" — trimmed, case-insensitive — is a yes: a destructive run
+// must not be authorized by a stray keystroke or an empty line, and an answer
+// that cannot be read at all is a no for the same reason. That is also why this
+// returns no error.
 func (c *console) confirm(question string) bool {
 	fmt.Fprint(c.errOut, question)
 	answer, err := c.readLine()
@@ -51,16 +49,12 @@ func (c *console) PromptEmail() (string, error) {
 
 // PromptPassword asks for the account password.
 //
-// When the input is a real terminal the typed characters are hidden, using
-// golang.org/x/term (the only platform-portable way to do so). With an injected
-// reader — tests, pipes, redirection — there is no terminal to hide behind, so
-// the line is read normally and stays visible; that fallback is what keeps the
-// front end testable.
+// On a real terminal the typed characters are hidden with golang.org/x/term (the
+// only platform-portable way); with an injected reader the line is read normally
+// and stays visible, which keeps the front end testable.
 //
-// Abort limitation (documented, not hardened): term.ReadPassword restores the
-// terminal mode that was saved when it started. A Ctrl+C delivered in the
-// middle of the read can leave the console with echo switched off, because the
-// saved mode is the one that was already in effect.
+// A Ctrl+C during term.ReadPassword can leave the console with echo switched
+// off, because the mode it restores is the one that was already in effect.
 func (c *console) PromptPassword() (string, error) {
 	if fd, ok := c.terminalFd(); ok {
 		fmt.Fprint(c.errOut, "Password: ")
@@ -84,9 +78,6 @@ func (c *console) PromptPassword() (string, error) {
 // to do, reads the answer and hands it back to webapi. The challenge itself is
 // consumed exactly once by webapi, so a failure here is reported rather than
 // retried with the same challenge.
-//
-// The wording: "Security code: " for the second-step code and "Authenticator
-// security code: " for the TOTP code, plus the four-line browser block.
 func (c *console) ResolveChallenge(ctx context.Context, web *webapi.Client, ch *webapi.LoginChallenge) error {
 	switch ch.Kind {
 	case webapi.ChallengeTwoFactor:

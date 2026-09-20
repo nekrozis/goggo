@@ -9,14 +9,10 @@ import (
 // RetryPolicyFor maps the retry configuration the website endpoints need onto a
 // transport policy.
 //
-// Retries are capped at 3, so the number of attempts is min(3, retries) + 1.
-// Wait is forwarded unchanged as a duration; the caller owns the unit conversion
-// from its own configuration (the CLI's --wait is milliseconds — see
-// core.retryWait for the evidence).
-//
-// ShouldRetry is deliberately left zero so httpx.New keeps ownership of the
-// default predicate. This function maps the website retry rule only; it is not
-// a general builder for httpx configuration.
+// Retries are capped at 3, so attempts are min(3, retries) + 1. Wait is forwarded
+// unchanged: the caller owns the unit conversion (the CLI's --wait is
+// milliseconds — see core.retryWait). ShouldRetry is deliberately left zero so
+// httpx.New keeps ownership of the default predicate.
 func RetryPolicyFor(retries int, wait time.Duration) httpx.RetryPolicy {
 	switch {
 	case retries < 0:

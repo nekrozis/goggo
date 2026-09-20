@@ -48,13 +48,11 @@ func (c PersistentCookie) unrepresentable() bool {
 
 // Parse decodes a cookies.txt document into its rows.
 //
-// Tolerance: comment lines and blank lines are skipped, and malformed rows
-// (wrong column count, a non-TRUE/FALSE flag, a non-integer expiry, a negative
-// expiry, or extra columns caused by a tab inside the value) are skipped instead
-// of failing the whole parse. A row whose domain column starts with the
+// Tolerance: comment lines and blank lines are skipped, and a malformed row is
+// skipped rather than failing the whole parse. A domain column starting with the
 // "#HttpOnly_" prefix yields HttpOnly=true with the prefix stripped; any other
-// "#"-prefixed row is treated as a comment. Both LF and CRLF line endings are
-// accepted. The function never fails and never panics on arbitrary input.
+// "#"-prefixed row is a comment. Both LF and CRLF line endings are accepted, and the
+// function never fails and never panics on arbitrary input.
 func Parse(data []byte) []PersistentCookie {
 	var out []PersistentCookie
 	for _, raw := range strings.Split(string(data), "\n") {

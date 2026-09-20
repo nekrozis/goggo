@@ -10,16 +10,11 @@ import (
 // against a transport it controls and a front end can poll the download
 // progress it asked for.
 //
-// It is a construction-time seam, not runtime configuration and not a client
-// container: the network exit is replaceable and the progress surface is handed
-// in, and nothing else leaves the caller's control. The transport, the webapi
-// client and the Galaxy client stay built here, from the caller's
-// configuration, because handing them in prebuilt would let a caller pair a
-// webapi client with a different transport than the cookie jar this package
-// persists through, and neither client exposes an interface to fake — a
-// rewriting RoundTripper already covers every offline scenario.
-//
-// Fields are added only together with their first consumer.
+// It is a construction-time seam: the network exit is replaceable and the
+// progress surface is handed in, and nothing else leaves the caller's control.
+// The transport, the webapi client and the Galaxy client stay built here,
+// because handing them in prebuilt would let a caller pair a webapi client with
+// a different transport than the cookie jar this package persists through.
 type Dependencies struct {
 	// HTTPTransport, when non-nil, replaces the network exit of the transport
 	// OpenWith builds. The cookie jar, the cookie file, the retry policy and the

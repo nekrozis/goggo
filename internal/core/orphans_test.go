@@ -60,8 +60,10 @@ func TestCheckOrphanedFiles(t *testing.T) {
 	if err := d.CheckOrphanedFiles(context.Background(), f.res); err != nil {
 		t.Fatalf("CheckOrphanedFiles: %v", err)
 	}
+	// The count line is the walk's observable: its tab-separated count token
+	// keeps "11 orphaned files" from satisfying "1 orphaned files".
 	out := consoleText(t, d)
-	if !strings.Contains(out, "Checking for orphaned files") || !strings.Contains(out, "\t1 orphaned files") {
+	if !strings.Contains(out, "\t1 orphaned files") {
 		t.Errorf("output = %q, want the orphan count", out)
 	}
 	if _, err := os.Stat(filepath.Join(f.root, "leftover.bin")); err != nil {

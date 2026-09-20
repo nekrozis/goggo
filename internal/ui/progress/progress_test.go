@@ -100,6 +100,9 @@ func TestUnicodePartialIndexMidBar(t *testing.T) {
 	}
 }
 
+// Contract (format): the coloured bar is consumed as bytes by the terminal and
+// must match the C++ implementation's escape sequences exactly — the name of
+// this test is the stated goal — so the assertion stays byte-exact.
 func TestColorsMatchCPlusPlusSequences(t *testing.T) {
 	simple := NewBar(false, true)
 	if got := simple.Create(2, 0); got != "\x1b[1;37m[\x1b[1;34m \x1b[0m \x1b[1;37m]\x1b[0m" {

@@ -70,20 +70,13 @@ func TestParseRemoteXMLDefault(t *testing.T) {
 
 // TestSubdirDefaults locks the values applyParseDefaults writes for the six
 // domains: the parsed default is what the download path actually uses, so this
-// is the CLI's half of the config table's defaults.
+// is the CLI's half of the config table's defaults. The expected values are the
+// table's own, so a change of default is a change to config, not to the test.
 func TestSubdirDefaults(t *testing.T) {
 	inv := mustParse(t, "download", "some_game")
-	want := map[string]string{
-		"installers":     "",
-		"extras":         "extras",
-		"patches":        "patches",
-		"language-packs": "languagepacks",
-		"dlc":            "dlc/%dlcname%",
-		"game":           "%gamename%",
-	}
-	for name, expected := range want {
-		if got := subdirField(inv.cfg.Directories, name); got != expected {
-			t.Errorf("parsed default --subdir-%s = %q, want %q", name, got, expected)
+	for _, opt := range config.SubdirOptions {
+		if got := subdirField(inv.cfg.Directories, opt.Name); got != opt.Default {
+			t.Errorf("parsed default --subdir-%s = %q, want the config table's %q", opt.Name, got, opt.Default)
 		}
 	}
 }
@@ -200,14 +193,21 @@ func TestOutputFileRules(t *testing.T) {
 
 // TestDownloadTopicsNameTheirTemplates applies the rule that a whitelist the
 // user cannot read is a whitelist the user cannot use to the six subdir domains:
-// each option's help must list exactly its own templates.
+// each option's help must list exactly its own templates. The usage lines, the
+// subcommand name and the sentences the topic carries are derived from the
+// parser's own data — the tree, the arity table and the option table — so the
+// test states what the topic must say, not how it spells it.
 func TestDownloadTopicsNameTheirTemplates(t *testing.T) {
+	download := topicNode(t, "download")
 	_, topic, _ := run(t, "", "download", "-h")
-	if !strings.Contains(topic, "Usage: goggo download <game>...") {
-		t.Errorf("download topic is missing the variadic usage line: %q", topic)
+
+	if want := commandUsageLine(t, "download"); !strings.Contains(topic, want) {
+		t.Errorf("download topic is missing its usage line %q: %q", want, topic)
 	}
-	if !strings.Contains(topic, "file") {
-		t.Errorf("download topic must list the file subcommand: %q", topic)
+	for _, child := range download.children {
+		if !topicRow(topic, child) {
+			t.Errorf("download topic must list the %s subcommand (%q): %q", child.name, child.summary, topic)
+		}
 	}
 	for _, opt := range config.SubdirOptions {
 		if !strings.Contains(topic, "--subdir-"+opt.Name) {
@@ -220,15 +220,26 @@ func TestDownloadTopicsNameTheirTemplates(t *testing.T) {
 		}
 	}
 	// The aggregate contract belongs in the topic a reader trusts before
-	// running a bulk transfer.
-	if !strings.Contains(topic, "exits 1") {
-		t.Errorf("download topic must state the aggregate exit: %q", topic)
+	// running a bulk transfer: the node's own notes.
+	for _, note := range nodeNotes(t, "download") {
+		if !strings.Contains(topic, note) {
+			t.Errorf("download topic must state %q: %q", note, topic)
+		}
 	}
 
+	file := topicNode(t, "download", "file")
 	_, fileTopic, _ := run(t, "", "download", "file", "-h")
-	for _, want := range []string{"Usage: goggo download file <spec>...", "--output-file", "gogdownloader://", "fileid"} {
-		if !strings.Contains(fileTopic, want) {
-			t.Errorf("download file topic is missing %s: %q", want, fileTopic)
+	if want := commandUsageLine(t, "download", "file"); !strings.Contains(fileTopic, want) {
+		t.Errorf("download file topic is missing its usage line %q: %q", want, fileTopic)
+	}
+	for _, note := range nodeNotes(t, "download", "file") {
+		if !strings.Contains(fileTopic, note) {
+			t.Errorf("download file topic must state %q: %q", note, fileTopic)
+		}
+	}
+	for _, long := range nodeOptionLongs(file) {
+		if !strings.Contains(fileTopic, long) {
+			t.Errorf("download file topic is missing %s: %q", long, fileTopic)
 		}
 	}
 }

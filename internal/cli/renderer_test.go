@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -283,15 +284,22 @@ func TestStopFinalizesOnce(t *testing.T) {
 // completion count — a canceled run's active tasks were interrupted, not
 // finished — and a zero-transfer completed run says nothing (the plan's "Nothing
 // to download." already spoke for it).
+//
+// The two counts are given different values on purpose: each line must carry its
+// own number, so a run that reported one number on both lines fails here.
 func TestFinalLines(t *testing.T) {
-	if got := finalLines(stopCompleted, runStats{completed: 3}, ""); len(got) != 1 || !strings.Contains(got[0], "3") {
-		t.Errorf("completed = %q, want the count", got)
+	stats := runStats{completed: 3}
+	if got := finalLines(stopCompleted, stats, ""); len(got) != 1 || !strings.Contains(got[0], strconv.Itoa(stats.completed)) {
+		t.Errorf("completed = %q, want the count %d", got, stats.completed)
 	}
 	// The resume aggregate line rides the terminal state: markers arrive
 	// mid-run, so the count lands beside the completion line.
-	got := finalLines(stopCompleted, runStats{completed: 2, resumed: 2}, "")
-	if len(got) != 2 || !strings.Contains(got[0], "Resuming: 2") {
-		t.Errorf("completed+resumed = %q, want the resume line before the count", got)
+	both := runStats{completed: 2, resumed: 5}
+	got := finalLines(stopCompleted, both, "")
+	if len(got) != 2 ||
+		!strings.Contains(got[0], strconv.Itoa(both.resumed)) ||
+		!strings.Contains(got[1], strconv.Itoa(both.completed)) {
+		t.Errorf("completed+resumed = %q, want the resume line (%d) before the completion count (%d)", got, both.resumed, both.completed)
 	}
 	if got := finalLines(stopCompleted, runStats{}, ""); got != nil {
 		t.Errorf("zero-transfer completed = %q, want no final line", got)

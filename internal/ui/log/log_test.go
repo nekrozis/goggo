@@ -57,6 +57,9 @@ func TestFormatIncludesPrefixOnlyWhenSet(t *testing.T) {
 	}
 }
 
+// Contract (format): the SGR spellings and their exact placement around the
+// timestamp and the text are the bytes a terminal consumes, so the four
+// type-to-colour wrappings are pinned byte-exactly.
 func TestFormatColorWrappingPerType(t *testing.T) {
 	cases := []struct {
 		name string
@@ -79,6 +82,9 @@ func TestFormatColorWrappingPerType(t *testing.T) {
 	}
 }
 
+// Contract (format): the timestamp layout is itself the interface — boost's
+// to_simple_string spelling, English short month and 24h clock — so the prefix
+// is pinned byte-exactly.
 func TestFormatTimeLayoutMatchesBoostSimple(t *testing.T) {
 	// boost to_simple_string prints "2026-Sep-09 23:46:13"; the layout must
 	// render English short month names and 24h time.

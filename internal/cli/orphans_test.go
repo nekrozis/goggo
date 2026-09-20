@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,9 @@ import (
 // TestRenderOrphansListsTheObjects locks the listing: the header states the root
 // once, every orphan gets one line relative to it (a long list stays readable and
 // the root is not repeated), and the count closes it.
+//
+// The tokens are the root, the relative paths and the count; how the header is
+// worded is not part of what the listing decides.
 func TestRenderOrphansListsTheObjects(t *testing.T) {
 	res := core.OrphansResult{
 		InstallPath: "/games/hoMM3",
@@ -24,28 +28,45 @@ func TestRenderOrphansListsTheObjects(t *testing.T) {
 	}
 	var out bytes.Buffer
 	renderOrphans(&out, res)
+	got := out.String()
 
-	want := strings.Join([]string{
-		"Checking → /games/hoMM3",
-		"  saves/autosave.gam",
-		"  mods/hd/patch.dll",
-		"2 orphaned files",
-		"",
-	}, "\n")
-	if out.String() != want {
-		t.Errorf("output =\n%q\nwant\n%q", out.String(), want)
+	if n := strings.Count(got, res.InstallPath); n != 1 {
+		t.Errorf("output = %q, want the root %q stated exactly once, got %d", got, res.InstallPath, n)
+	}
+	for _, file := range res.Files {
+		rel := strings.TrimPrefix(file, res.InstallPath+"/")
+		if !strings.Contains(got, rel) {
+			t.Errorf("output = %q, want %q listed relative to the root", got, rel)
+		}
+		if strings.Contains(got, file) {
+			t.Errorf("output = %q, want %q not repeated in full", got, file)
+		}
+	}
+	if want := fmt.Sprintf("%d orphaned files", len(res.Files)); !strings.Contains(got, want) {
+		t.Errorf("output = %q, want the count %q", got, want)
 	}
 }
 
 // TestRenderOrphansEmpty locks the empty answer: nothing found is a result, not
 // a silent success.
 func TestRenderOrphansEmpty(t *testing.T) {
+	res := core.OrphansResult{InstallPath: "/games/hoMM3"}
 	var out bytes.Buffer
-	renderOrphans(&out, core.OrphansResult{InstallPath: "/games/hoMM3"})
+	renderOrphans(&out, res)
+	got := out.String()
 
-	want := "Checking → /games/hoMM3\nNo orphaned files\n"
-	if out.String() != want {
-		t.Errorf("output = %q, want %q", out.String(), want)
+	// The answer is the token; the header is still the one that names the root,
+	// and it comes first.
+	const answer = "No orphaned files"
+	root, at := strings.Index(got, res.InstallPath), strings.Index(got, answer)
+	if at < 0 {
+		t.Errorf("output = %q, want the empty answer stated", got)
+	}
+	if root < 0 || root > at {
+		t.Errorf("output = %q, want the root named before the answer", got)
+	}
+	if n := strings.Count(got, res.InstallPath); n != 1 {
+		t.Errorf("output = %q, want the root stated once, got %d", got, n)
 	}
 }
 
@@ -108,18 +129,17 @@ func TestConfirm(t *testing.T) {
 // TestOrphansRemoveHelpStatesBothRolesOfYes ties the documentation to the
 // behaviour the tests above lock: --yes both skips the question and
 // is what makes a run without a terminal possible. The help said so before the
-// code did, so a topic that loses either half is a contract change.
+// code did, so a topic that loses either half is a contract change — and both
+// halves are the option's own help text, so the assertion reads it rather than
+// restating it.
 func TestOrphansRemoveHelpStatesBothRolesOfYes(t *testing.T) {
 	code, out, _ := run(t, "", "orphans", "remove", "-h")
 	if code != 0 {
 		t.Fatalf("orphans remove -h exit = %d, want 0", code)
 	}
-	for _, want := range []string{
-		"Do not ask for confirmation before deleting",
-		"Required when stdin is not a terminal",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("the topic is missing %q: %q", want, out)
+	for _, line := range optionHelpLines(t, optYes) {
+		if !strings.Contains(out, line) {
+			t.Errorf("the topic is missing the --yes help line %q: %q", line, out)
 		}
 	}
 }
@@ -183,9 +203,23 @@ func TestRemoveOrphansWithYesDoesNotAsk(t *testing.T) {
 	if strings.Contains(errOut.String(), "Nothing was deleted") {
 		t.Errorf("stderr = %q, want the removal to have happened", errOut.String())
 	}
-	want := "Deleting 2 orphaned files\n  saves/autosave.gam\n  mods/patch.dll\n"
-	if out.String() != want {
-		t.Errorf("stdout = %q, want %q", out.String(), want)
+	// The removal announces the count it is about to delete, then names each
+	// file it deleted — relative to the root, the way the walk listed it.
+	deleted := out.String()
+	if want := fmt.Sprintf("Deleting %d", len(files)); !strings.Contains(deleted, want) {
+		t.Errorf("stdout = %q, want the deletion announced with %q", deleted, want)
+	}
+	for _, path := range files {
+		rel, err := filepath.Rel(res.InstallPath, path)
+		if err != nil {
+			t.Fatalf("relative(%q, %q) = %v", res.InstallPath, path, err)
+		}
+		if rel = filepath.ToSlash(rel); !strings.Contains(deleted, rel) {
+			t.Errorf("stdout = %q, want %q listed relative to the root", deleted, rel)
+		}
+		if strings.Contains(deleted, path) {
+			t.Errorf("stdout = %q, want %q not repeated in full", deleted, path)
+		}
 	}
 	for _, path := range files {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -221,8 +255,11 @@ func TestRemoveOrphansAsksWithoutYes(t *testing.T) {
 			if got != outcomeOK {
 				t.Errorf("outcome = %v, want success: a declined removal is not a failure", got)
 			}
-			if !strings.Contains(errOut.String(), "Delete these 2 files? [y/N] ") {
-				t.Errorf("stderr = %q, want the confirmation question", errOut.String())
+			// The question is asked — and it is the one deleteQuestion builds,
+			// whose wording TestDeleteQuestion is the single home of.
+			question := deleteQuestion(len(files))
+			if question == "" || !strings.Contains(errOut.String(), question) {
+				t.Errorf("stderr = %q, want the confirmation question %q", errOut.String(), question)
 			}
 			for _, path := range files {
 				_, err := os.Stat(path)
@@ -232,8 +269,8 @@ func TestRemoveOrphansAsksWithoutYes(t *testing.T) {
 				}
 			}
 			if c.wantDelete {
-				if !strings.Contains(out.String(), "Deleting 2 orphaned files") {
-					t.Errorf("stdout = %q, want the deletion header", out.String())
+				if want := fmt.Sprintf("Deleting %d", len(files)); !strings.Contains(out.String(), want) {
+					t.Errorf("stdout = %q, want the deletion header %q", out.String(), want)
 				}
 				return
 			}

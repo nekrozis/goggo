@@ -474,6 +474,26 @@ func TestBuildPlanBlacklistFiltersTasks(t *testing.T) {
 	}
 }
 
+// planMessageHas reports whether one recorded plan message carries every token.
+// The tokens are the contract — the decision word and the values it reports —
+// and the sentence around them is not. A token with a leading space pins a
+// count as a whole one, so "12 files" cannot satisfy " 2 files".
+func planMessageHas(res PlanResult, tokens ...string) bool {
+	for _, m := range res.Messages {
+		all := true
+		for _, token := range tokens {
+			if !strings.Contains(m.Text, token) {
+				all = false
+				break
+			}
+		}
+		if all {
+			return true
+		}
+	}
+	return false
+}
+
 // planMessageTexts joins the plan's notice lines for assertion convenience.
 func planMessageTexts(res PlanResult) string {
 	var b strings.Builder
@@ -537,10 +557,10 @@ func TestBuildPlanSkipAggregation(t *testing.T) {
 	}
 
 	msgs := planMessageTexts(res)
-	if !strings.Contains(msgs, "Installing → "+installPath) {
-		t.Errorf("messages = %q, want the install-root header once", msgs)
+	if !planMessageHas(res, "Installing", installPath) {
+		t.Errorf("messages = %q, want the install-root header naming %s", msgs, installPath)
 	}
-	if !strings.Contains(msgs, "Already up to date: 2 files") {
+	if !planMessageHas(res, "Already up to date", " 2 files") {
 		t.Errorf("messages = %q, want the aggregate skip count", msgs)
 	}
 	if strings.Contains(msgs, "a.bin: OK") || strings.Contains(msgs, "b.bin: OK") {
@@ -602,10 +622,10 @@ func TestBuildPlanNothingToDownload(t *testing.T) {
 		t.Fatalf("tasks/skipped = %d/%d, want 0 tasks and 1 skipped", len(res.Plan.Tasks), len(res.Skipped))
 	}
 	msgs := planMessageTexts(res)
-	if !strings.Contains(msgs, "Already up to date: 1 files") || !strings.Contains(msgs, "Nothing to download.") {
-		t.Errorf("messages = %q, want both aggregate sentences", msgs)
+	if !planMessageHas(res, "Already up to date", " 1 files") || !planMessageHas(res, "Nothing to download") {
+		t.Errorf("messages = %q, want both aggregate lines", msgs)
 	}
-	if strings.Contains(msgs, "Total size installed: ") && !strings.Contains(msgs, "0.00 B") {
+	if !planMessageHas(res, "Total size installed", "0.00 B") {
 		t.Errorf("messages = %q, want a zero download total", msgs)
 	}
 }

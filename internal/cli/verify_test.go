@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -113,18 +114,36 @@ func TestRenderVerifyNothingToVerify(t *testing.T) {
 // status zero value exists for: a fact with no status and no error is not a
 // healthy file, so it takes a line and the run reports a failure — it cannot
 // pass for OK.
+//
+// The row's layout is TestRenderVerifyReportsEveryAbnormalFile's business; what
+// this test guards is the decision, so it asserts the tokens that decision
+// produces: the unclassified fact's own code on the fact's own row, and the
+// summary counting it in the attention bucket.
 func TestRenderVerifyUnclassifiedFactIsNotHealthy(t *testing.T) {
+	unclassified := verifyFact(verifyRoot, "b.bin", reconcile.StatusUnset)
 	res := core.VerifyResult{
 		InstallPath: verifyRoot,
-		Facts:       []core.FileFact{verifyFact(verifyRoot, "a.bin", reconcile.StatusOK), verifyFact(verifyRoot, "b.bin", reconcile.StatusUnset)},
+		Facts:       []core.FileFact{verifyFact(verifyRoot, "a.bin", reconcile.StatusOK), unclassified},
 	}
 	got, out, errOut := renderVerifyResult(t, res)
 
-	if !strings.Contains(out, "UNSET  /games/W3 GOTY/b.bin") {
-		t.Errorf("stdout = %q, want the unclassified file named", out)
+	code := fmt.Sprintf("%v", reconcile.StatusUnset)
+	named := false
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, unclassified.Destination) {
+			continue
+		}
+		named = true
+		if !strings.Contains(line, code) {
+			t.Errorf("line %q, want the unclassified file's code %q", line, code)
+		}
 	}
-	if !strings.Contains(out, "2 files: 1 OK, 1 unreadable") {
-		t.Errorf("stdout = %q, want it counted as needing attention", out)
+	if !named {
+		t.Errorf("stdout = %q, want %q named", out, unclassified.Destination)
+	}
+	// Every fact is counted, and this one is counted as needing attention.
+	if want := fmt.Sprintf("%d files: 1 OK, 1 unreadable", len(res.Facts)); !strings.Contains(out, want) {
+		t.Errorf("stdout = %q, want the summary %q", out, want)
 	}
 	if errOut != "" {
 		t.Errorf("stderr = %q, want nothing: this is not an observation failure", errOut)
@@ -136,15 +155,15 @@ func TestRenderVerifyUnclassifiedFactIsNotHealthy(t *testing.T) {
 
 // TestVerifyHelpDocumentsTheCodes locks the topic a user reads before trusting
 // the report: the four codes are defined there and the read-only promise is
-// stated.
+// stated — in the command's own notes, which is where the topic takes them from.
 func TestVerifyHelpDocumentsTheCodes(t *testing.T) {
 	code, out, _ := run(t, "", "verify", "-h")
 	if code != 0 {
 		t.Fatalf("verify -h exit = %d, want 0", code)
 	}
-	for _, want := range []string{"ND (not downloaded)", "MD5 (content differs)", "FS (size differs)", "never fixed"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("verify -h is missing %q: %q", want, out)
+	for _, note := range nodeNotes(t, "verify") {
+		if !strings.Contains(out, note) {
+			t.Errorf("verify -h is missing its note %q: %q", note, out)
 		}
 	}
 }

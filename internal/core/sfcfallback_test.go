@@ -115,7 +115,9 @@ func TestInstallDownloadsAContainerMemberTheContainerCannotSupply(t *testing.T) 
 	if !strings.Contains(console.errOut.String(), "container content does not match the manifest hash") {
 		t.Errorf("the refusal must be reported on the error stream: %q", console.errOut.String())
 	}
-	if !strings.Contains(out, "Checking for orphaned files") {
+	// The orphan phase ran and found nothing to report, which is the token that
+	// says the refusal did not abort the install.
+	if !strings.Contains(out, "\t0 orphaned files") {
 		t.Errorf("the install must continue to the orphan check: %q", out)
 	}
 }

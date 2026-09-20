@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"sort"
 	"strings"
 	"testing"
 
@@ -17,20 +18,150 @@ func run(t *testing.T, stdin string, args ...string) (code int, stdout, stderr s
 	return code, out.String(), errOut.String()
 }
 
+// The topics are generated from the parser's own tables (help.go), so the help
+// assertions below read those tables instead of restating what they render: a
+// change to the vocabulary is a change to the data, not to the test.
+
+// topicNode resolves a topic path to the node the help renders it from.
+func topicNode(t *testing.T, path ...string) commandNode {
+	t.Helper()
+	node, ok := resolveTopic(path)
+	if !ok {
+		t.Fatalf("no topic %q in the command tree", strings.Join(path, " "))
+	}
+	return node
+}
+
+// nodeNotes is a node's notes, the sentences its topic prints between the
+// summary and the options. A node that declares none has nothing for a topic to
+// print, so a caller's loop would pass without checking anything: that is a
+// failure, not a pass.
+func nodeNotes(t *testing.T, path ...string) []string {
+	t.Helper()
+	node := topicNode(t, path...)
+	if len(node.notes) == 0 {
+		t.Fatalf("topic %q declares no notes for its help to print", strings.Join(path, " "))
+	}
+	return node.notes
+}
+
+// commandUsageLine derives the usage line help.go composes for a command:
+// ProgramName, the path and the arity placeholder. It is derived here from the
+// same three inputs, so a wrong path or arity is still caught while a change to
+// the assembler needs no test edit.
+func commandUsageLine(t *testing.T, path ...string) string {
+	t.Helper()
+	node := topicNode(t, path...)
+	line := "Usage: " + config.ProgramName + " " + strings.Join(path, " ")
+	switch want, count := commandArity(node.id); {
+	case count == -2:
+		line += " [" + want + "]..."
+	case count < 0:
+		line += " <" + want + ">..."
+	case count > 0:
+		line += " <" + want + ">"
+	}
+	return line
+}
+
+// namespaceUsageLine derives the usage line of a pure namespace topic.
+func namespaceUsageLine(path ...string) string {
+	return "Usage: " + config.ProgramName + " " + strings.Join(path, " ") + " <subcommand> [options]"
+}
+
+// optionLong is one option's long name as the help spells it.
+func optionLong(id optionID) string { return "--" + optionName(id) }
+
+// optionLongs lists the long names of a set of options in table order — the
+// order optionLines renders them in.
+func optionLongs(ids optionSet) []string {
+	var longs []string
+	for i := range optionTable {
+		spec := &optionTable[i]
+		if spec.hidden || !ids.contains(spec.id) {
+			continue
+		}
+		longs = append(longs, optionLong(spec.id))
+	}
+	return longs
+}
+
+// nodeOptionLongs lists every option a command's topic prints: the shared set
+// plus the node's own, in table order.
+func nodeOptionLongs(node commandNode) []string {
+	var longs []string
+	for i := range optionTable {
+		spec := &optionTable[i]
+		if spec.hidden || !node.accepts(spec.id) {
+			continue
+		}
+		longs = append(longs, optionLong(spec.id))
+	}
+	return longs
+}
+
+// topicRow reports whether the topic lists one subcommand: it looks for a line
+// that begins with the subcommand's name and carries its summary. Reading the
+// line that way rather than searching the whole topic for the name is what makes
+// the check mean "the topic lists this subcommand" — a name as short as "file"
+// also occurs in the surrounding sentences.
+func topicRow(topic string, child commandNode) bool {
+	for _, line := range strings.Split(topic, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, child.name+" ") && strings.Contains(trimmed, child.summary) {
+			return true
+		}
+	}
+	return false
+}
+
+// optionSpecByID finds the option table entry an id names.
+func optionSpecByID(t *testing.T, id optionID) *optionSpec {
+	t.Helper()
+	for i := range optionTable {
+		if optionTable[i].id == id {
+			return &optionTable[i]
+		}
+	}
+	t.Fatalf("option %d is not in the option table", id)
+	return nil
+}
+
+// optionHelpLines is an option's help as a topic prints it: the summary line
+// plus the lines of its longer detail. An option that declares no help has
+// nothing for a topic to print, so a caller's loop would pass without checking
+// anything: that is a failure, not a pass.
+func optionHelpLines(t *testing.T, id optionID) []string {
+	t.Helper()
+	spec := optionSpecByID(t, id)
+	if spec.summary == "" || spec.detail == "" {
+		t.Fatalf("--%s declares no help for its topic to print", spec.long)
+	}
+	lines := []string{spec.summary}
+	for _, line := range strings.Split(spec.detail, "\n") {
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
 // TestRunHelpAndVersion covers the two meta answers, which run before any
 // session work (D18). The help is generated from the parser's tables, so it
 // lists the command surface rather than a hand-kept option list.
 func TestRunHelpAndVersion(t *testing.T) {
+	// The root topic opens with the usage line, which names the program.
+	usagePrefix := "Usage: " + config.ProgramName + " "
 	for _, flag := range []string{"--help", "-h"} {
 		code, out, errOut := run(t, "", flag)
 		if code != 0 {
 			t.Errorf("%s exit = %d, want 0", flag, code)
 		}
-		if !strings.HasPrefix(out, "Usage: ") {
+		if !strings.HasPrefix(out, usagePrefix) {
 			t.Errorf("%s output must start with the usage line, got %q", flag, out)
 		}
-		if !strings.Contains(out, "Usage: ") || !strings.Contains(out, "Commands:") {
-			t.Errorf("%s output is missing the surface: %q", flag, out)
+		if !strings.Contains(out, "Commands:") {
+			t.Errorf("%s output is missing the command surface: %q", flag, out)
 		}
 		if errOut != "" {
 			t.Errorf("%s stderr = %q", flag, errOut)
@@ -57,7 +188,7 @@ func TestRunHelpAndVersion(t *testing.T) {
 	// A bare invocation is a usage failure: it shows the surface and does not
 	// look like a successful run.
 	code, out, errOut := run(t, "")
-	if code != 2 || out != "" || !strings.Contains(errOut, "Usage: ") {
+	if code != 2 || out != "" || !strings.Contains(errOut, usagePrefix) {
 		t.Errorf("bare invocation = %d/%q/%q, want a usage failure on stderr", code, out, errOut)
 	}
 }
@@ -277,26 +408,58 @@ func TestRunMalformedTargetFailsOffline(t *testing.T) {
 
 // TestRunHelpListsTheCommandSurface keeps the help in step with the parser:
 // every command and every shared option the CLI accepts is listed, and nothing
-// it removed is (D14).
+// it removed is (D14). The names come from the tables the help is generated
+// from, so the surface is compared with itself rather than with a second copy.
 func TestRunHelpListsTheCommandSurface(t *testing.T) {
 	_, out, _ := run(t, "", "--help")
-	for _, want := range []string{
-		"auth", "login", "logout", "status",
-		"list", "games", "tags", "wishlist",
-		"show", "builds", "manifest", "cdns",
-		"install", "verify", "orphans", "check", "remove",
-		"help", "version",
-		// The root topic shows the shared options; a command's own options
-		// (--threads, --directory,...) belong to its topic.
-		"--verbose", "--no-color", "--no-unicode", "--unit-format",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("--help output does not mention %s: %q", want, out)
+
+	// Every command and subcommand of the tree, meta commands included, must be
+	// reachable from the root topic.
+	for _, node := range append(append([]commandNode{}, commandTree...), metaCommands...) {
+		names := []string{node.name}
+		for _, child := range node.children {
+			names = append(names, child.name)
+		}
+		for _, name := range names {
+			if !strings.Contains(out, name) {
+				t.Errorf("--help output does not mention the %s command: %q", name, out)
+			}
 		}
 	}
-	for _, gone := range []string{"--galaxy-install", "--check-orphans", "--download", "--repair"} {
-		if strings.Contains(out, gone) {
-			t.Errorf("--help still advertises the removed %s: %q", gone, out)
+
+	// The root topic shows the shared options; a command's own options
+	// (--threads, --directory,...) belong to its topic.
+	for _, long := range optionLongs(sharedOptions) {
+		if !strings.Contains(out, long) {
+			t.Errorf("--help output does not mention the shared %s: %q", long, out)
+		}
+	}
+
+	// Nothing the parser deliberately dropped is advertised again. It could come
+	// back two ways: as text in the topic, or as a shared option carrying its old
+	// name — the second is invisible to the first, because a live option's name
+	// is exactly what the topic is supposed to print.
+	live := make(map[string]bool, len(optionTable))
+	for i := range optionTable {
+		live[optionTable[i].long] = true
+	}
+	var removed []string
+	for name := range removedOptions {
+		if !live[name] {
+			removed = append(removed, name)
+		}
+	}
+	sort.Strings(removed)
+	for _, name := range removed {
+		if strings.Contains(out, "--"+name) {
+			t.Errorf("--help still advertises the removed --%s: %q", name, out)
+		}
+	}
+	for i := range optionTable {
+		if spec := &optionTable[i]; sharedOptions.contains(spec.id) {
+			if _, gone := removedOptions[spec.long]; gone {
+				t.Errorf("--help advertises the removed --%s as a shared option: %q", spec.long, out)
+			}
 		}
 	}
 }
@@ -305,10 +468,10 @@ func TestRunHelpListsTheCommandSurface(t *testing.T) {
 // not need a session: a command topic renders from the tree, and a removed
 // command is unknown (with the migration hint when one exists).
 func TestRunHelpForACommandAndRemovedCommands(t *testing.T) {
-	if code, out, _ := run(t, "", "help", "install"); code != 0 || !strings.Contains(out, "install") {
+	if code, out, _ := run(t, "", "help", "install"); code != 0 || !strings.Contains(out, commandUsageLine(t, "install")) {
 		t.Errorf("help install = %d/%q, want the topic", code, out)
 	}
-	if code, out, _ := run(t, "", "install", "-h"); code != 0 || !strings.Contains(out, "--platform") {
+	if code, out, _ := run(t, "", "install", "-h"); code != 0 || !strings.Contains(out, optionLong(optPlatform)) {
 		t.Errorf("install -h = %d/%q, want the command's options", code, out)
 	}
 	if code, _, errOut := run(t, "", "repair"); code != 2 || !strings.Contains(errOut, "unknown command") {
@@ -323,6 +486,11 @@ func TestRunHelpForACommandAndRemovedCommands(t *testing.T) {
 // so its malformed cases are covered by TestRunMalformedTargetFailsOffline.
 
 // TestRenderBuilds locks the listing line.
+//
+// Contract (format): the builds listing is one line per build with fixed labels
+// — index, version, date, generation, build id — and a user reads or copies that
+// line as it is, so the bytes of the line are the contract, not a set of tokens
+// that happen to appear in it.
 func TestRenderBuilds(t *testing.T) {
 	var buf bytes.Buffer
 	rows := []core.BuildRow{
@@ -418,43 +586,63 @@ func TestRenderNotice(t *testing.T) {
 // command topic lists exactly what that command accepts (with the sentences a
 // user needs), and the orphan topics carry the cross-platform warning before a
 // destructive run.
+//
+// Everything a topic states about a command is read from that command's own
+// node and options, so a topic that stops rendering one of them fails here
+// without the test keeping a second copy of the vocabulary.
 func TestRunHelpTopicsLockTheirContent(t *testing.T) {
 	_, root, _ := run(t, "", "--help")
 	if !strings.Contains(root, "Run 'goggo <command> -h'") {
 		t.Errorf("root help does not point at the per-command topics: %q", root)
 	}
-	if strings.Contains(root, "--threads") {
+	if strings.Contains(root, optionLong(optThreads)) {
 		t.Errorf("root help lists a command-only option: %q", root)
 	}
 
-	_, install, _ := run(t, "", "install", "-h")
-	for _, want := range []string{"Usage: goggo install <game>", "--threads", "--platform", "--install-dir", "--verbose"} {
-		if !strings.Contains(install, want) {
-			t.Errorf("install topic is missing %s: %q", want, install)
+	install := topicNode(t, "install")
+	_, installTopic, _ := run(t, "", "install", "-h")
+	if want := commandUsageLine(t, "install"); !strings.Contains(installTopic, want) {
+		t.Errorf("install topic is missing its usage line %q: %q", want, installTopic)
+	}
+	for _, long := range nodeOptionLongs(install) {
+		if !strings.Contains(installTopic, long) {
+			t.Errorf("install topic is missing %s: %q", long, installTopic)
 		}
 	}
 	// The install topic names the templates --install-dir accepts, because a
-	// whitelist the user cannot read is a whitelist the user cannot use.
+	// whitelist the user cannot read is a whitelist the user cannot use: the
+	// list is the resolver's, and the sentence stating that a template is
+	// matched whole is the option's own help line.
 	for _, template := range core.InstallSubdirTemplates {
-		if !strings.Contains(install, template) {
-			t.Errorf("install topic must name the %s template: %q", template, install)
+		if !strings.Contains(installTopic, template) {
+			t.Errorf("install topic must name the %s template: %q", template, installTopic)
 		}
 	}
-	if !strings.Contains(install, "matched whole") {
-		t.Errorf("install topic must explain that a template is not expanded inside a path: %q", install)
+	for _, line := range optionHelpLines(t, optInstallDir) {
+		if !strings.Contains(installTopic, line) {
+			t.Errorf("install topic must carry the --install-dir help line %q: %q", line, installTopic)
+		}
 	}
 
+	auth := topicNode(t, "auth")
 	_, authTopic, _ := run(t, "", "help", "auth")
-	for _, want := range []string{"login", "logout", "status", "subcommand"} {
-		if !strings.Contains(authTopic, want) {
-			t.Errorf("auth topic is missing %s: %q", want, authTopic)
+	if want := namespaceUsageLine("auth"); !strings.Contains(authTopic, want) {
+		t.Errorf("auth topic is missing its usage line %q: %q", want, authTopic)
+	}
+	for _, child := range auth.children {
+		if !topicRow(authTopic, child) {
+			t.Errorf("auth topic is missing the %s subcommand (%q): %q", child.name, child.summary, authTopic)
 		}
 	}
 
-	for _, args := range [][]string{{"orphans", "check", "-h"}, {"orphans", "remove", "-h"}} {
-		_, out, _ := run(t, "", args...)
-		if !strings.Contains(out, "other variants may be reported as orphaned") {
-			t.Errorf("%v does not carry the cross-platform warning: %q", args, out)
+	// The cross-platform warning a destructive run must state comes from the
+	// node's own notes.
+	for _, path := range [][]string{{"orphans", "check"}, {"orphans", "remove"}} {
+		_, out, _ := run(t, "", append(append([]string{}, path...), "-h")...)
+		for _, note := range nodeNotes(t, path...) {
+			if !strings.Contains(out, note) {
+				t.Errorf("%v does not carry the node's warning %q: %q", path, note, out)
+			}
 		}
 	}
 

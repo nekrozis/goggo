@@ -29,6 +29,9 @@ func TestVisibleWidth(t *testing.T) {
 	}
 }
 
+// Contract (format): truncation must not strand a colour state, and the only
+// way to state that is on the escape sequences themselves — the opening SGR
+// sequence and the reset are the bytes a terminal acts on.
 // TestTruncateVisiblePreservesANSI locks that truncation cuts printable cells
 // but never strands a color state: the reset sequence survives a cut.
 func TestTruncateVisiblePreservesANSI(t *testing.T) {

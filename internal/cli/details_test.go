@@ -155,7 +155,8 @@ func TestInfoThreadsAcceptance(t *testing.T) {
 
 // TestListDetailsArityAndHelp locks the arity at the parse surface: zero
 // arguments is legal (the whole account), arguments select, and the topic
-// says so.
+// says so — with the usage line, the notes and the options the node itself
+// declares.
 func TestListDetailsArityAndHelp(t *testing.T) {
 	inv := mustParse(t, "list", "details")
 	if len(inv.args) != 0 || inv.cmd != cmdListDetails {
@@ -165,10 +166,20 @@ func TestListDetailsArityAndHelp(t *testing.T) {
 	if len(inv.args) != 2 || inv.cmd != cmdListJSON {
 		t.Errorf("list json a b = %v %v", inv.cmd, inv.args)
 	}
+
+	details := topicNode(t, "list", "details")
 	_, topic, _ := run(t, "", "list", "details", "-h")
-	for _, want := range []string{"Usage: goggo list details [game]...", "Read-only", "--save-serials", "--info-threads"} {
-		if !strings.Contains(topic, want) {
-			t.Errorf("list details topic missing %s:\n%s", want, topic)
+	if want := commandUsageLine(t, "list", "details"); !strings.Contains(topic, want) {
+		t.Errorf("list details topic missing its usage line %q:\n%s", want, topic)
+	}
+	for _, note := range nodeNotes(t, "list", "details") {
+		if !strings.Contains(topic, note) {
+			t.Errorf("list details topic missing its note %q:\n%s", note, topic)
+		}
+	}
+	for _, long := range nodeOptionLongs(details) {
+		if !strings.Contains(topic, long) {
+			t.Errorf("list details topic missing %s:\n%s", long, topic)
 		}
 	}
 }

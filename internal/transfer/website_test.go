@@ -151,12 +151,24 @@ func (e *websiteEnv) eventsFor(base string) []Event {
 	return out
 }
 
-// hasMessage reports whether any recorded message contains needle. It lets
+// hasMessage reports whether one recorded message carries every token. It lets
 // a test ask the question once, instead of looping and then re-asking the
 // environment for the same list to build the failure message.
-func hasMessage(messages []string, needle string) bool {
+//
+// The tokens are the contract — the decision word and the file it names — and
+// the sentence around them is not: "Skipping complete file" and "setup.bin"
+// must land in the same message, while their punctuation and connectives are
+// free to change.
+func hasMessage(messages []string, tokens ...string) bool {
 	for _, text := range messages {
-		if strings.Contains(text, needle) {
+		all := true
+		for _, token := range tokens {
+			if !strings.Contains(text, token) {
+				all = false
+				break
+			}
+		}
+		if all {
 			return true
 		}
 	}
@@ -204,8 +216,8 @@ func TestRunWebsiteBlacklistSkip(t *testing.T) {
 	if hits := f.hitCount("/file"); hits != 0 {
 		t.Errorf("requests = %d, want none for a blacklisted file", hits)
 	}
-	if messages := env.messageTexts(); !hasMessage(messages, "Blacklisted file: ") {
-		t.Errorf("messages = %v, want the blacklist line", messages)
+	if messages := env.messageTexts(); !hasMessage(messages, "Blacklisted", filepath.Base(dest)) {
+		t.Errorf("messages = %v, want the blacklist line naming %s", messages, filepath.Base(dest))
 	}
 }
 
@@ -228,8 +240,8 @@ func TestRunWebsiteDirOccupiedSkip(t *testing.T) {
 	}, Options{Workers: 1}, env.deps); err != nil {
 		t.Fatalf("RunWebsite: %v", err)
 	}
-	if messages := env.messageTexts(); !hasMessage(messages, "is not directory, skipping file") {
-		t.Errorf("messages = %v, want the occupied-directory warning", messages)
+	if messages := env.messageTexts(); !hasMessage(messages, "not directory", "skipping file", filepath.Base(dest)) {
+		t.Errorf("messages = %v, want the occupied-directory warning naming %s", messages, filepath.Base(dest))
 	}
 }
 
@@ -307,8 +319,8 @@ func TestRunWebsiteChecksummedCompleteSkip(t *testing.T) {
 	if hits := f.hitCount("/file"); hits != 0 {
 		t.Errorf("requests = %d, want none for a complete file", hits)
 	}
-	if messages := env.messageTexts(); !hasMessage(messages, "Skipping complete file: setup.bin") {
-		t.Errorf("messages = %v, want the skip line", messages)
+	if messages := env.messageTexts(); !hasMessage(messages, "Skipping complete file", "setup.bin") {
+		t.Errorf("messages = %v, want the skip line naming setup.bin", messages)
 	}
 	// The remote checksum document is cached under the xml directory.
 	if _, err := os.Stat(filepath.Join(env.deps.XMLDirectory, "game", "setup.bin.xml")); err != nil {
@@ -487,8 +499,8 @@ func TestRunWebsiteRetryAndCleanupMatrix(t *testing.T) {
 			t.Fatalf("RunWebsite: %v", err)
 		}
 		assertFileContent(t, dest, "recovered")
-		if messages := env.messageTexts(); !hasMessage(messages, "Retry 1/3") {
-			t.Errorf("messages = %v, want the retry line", messages)
+		if messages := env.messageTexts(); !hasMessage(messages, "Retry", "1/3", filepath.Base(dest)) {
+			t.Errorf("messages = %v, want the retry line for %s", messages, filepath.Base(dest))
 		}
 	})
 }

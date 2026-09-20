@@ -234,7 +234,13 @@ func TestRunRetriesOnHashMismatch(t *testing.T) {
 
 	var retried bool
 	for _, ev := range obs.events {
-		if ev.Kind == EventMessageInfo && strings.Contains(ev.Text, "Retry 1/3") {
+		// The tokens, not the sentence: the retry word, the attempt out of the
+		// configured total, and the file the announcement names.
+		if ev.Kind != EventMessageInfo {
+			continue
+		}
+		if strings.Contains(ev.Text, "Retry") && strings.Contains(ev.Text, "1/3") &&
+			strings.Contains(ev.Text, filepath.Base(dest)) {
 			retried = true
 		}
 	}

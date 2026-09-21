@@ -47,12 +47,12 @@ func InstallSubdirNeedsProductInfo(template string) bool {
 // The template is matched WHOLE: it must be exactly one of the names in
 // InstallSubdirTemplates, so "--install-dir %install_dir%/data" keeps its
 // literal text rather than gaining an expanded prefix, and %product_id% is the
-// manifest's baseProductId rather than the id the caller requested. product may
-// be nil: a template that reads it is registered only when the document carries
-// a non-empty value, so a missing slug or title leaves the NAME ITSELF as the
-// result — "%title%/setup" must not collapse to "/setup". The function issues
-// no request; the caller decides whether to fetch the document.
-func ResolveInstallSubdir(template string, manifest, product map[string]any) (string, error) {
+// manifest's baseProductId rather than the id the caller requested. slug and title
+// are optional: a template that reads them is registered only when non-empty,
+// so a missing slug or title leaves the NAME ITSELF as the result — "%title%/setup"
+// must not collapse to "/setup". The function issues no request; the caller decides
+// whether to fetch the document.
+func ResolveInstallSubdir(template string, manifest map[string]any, slug, title string) (string, error) {
 	installDir, err := documentString(manifest, "installDirectory")
 	if err != nil {
 		return "", err
@@ -71,22 +71,12 @@ func ResolveInstallSubdir(template string, manifest, product map[string]any) (st
 		"%install_dir_stripped%": util.StrippedString(installDir),
 	}
 
-	if InstallSubdirNeedsProductInfo(template) && product != nil {
-		slug, err := documentString(product, "slug")
-		if err != nil {
-			return "", err
-		}
+	if InstallSubdirNeedsProductInfo(template) {
 		if slug != "" {
 			name["%gamename%"] = slug
 		}
-		title, err := documentString(product, "title")
-		if err != nil {
-			return "", err
-		}
 		if title != "" {
 			name["%title%"] = title
-		}
-		if title, ok := name["%title%"]; ok {
 			name["%title_stripped%"] = util.StrippedString(title)
 		}
 	}

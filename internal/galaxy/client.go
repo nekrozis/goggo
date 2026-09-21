@@ -1,6 +1,7 @@
 package galaxy
 
 import (
+	"bytes"
 	"compress/zlib"
 	"context"
 	"encoding/json"
@@ -75,20 +76,25 @@ func (c *Client) authorization() string {
 	return c.authz.AuthorizationValue()
 }
 
+// getResponseBytes fetches target and returns the raw response body.
+func (c *Client) getResponseBytes(ctx context.Context, target string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, httpx.SanitizeError(err)
+	}
+	if v := c.authorization(); v != "" {
+		req.Header.Set("Authorization", v)
+	}
+	return c.hx.DoBytesWithRetry(ctx, req)
+}
+
 // getResponse fetches target and returns the body.
 //
 // Acceptance of encodings is left to the transport, which asks for gzip and
 // decompresses it transparently. Setting Accept-Encoding here would DISABLE
 // Go's transparent decompression, so it is deliberately not touched.
 func (c *Client) getResponse(ctx context.Context, target string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return "", httpx.SanitizeError(err)
-	}
-	if v := c.authorization(); v != "" {
-		req.Header.Set("Authorization", v)
-	}
-	body, err := c.hx.DoBytesWithRetry(ctx, req)
+	body, err := c.getResponseBytes(ctx, target)
 	if err != nil {
 		return "", err
 	}
@@ -170,23 +176,18 @@ func decodeAny(body string) (any, error) {
 	return v, nil
 }
 
-// inflateZlibBody inflates body when it starts with a zlib stream header, and
+// inflateZlibBytes inflates b when it starts with a zlib stream header, and
 // reports whether it did.
-//
-// The header check limits the fallback to the compressed case: 0x78 followed by
-// 0x01, 0x5e, 0x9c or 0xda is a zlib stream with a 32 KiB window and the usual
-// compression levels. compress/zlib handles the zlib wrapper itself, so no header
-// is parsed out here.
-func inflateZlibBody(body string) ([]byte, bool) {
-	if len(body) < 2 || body[0] != 0x78 {
+func inflateZlibBytes(b []byte) ([]byte, bool) {
+	if len(b) < 2 || b[0] != 0x78 {
 		return nil, false
 	}
-	switch body[1] {
+	switch b[1] {
 	case 0x01, 0x5e, 0x9c, 0xda:
 	default:
 		return nil, false
 	}
-	zr, err := zlib.NewReader(strings.NewReader(body))
+	zr, err := zlib.NewReader(bytes.NewReader(b))
 	if err != nil {
 		return nil, false
 	}
@@ -196,4 +197,15 @@ func inflateZlibBody(body string) ([]byte, bool) {
 		return nil, false
 	}
 	return plain, true
+}
+
+// inflateZlibBody inflates body when it starts with a zlib stream header, and
+// reports whether it did.
+//
+// The header check limits the fallback to the compressed case: 0x78 followed by
+// 0x01, 0x5e, 0x9c or 0xda is a zlib stream with a 32 KiB window and the usual
+// compression levels. compress/zlib handles the zlib wrapper itself, so no header
+// is parsed out here.
+func inflateZlibBody(body string) ([]byte, bool) {
+	return inflateZlibBytes([]byte(body))
 }

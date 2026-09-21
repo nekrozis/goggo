@@ -1,6 +1,7 @@
 package galaxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -104,8 +105,14 @@ func TestProductSkipsExpansionWithoutDLCInformation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Product: %v", err)
 			}
-			if _, present := got["expanded_dlcs"]; present {
-				t.Errorf("expanded_dlcs = %v, want the member absent", got["expanded_dlcs"])
+			if !bytes.Equal(got.JSON, []byte(tc.doc)) {
+				t.Fatalf("JSON was rewritten without DLCs: got %q, want %q", got.JSON, tc.doc)
+			}
+			if bytes.Contains(got.JSON, []byte(`"expanded_dlcs"`)) {
+				t.Errorf("expanded_dlcs present in JSON, want absent: %s", got.JSON)
+			}
+			if got.Slug != "game" {
+				t.Errorf("Slug = %q, want game", got.Slug)
 			}
 			if uris := f.requestURIs(); len(uris) != 1 {
 				t.Errorf("requests = %v, want only the product document", uris)
@@ -136,21 +143,25 @@ func TestProductSkipsExpansionForNonObjectDLCs(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newProductFixture(t)
+			wantDoc := mustJSON(t, map[string]any{"id": "1", "slug": "game", "dlcs": tc.dlcs})
 			f.setServe(func(string) (string, int) {
-				return mustJSON(t, map[string]any{"id": "1", "slug": "game", "dlcs": tc.dlcs}), http.StatusOK
+				return wantDoc, http.StatusOK
 			})
 
 			got, err := newProductClient(t, f.Server).Product(context.Background(), "1")
 			if err != nil {
 				t.Fatalf("Product must skip a non-object dlcs, not fail: %v", err)
 			}
-			if _, present := got["expanded_dlcs"]; present {
-				t.Errorf("expanded_dlcs = %v, want the member absent (nothing was expanded)", got["expanded_dlcs"])
+			if !bytes.Equal(got.JSON, []byte(wantDoc)) {
+				t.Fatalf("JSON was rewritten for non-object DLCs: got %q, want %q", got.JSON, wantDoc)
+			}
+			if bytes.Contains(got.JSON, []byte(`"expanded_dlcs"`)) {
+				t.Errorf("expanded_dlcs present in JSON, want absent (nothing was expanded)")
 			}
 			// The document is untouched apart from the missing injection: the
 			// guard is skipped and the response is returned as it arrived.
-			if got["slug"] != "game" {
-				t.Errorf("slug = %v, want the original value", got["slug"])
+			if got.Slug != "game" {
+				t.Errorf("slug = %v, want the original value", got.Slug)
 			}
 			if uris := f.requestURIs(); len(uris) != 1 {
 				t.Errorf("requests = %v, want only the main document", uris)
@@ -183,17 +194,24 @@ func TestProductExpandsDLCsInOneRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Product: %v", err)
 	}
-	dlcs, ok := got["expanded_dlcs"].([]any)
-	if !ok || len(dlcs) != 2 {
-		t.Fatalf("expanded_dlcs = %v, want the two documents", got["expanded_dlcs"])
+	var doc struct {
+		ExpandedDLCs []struct {
+			ID string `json:"id"`
+		} `json:"expanded_dlcs"`
+	}
+	if err := json.Unmarshal(got.JSON, &doc); err != nil {
+		t.Fatalf("unmarshal got.JSON: %v", err)
+	}
+	if len(doc.ExpandedDLCs) != 2 {
+		t.Fatalf("expanded_dlcs = %+v, want 2", doc.ExpandedDLCs)
 	}
 	if uris := f.requestURIs(); len(uris) != 2 || uris[1] != "/expanded" {
 		t.Errorf("requests = %v, want the document then /expanded", uris)
 	}
 	// The rest of the document is untouched: Product hands back what the API
 	// answered, it does not rebuild it.
-	if got["slug"] != "game" {
-		t.Errorf("slug = %v, want the original value", got["slug"])
+	if got.Slug != "game" {
+		t.Errorf("slug = %v, want the original value", got.Slug)
 	}
 }
 
@@ -256,14 +274,20 @@ func TestProductBatchesDLCIDs(t *testing.T) {
 				t.Errorf("batch sizes = %v, want %v", sizes, tc.batches)
 			}
 
-			docs, ok := got["expanded_dlcs"].([]any)
-			if !ok || len(docs) != tc.count {
-				t.Fatalf("expanded_dlcs has %d entries, want %d", len(docs), tc.count)
+			var doc struct {
+				ExpandedDLCs []struct {
+					ID string `json:"id"`
+				} `json:"expanded_dlcs"`
 			}
-			for i, doc := range docs {
-				entry, _ := doc.(map[string]any)
-				if entry["id"] != ids[i] {
-					t.Fatalf("expanded_dlcs[%d].id = %v, want %v (order must survive batching)", i, entry["id"], ids[i])
+			if err := json.Unmarshal(got.JSON, &doc); err != nil {
+				t.Fatalf("unmarshal got.JSON: %v", err)
+			}
+			if len(doc.ExpandedDLCs) != tc.count {
+				t.Fatalf("expanded_dlcs has %d entries, want %d", len(doc.ExpandedDLCs), tc.count)
+			}
+			for i, entry := range doc.ExpandedDLCs {
+				if entry.ID != ids[i] {
+					t.Fatalf("expanded_dlcs[%d].id = %v, want %v (order must survive batching)", i, entry.ID, ids[i])
 				}
 			}
 		})
@@ -325,9 +349,16 @@ func TestProductExpandsNumericDLCIDs(t *testing.T) {
 	if batches[0][0] != "1523284508" || batches[0][1] != "1523284509" {
 		t.Errorf("first ids = %q,%q, want the numeric ids stringified", batches[0][0], batches[0][1])
 	}
-	docs, ok := got["expanded_dlcs"].([]any)
-	if !ok || len(docs) != total {
-		t.Fatalf("expanded_dlcs = %v, want %d documents", got["expanded_dlcs"], total)
+	var doc struct {
+		ExpandedDLCs []struct {
+			ID any `json:"id"`
+		} `json:"expanded_dlcs"`
+	}
+	if err := json.Unmarshal(got.JSON, &doc); err != nil {
+		t.Fatalf("unmarshal got.JSON: %v", err)
+	}
+	if len(doc.ExpandedDLCs) != total {
+		t.Fatalf("expanded_dlcs has %d entries, want %d documents", len(doc.ExpandedDLCs), total)
 	}
 }
 
@@ -381,9 +412,14 @@ func TestProductSkipsTheRequestForAnUnusableExpansionURL(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Product: %v", err)
 			}
-			docs, ok := got["expanded_dlcs"].([]any)
-			if !ok || len(docs) != 0 {
-				t.Errorf("expanded_dlcs = %v, want an empty array", got["expanded_dlcs"])
+			var doc struct {
+				ExpandedDLCs []any `json:"expanded_dlcs"`
+			}
+			if err := json.Unmarshal(got.JSON, &doc); err != nil {
+				t.Fatalf("unmarshal got.JSON: %v", err)
+			}
+			if doc.ExpandedDLCs == nil || len(doc.ExpandedDLCs) != 0 {
+				t.Errorf("expanded_dlcs = %v, want an empty array", doc.ExpandedDLCs)
 			}
 			if uris := f.requestURIs(); len(uris) != 1 {
 				t.Errorf("requests = %v, want no request for an unusable url", uris)

@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/nekrozis/goggo/internal/httpx"
-	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // DefaultContentSystemHost serves builds, secure links and dependency
@@ -140,7 +139,7 @@ func decodeJSONObject(body string) (map[string]any, error) {
 	}
 	obj, ok := v.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonval.Kind(v))
+		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, mapKind(v))
 	}
 	return obj, nil
 }

@@ -57,6 +57,44 @@ func TestManualURLsFromJSON(t *testing.T) {
 		}
 	})
 
+	t.Run("manualUrl scalar coercion and container rejection", func(t *testing.T) {
+		cases := []struct {
+			name    string
+			val     any
+			want    string
+			wantErr bool
+		}{
+			{name: "string", val: "https://example.com/dlc", want: "https://example.com/dlc"},
+			{name: "int", val: 12345, want: "12345"},
+			{name: "int64", val: int64(9876543210), want: "9876543210"},
+			{name: "uint64", val: uint64(1234567890123), want: "1234567890123"},
+			{name: "float64", val: 5.25, want: "5.25"},
+			{name: "bool true", val: true, want: "true"},
+			{name: "bool false", val: false, want: "false"},
+			{name: "null", val: nil, want: ""},
+			{name: "array rejected", val: []any{"a"}, wantErr: true},
+			{name: "object rejected", val: map[string]any{"a": 1}, wantErr: true},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				in := map[string]any{"manualUrl": tc.val}
+				got, err := ManualURLsFromJSON(in)
+				if tc.wantErr {
+					if err == nil {
+						t.Fatalf("ManualURLsFromJSON(%#v) expected error, got nil", tc.val)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("ManualURLsFromJSON(%#v) unexpected error: %v", tc.val, err)
+				}
+				if len(got) != 1 || got[0] != tc.want {
+					t.Errorf("ManualURLsFromJSON(%#v) = %v, want [%q]", tc.val, got, tc.want)
+				}
+			})
+		}
+	})
+
 	t.Run("scalars and empty input contribute nothing", func(t *testing.T) {
 		for _, in := range []any{nil, "text", float64(1), []any{}, map[string]any{}} {
 			got, err := ManualURLsFromJSON(in)

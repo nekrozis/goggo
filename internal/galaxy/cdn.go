@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
-	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -44,7 +44,7 @@ func CdnURLTemplatesFromJSON(json map[string]any, cdnPriority []string) ([]strin
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	entries, err := jsonval.Array(raw)
+	entries, err := mapArray(raw)
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: link document urls: %w", err)
 	}
@@ -55,11 +55,11 @@ func CdnURLTemplatesFromJSON(json map[string]any, cdnPriority []string) ([]strin
 	}
 	rankedURLs := make([]ranked, 0, len(entries))
 	for i, element := range entries {
-		entry, err := jsonval.Object(element)
+		entry, err := mapObject(element)
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: link document urls[%d]: %w", i, err)
 		}
-		name, err := jsonval.Str(entry["endpoint_name"])
+		name, err := scalarString(entry["endpoint_name"])
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: link document urls[%d].endpoint_name: %w", i, err)
 		}
@@ -97,7 +97,7 @@ func cdnRank(endpointName string, cdnPriority []string, index int) int {
 // order is observable when one parameter's value contains another parameter's
 // placeholder.
 func urlTemplate(entry map[string]any) (string, error) {
-	format, err := jsonval.Str(entry["url_format"])
+	format, err := scalarString(entry["url_format"])
 	if err != nil {
 		return "", fmt.Errorf("url_format: %w", err)
 	}
@@ -107,7 +107,7 @@ func urlTemplate(entry map[string]any) (string, error) {
 		// A null parameters object means "nothing to replace".
 		return format, nil
 	}
-	parameters, err := jsonval.Object(raw)
+	parameters, err := mapObject(raw)
 	if err != nil {
 		return "", fmt.Errorf("parameters: %w", err)
 	}
@@ -119,7 +119,7 @@ func urlTemplate(entry map[string]any) (string, error) {
 	sort.Strings(keys)
 
 	for _, name := range keys {
-		value, err := jsonval.Str(parameters[name])
+		value, err := scalarString(parameters[name])
 		if err != nil {
 			return "", fmt.Errorf("parameters[%q]: %w", name, err)
 		}
@@ -196,4 +196,44 @@ func PathFromDownlinkURL(downlinkURL, gameName string) string {
 		}
 	}
 	return path
+}
+
+func mapObject(v any) (map[string]any, error) {
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("expected a JSON object, got %s", mapKind(v))
+	}
+	return obj, nil
+}
+
+func mapArray(v any) ([]any, error) {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("expected a JSON array, got %s", mapKind(v))
+	}
+	return arr, nil
+}
+
+func scalarString(v any) (string, error) {
+	switch t := v.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return t, nil
+	case bool:
+		if t {
+			return "true", nil
+		}
+		return "false", nil
+	case int:
+		return strconv.Itoa(t), nil
+	case int64:
+		return strconv.FormatInt(t, 10), nil
+	case uint64:
+		return strconv.FormatUint(t, 10), nil
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64), nil
+	default:
+		return "", fmt.Errorf("expected a string, got %s", mapKind(v))
+	}
 }

@@ -3,7 +3,6 @@ package gamedetails
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"fmt"
@@ -59,7 +58,7 @@ type rawProduct struct {
 	Changelog    string           `json:"changelog"`
 	Images       rawImages        `json:"images"`
 	Downloads    rawDownloads     `json:"downloads"`
-	ExpandedDLCs []rawExpandedDLC `json:"expanded_dlcs"`
+	ExpandedDLCs []jsontext.Value `json:"expanded_dlcs"`
 }
 
 // rawExpandedDLC models a DLC entry inside expanded_dlcs.
@@ -70,7 +69,7 @@ type rawExpandedDLC struct {
 	Changelog    string           `json:"changelog"`
 	Images       rawImages        `json:"images"`
 	Downloads    rawDownloads     `json:"downloads"`
-	ExpandedDLCs []rawExpandedDLC `json:"expanded_dlcs"`
+	ExpandedDLCs []jsontext.Value `json:"expanded_dlcs"`
 }
 
 type rawImages struct {
@@ -195,7 +194,7 @@ func readFileSize(v jsontext.Value) (uint64, bool, error) {
 // owned is the set of owned product ids; an EMPTY set means no filtering.
 func ProductInfoToGameDetails(ctx context.Context, raw []byte, cfg config.DownloadConfig,
 	owned map[string]bool, resolve DownlinkResolver) (GameDetails, error) {
-	if len(bytes.TrimSpace(raw)) == 0 {
+	if len(raw) == 0 {
 		return GameDetails{}, nil
 	}
 	var p rawProduct
@@ -236,14 +235,11 @@ func convertProduct(ctx context.Context, p rawProduct, raw []byte, cfg config.Do
 	gd.Logo = strings.ReplaceAll(httpsPrefix+logo, logoNameInAPI, logoNameFinal)
 
 	if cfg.SaveProductJSON {
-		var rawVal any
-		if err := json.Unmarshal(raw, &rawVal); err == nil {
-			rendered, err := util.StyledJSON(rawVal)
-			if err != nil {
-				return GameDetails{}, wrap("gamedetails: product json", err)
-			}
-			gd.ProductJson = rendered
+		rendered, err := util.StyledJSONBytes(raw)
+		if err != nil {
+			return GameDetails{}, wrap("gamedetails: product json", err)
 		}
+		gd.ProductJson = rendered
 	}
 
 	for _, v := range []struct {
@@ -271,8 +267,12 @@ func convertProduct(ctx context.Context, p rawProduct, raw []byte, cfg config.Do
 	if cfg.Include&config.GFDLC == 0 {
 		return gd, nil
 	}
-	for i, dlc := range p.ExpandedDLCs {
+	for i, rawDLC := range p.ExpandedDLCs {
 		where := fmt.Sprintf("gamedetails: expanded_dlcs[%d]", i)
+		var dlc rawExpandedDLC
+		if err := jsonv2.Unmarshal(rawDLC, &dlc); err != nil {
+			return GameDetails{}, wrap(where, err)
+		}
 		id, err := readProductID(dlc.ID)
 		if err != nil {
 			return GameDetails{}, wrap(where, err)
@@ -280,7 +280,7 @@ func convertProduct(ctx context.Context, p rawProduct, raw []byte, cfg config.Do
 		if len(owned) > 0 && !owned[id] {
 			continue
 		}
-		sub, err := convertDLC(ctx, dlc, cfg, owned, resolve)
+		sub, err := convertDLC(ctx, dlc, rawDLC, cfg, owned, resolve)
 		if err != nil {
 			return GameDetails{}, err
 		}
@@ -296,7 +296,8 @@ func convertProduct(ctx context.Context, p rawProduct, raw []byte, cfg config.Do
 	return gd, nil
 }
 
-func convertDLC(ctx context.Context, dlc rawExpandedDLC, cfg config.DownloadConfig,
+// raw is the source of truth for ProductJson.
+func convertDLC(ctx context.Context, dlc rawExpandedDLC, raw []byte, cfg config.DownloadConfig,
 	owned map[string]bool, resolve DownlinkResolver) (GameDetails, error) {
 	var gd GameDetails
 
@@ -320,7 +321,7 @@ func convertDLC(ctx context.Context, dlc rawExpandedDLC, cfg config.DownloadConf
 	gd.Logo = strings.ReplaceAll(httpsPrefix+logo, logoNameInAPI, logoNameFinal)
 
 	if cfg.SaveProductJSON {
-		rendered, err := util.StyledJSON(dlc)
+		rendered, err := util.StyledJSONBytes(raw)
 		if err != nil {
 			return GameDetails{}, wrap("gamedetails: product json", err)
 		}
@@ -352,8 +353,12 @@ func convertDLC(ctx context.Context, dlc rawExpandedDLC, cfg config.DownloadConf
 	if cfg.Include&config.GFDLC == 0 {
 		return gd, nil
 	}
-	for i, subDLC := range dlc.ExpandedDLCs {
+	for i, subRawDLC := range dlc.ExpandedDLCs {
 		where := fmt.Sprintf("gamedetails: expanded_dlcs[%d]", i)
+		var subDLC rawExpandedDLC
+		if err := jsonv2.Unmarshal(subRawDLC, &subDLC); err != nil {
+			return GameDetails{}, wrap(where, err)
+		}
 		id, err := readProductID(subDLC.ID)
 		if err != nil {
 			return GameDetails{}, wrap(where, err)
@@ -361,7 +366,7 @@ func convertDLC(ctx context.Context, dlc rawExpandedDLC, cfg config.DownloadConf
 		if len(owned) > 0 && !owned[id] {
 			continue
 		}
-		sub, err := convertDLC(ctx, subDLC, cfg, owned, resolve)
+		sub, err := convertDLC(ctx, subDLC, subRawDLC, cfg, owned, resolve)
 		if err != nil {
 			return GameDetails{}, err
 		}

@@ -3,6 +3,7 @@ package galaxy
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"net/http"
@@ -71,6 +72,18 @@ func TestDepotItemsSmallFilesContainer(t *testing.T) {
 			body: `{"depot":{"smallFilesContainer":{"chunks":[` +
 				`{"compressedMd5":"c1","md5":"u1","compressedSize":10,"size":20},` +
 				`{"compressedMd5":"c2","md5":"u2","compressedSize":5,"size":7}]}}}`,
+			wantMD5: "",
+		},
+		{
+			name: "explicit null container md5 does not fallback to single chunk",
+			body: `{"depot":{"smallFilesContainer":{"md5":null,"chunks":[` +
+				`{"compressedMd5":"c1","md5":"u1","compressedSize":10,"size":20}]}}}`,
+			wantMD5: "",
+		},
+		{
+			name: "empty container md5 does not fallback to single chunk",
+			body: `{"depot":{"smallFilesContainer":{"md5":"","chunks":[` +
+				`{"compressedMd5":"c1","md5":"u1","compressedSize":10,"size":20}]}}}`,
 			wantMD5: "",
 		},
 	}
@@ -405,44 +418,44 @@ func TestDepotItemsRequestsManifest(t *testing.T) {
 const oneChunkManifest = `{"depot":{"items":[{"path":"a.bin",` +
 	`"chunks":[{"compressedMd5":"c","md5":"u","compressedSize":1,"size":1}]}]}}`
 
-// TestUint64Value locks the reader's rules: strings and booleans are rejected
-// rather than coerced.
-func TestUint64Value(t *testing.T) {
+// TestReadDepotSize locks the reader's rules: strings, booleans, negative numbers,
+// and floats are rejected rather than coerced.
+func TestReadDepotSize(t *testing.T) {
 	cases := []struct {
 		name    string
-		value   any
+		value   jsontext.Value
 		want    uint64
 		wantErr bool
 	}{
-		{"float64 whole", float64(5), 5, false},
-		{"float64 zero", float64(0), 0, false},
+		{"whole number", jsontext.Value("5"), 5, false},
+		{"zero", jsontext.Value("0"), 0, false},
 		{"nil is zero", nil, 0, false},
-		{"int", 7, 7, false},
-		{"int64", int64(8), 8, false},
-		{"uint64", uint64(9), 9, false},
-		{"negative float", float64(-1), 0, true},
-		{"fractional", 5.5, 0, true},
-		{"negative int", -3, 0, true},
-		{"string number", "5", 0, true},
-		{"boolean", true, 0, true},
-		{"array", []any{}, 0, true},
-		{"object", map[string]any{}, 0, true},
-		{"float64 at 2^64", maxUint64Exclusive, 0, true},
+		{"null literal is zero", jsontext.Value("null"), 0, false},
+		{"empty is zero", jsontext.Value(""), 0, false},
+		{"large 64-bit precision", jsontext.Value("58812465975493914"), 58812465975493914, false},
+		{"max uint64", jsontext.Value("18446744073709551615"), 18446744073709551615, false},
+		{"negative number", jsontext.Value("-1"), 0, true},
+		{"fractional", jsontext.Value("5.5"), 0, true},
+		{"string number", jsontext.Value(`"5"`), 0, true},
+		{"boolean", jsontext.Value("true"), 0, true},
+		{"array", jsontext.Value("[]"), 0, true},
+		{"object", jsontext.Value("{}"), 0, true},
+		{"overflow past uint64", jsontext.Value("18446744073709551616"), 0, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := uint64Value(c.value)
+			got, err := readDepotSize(c.value, "size")
 			if c.wantErr {
 				if err == nil {
-					t.Fatalf("uint64Value(%v) must fail", c.value)
+					t.Fatalf("readDepotSize(%s) must fail", string(c.value))
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("uint64Value(%v): %v", c.value, err)
+				t.Fatalf("readDepotSize(%s): %v", string(c.value), err)
 			}
 			if got != c.want {
-				t.Errorf("uint64Value(%v) = %d, want %d", c.value, got, c.want)
+				t.Errorf("readDepotSize(%s) = %d, want %d", string(c.value), got, c.want)
 			}
 		})
 	}
@@ -480,5 +493,119 @@ func TestDepotItemsPropagatesManifestFailure(t *testing.T) {
 	}
 	if errors.Is(err, ErrNotJSON) {
 		t.Errorf("err = %v must stay an HTTP error", err)
+	}
+}
+
+// TestDepotItems64BitPrecision locks the 64-bit unsigned integer decoding across
+// the full DepotItems pipeline, verifying that chunk sizes, running offsets,
+// item totals, and sfcRef ranges preserve exact values > 2^53 without float64 loss.
+func TestDepotItems64BitPrecision(t *testing.T) {
+	// 58812465975493914 > 2^53, exercises the path that would lose
+	// precision if decoded through float64 (58812465975493920).
+	const body = `{"depot":{"items":[{` +
+		`"path":"large.bin",` +
+		`"chunks":[` +
+		`{"compressedMd5":"c1","md5":"u1","compressedSize":58812465975493914,"size":58812465975493914},` +
+		`{"compressedMd5":"c2","md5":"u2","compressedSize":2,"size":3}` +
+		`],` +
+		`"sfcRef":{"offset":58812465975493914,"size":2}` +
+		`}]}}`
+
+	srv, _ := depotServer(t, body)
+	cl := newTestClient(t, srv, nil)
+	items, err := cl.DepotItems(context.Background(), "abcdef", DepotOptions{})
+	if err != nil {
+		t.Fatalf("DepotItems: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	item := items[0]
+	if len(item.Chunks) != 2 {
+		t.Fatalf("len(item.Chunks) = %d, want 2", len(item.Chunks))
+	}
+
+	// Chunk 0 exact sizes and initial 0 offsets.
+	if item.Chunks[0].CompressedSize != 58812465975493914 {
+		t.Errorf("chunk 0 CompressedSize = %d, want 58812465975493914", item.Chunks[0].CompressedSize)
+	}
+	if item.Chunks[0].Size != 58812465975493914 {
+		t.Errorf("chunk 0 Size = %d, want 58812465975493914", item.Chunks[0].Size)
+	}
+	if item.Chunks[0].CompressedOffset != 0 || item.Chunks[0].Offset != 0 {
+		t.Errorf("chunk 0 offsets = %d/%d, want 0/0", item.Chunks[0].CompressedOffset, item.Chunks[0].Offset)
+	}
+
+	// Chunk 1 running offset accumulation > 2^53.
+	if item.Chunks[1].CompressedOffset != 58812465975493914 {
+		t.Errorf("chunk 1 CompressedOffset = %d, want 58812465975493914", item.Chunks[1].CompressedOffset)
+	}
+	if item.Chunks[1].Offset != 58812465975493914 {
+		t.Errorf("chunk 1 Offset = %d, want 58812465975493914", item.Chunks[1].Offset)
+	}
+
+	// Item totals accumulation.
+	const wantTotalCompressed = 58812465975493916 // 58812465975493914 + 2
+	const wantTotal = 58812465975493917           // 58812465975493914 + 3
+	if item.TotalCompressedSize != wantTotalCompressed {
+		t.Errorf("TotalCompressedSize = %d, want %d", item.TotalCompressedSize, wantTotalCompressed)
+	}
+	if item.TotalSize != wantTotal {
+		t.Errorf("TotalSize = %d, want %d", item.TotalSize, wantTotal)
+	}
+
+	// sfcRef exact offsets > 2^53.
+	if !item.IsInSFC {
+		t.Error("item.IsInSFC must be true")
+	}
+	if item.SFCOffset != 58812465975493914 {
+		t.Errorf("item.SFCOffset = %d, want 58812465975493914", item.SFCOffset)
+	}
+	if item.SFCSize != 2 {
+		t.Errorf("item.SFCSize = %d, want 2", item.SFCSize)
+	}
+}
+
+// TestDepotItemsRejectsNonStringIdentifiers locks the boundary tightening for
+// path and chunk hash fields: numbers and booleans are rejected as protocol errors.
+func TestDepotItemsRejectsNonStringIdentifiers(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{
+			name:    "number path rejected",
+			body:    `{"depot":{"items":[{"path":12345,"chunks":[{"compressedMd5":"c","md5":"u","compressedSize":1,"size":1}]}]}}`,
+			wantErr: true,
+		},
+		{
+			name:    "boolean path rejected",
+			body:    `{"depot":{"items":[{"path":true,"chunks":[{"compressedMd5":"c","md5":"u","compressedSize":1,"size":1}]}]}}`,
+			wantErr: true,
+		},
+		{
+			name:    "number chunk md5 rejected",
+			body:    `{"depot":{"items":[{"path":"a.bin","chunks":[{"compressedMd5":"c","md5":12345,"compressedSize":1,"size":1}]}]}}`,
+			wantErr: true,
+		},
+		{
+			name:    "boolean chunk compressedMd5 rejected",
+			body:    `{"depot":{"items":[{"path":"a.bin","chunks":[{"compressedMd5":true,"md5":"u","compressedSize":1,"size":1}]}]}}`,
+			wantErr: true,
+		},
+		{
+			name:    "number item md5 rejected",
+			body:    `{"depot":{"items":[{"path":"a.bin","md5":99999,"chunks":[{"compressedMd5":"c","md5":"u","compressedSize":1,"size":1}]}]}}`,
+			wantErr: true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := depotItems(t, c.body, DepotOptions{})
+			if c.wantErr && err == nil {
+				t.Fatalf("expected error for non-string identifier in %s", c.name)
+			}
+		})
 	}
 }

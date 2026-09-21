@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -232,7 +233,15 @@ func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[st
 	}
 	cfg := d.cfg.DownloadConfig
 	cfg.Include = include
-	gd, err := gamedetails.ProductInfoToGameDetails(ctx, product, cfg, owned, resolver.Resolve)
+
+	// Temporary JSON bridge.
+	// galaxy.Product currently exposes map data.
+	// Removed after galaxy product transport migrates to raw JSON.
+	rawProduct, err := json.Marshal(product)
+	if err != nil {
+		return gamedetails.GameDetails{}, err
+	}
+	gd, err := gamedetails.ProductInfoToGameDetails(ctx, rawProduct, cfg, owned, resolver.Resolve)
 	if err != nil {
 		return gamedetails.GameDetails{}, err
 	}
@@ -264,12 +273,20 @@ func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[st
 			gd.Serials, gd.SerialsDiag = serialsFromDetails(details)
 		}
 		if cfg.SaveChangelogs && gd.Changelog == "" {
-			cl, err := gamedetails.ChangelogFromJSON(details)
-			switch {
-			case err != nil:
+			// Temporary JSON bridge.
+			// web.GameDetailsJSON currently exposes map data.
+			// Removed after webapi response transport migrates to raw JSON.
+			rawDetails, err := json.Marshal(details)
+			if err != nil {
 				gd.MetadataDiag = err.Error()
-			case cl != "":
-				gd.Changelog = cl
+			} else {
+				cl, err := gamedetails.ChangelogFromJSON(rawDetails)
+				switch {
+				case err != nil:
+					gd.MetadataDiag = err.Error()
+				case cl != "":
+					gd.Changelog = cl
+				}
 			}
 		}
 	}

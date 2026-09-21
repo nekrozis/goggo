@@ -1,14 +1,17 @@
 package gamedetails
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
 	"github.com/nekrozis/goggo/internal/config"
-	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -48,15 +51,158 @@ const (
 // what makes it a URL. An absolute value would gain a second prefix.
 const httpsPrefix = "https:"
 
-// ProductInfoToGameDetails converts one Galaxy product document into the domain
+// rawProduct models the product document root for unmarshaling.
+type rawProduct struct {
+	Slug         jsontext.Value   `json:"slug"`
+	ID           jsontext.Value   `json:"id"`
+	Title        string           `json:"title"`
+	Changelog    string           `json:"changelog"`
+	Images       rawImages        `json:"images"`
+	Downloads    rawDownloads     `json:"downloads"`
+	ExpandedDLCs []rawExpandedDLC `json:"expanded_dlcs"`
+}
+
+// rawExpandedDLC models a DLC entry inside expanded_dlcs.
+type rawExpandedDLC struct {
+	Slug         jsontext.Value   `json:"slug"`
+	ID           jsontext.Value   `json:"id"`
+	Title        string           `json:"title"`
+	Changelog    string           `json:"changelog"`
+	Images       rawImages        `json:"images"`
+	Downloads    rawDownloads     `json:"downloads"`
+	ExpandedDLCs []rawExpandedDLC `json:"expanded_dlcs"`
+}
+
+type rawImages struct {
+	Icon string `json:"icon"`
+	Logo string `json:"logo"`
+}
+
+type rawDownloads struct {
+	Installers    []rawFileGroup `json:"installers"`
+	BonusContent  []rawFileGroup `json:"bonus_content"`
+	Patches       []rawFileGroup `json:"patches"`
+	LanguagePacks []rawFileGroup `json:"language_packs"`
+}
+
+type rawFileGroup struct {
+	Name      string    `json:"name"`
+	Version   string    `json:"version"`
+	OS        string    `json:"os"`
+	Language  string    `json:"language"`
+	Count     uint64    `json:"count"`
+	TotalSize uint64    `json:"total_size"`
+	Files     []rawFile `json:"files"`
+}
+
+type rawFile struct {
+	ID       jsontext.Value `json:"id"`
+	Downlink string         `json:"downlink"`
+	Size     jsontext.Value `json:"size"`
+}
+
+func readToken(v jsontext.Value) (jsontext.Token, error) {
+	if len(v) == 0 {
+		return jsontext.Token{}, io.ErrUnexpectedEOF
+	}
+	dec := jsontext.NewDecoder(bytes.NewReader(v))
+	return dec.ReadToken()
+}
+
+func readProductID(v jsontext.Value) (string, error) {
+	if len(v) == 0 {
+		return "", nil
+	}
+	tok, err := readToken(v)
+	if err != nil {
+		return "", err
+	}
+	switch tok.Kind() {
+	case jsontext.KindNull:
+		return "", nil
+	case jsontext.KindString, jsontext.KindNumber:
+		return tok.String(), nil
+	case jsontext.KindTrue:
+		return "true", nil
+	case jsontext.KindFalse:
+		return "false", nil
+	default:
+		return "", fmt.Errorf("id: expected a scalar, got %s", tok.Kind())
+	}
+}
+
+func readFileID(v jsontext.Value) (string, error) {
+	return readProductID(v)
+}
+
+func readProductSlug(v jsontext.Value) (string, error) {
+	if len(v) == 0 {
+		return "", nil
+	}
+	tok, err := readToken(v)
+	if err != nil {
+		return "", err
+	}
+	switch tok.Kind() {
+	case jsontext.KindNull:
+		return "", nil
+	case jsontext.KindString:
+		return tok.String(), nil
+	default:
+		return "", fmt.Errorf("slug: expected a JSON string, got %s", tok.Kind())
+	}
+}
+
+func readFileSize(v jsontext.Value) (uint64, bool, error) {
+	if len(v) == 0 {
+		return 0, false, nil
+	}
+	tok, err := readToken(v)
+	if err != nil {
+		return 0, false, err
+	}
+	switch tok.Kind() {
+	case jsontext.KindNull:
+		return 0, false, nil
+	case jsontext.KindNumber:
+		u, err := tok.Uint()
+		if err != nil {
+			return 0, false, nil
+		}
+		return u, true, nil
+	case jsontext.KindString:
+		s := strings.TrimSpace(tok.String())
+		if s == "" {
+			return 0, false, nil
+		}
+		u, err := strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			return 0, false, nil
+		}
+		return u, true, nil
+	case jsontext.KindTrue, jsontext.KindFalse:
+		return 0, false, nil
+	default:
+		return 0, false, nil
+	}
+}
+
+// ProductInfoToGameDetails converts one Galaxy product document bytes into the domain
 // model: a field the conversion reads is validated against the JSON type it must
 // have — absent is the zero value, present with the wrong shape is an error — and
 // values are never coerced.
 //
 // owned is the set of owned product ids; an EMPTY set means no filtering.
-func ProductInfoToGameDetails(ctx context.Context, product map[string]any, cfg config.DownloadConfig,
+func ProductInfoToGameDetails(ctx context.Context, raw []byte, cfg config.DownloadConfig,
 	owned map[string]bool, resolve DownlinkResolver) (GameDetails, error) {
-	gd, err := convertProduct(ctx, product, cfg, owned, resolve)
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return GameDetails{}, nil
+	}
+	var p rawProduct
+	if err := jsonv2.Unmarshal(raw, &p); err != nil {
+		return GameDetails{}, wrap("gamedetails", err)
+	}
+	gd, err := convertProduct(ctx, p, raw, cfg, owned, resolve)
 	if err != nil {
 		// Nothing half-built crosses the boundary: a caller that gets an error
 		// gets the zero value, never a partial tree it could mistake for a
@@ -66,93 +212,56 @@ func ProductInfoToGameDetails(ctx context.Context, product map[string]any, cfg c
 	return gd, nil
 }
 
-// convertProduct is the recursive body: a DLC subtree is converted by this same
-// function.
-func convertProduct(ctx context.Context, product map[string]any, cfg config.DownloadConfig,
+func convertProduct(ctx context.Context, p rawProduct, raw []byte, cfg config.DownloadConfig,
 	owned map[string]bool, resolve DownlinkResolver) (GameDetails, error) {
 	var gd GameDetails
 
-	gamename, err := fieldString(product, "slug")
+	gamename, err := readProductSlug(p.Slug)
 	if err != nil {
 		return GameDetails{}, wrap("gamedetails", err)
 	}
 	gd.Gamename = gamename
 
-	// The product id is one of the identifier fields and reads through
-	// idString; title and changelog are free strings and keep the strict
-	// reader.
-	productID, err := idString(product, "id")
+	productID, err := readProductID(p.ID)
 	if err != nil {
 		return GameDetails{}, wrap("gamedetails", err)
 	}
 	gd.ProductID = productID
-	for _, f := range []struct {
-		name string
-		dst  *string
-	}{
-		{"title", &gd.Title},
-		{"changelog", &gd.Changelog},
-	} {
-		value, err := fieldString(product, f.name)
-		if err != nil {
-			return GameDetails{}, wrap("gamedetails", err)
-		}
-		*f.dst = value
-	}
+	gd.Title = p.Title
+	gd.Changelog = p.Changelog
 
-	images, err := fieldObject(product, "images")
-	if err != nil {
-		return GameDetails{}, wrap("gamedetails", err)
-	}
-	icon, err := fieldString(images, "icon")
-	if err != nil {
-		return GameDetails{}, wrap("gamedetails: images", err)
-	}
+	icon := p.Images.Icon
 	gd.Icon = httpsPrefix + icon
-	logo, err := fieldString(images, "logo")
-	if err != nil {
-		return GameDetails{}, wrap("gamedetails: images", err)
-	}
+	logo := p.Images.Logo
 	gd.Logo = strings.ReplaceAll(httpsPrefix+logo, logoNameInAPI, logoNameFinal)
 
-	// The save-product-json artifact is rendered from the document the
-	// conversion already holds — for a DLC that is the inline expanded
-	// document — so no extra request is made for a DLC.
 	if cfg.SaveProductJSON {
-		rendered, err := util.StyledJSON(product)
-		if err != nil {
-			return GameDetails{}, wrap("gamedetails: product json", err)
+		var rawVal any
+		if err := json.Unmarshal(raw, &rawVal); err == nil {
+			rendered, err := util.StyledJSON(rawVal)
+			if err != nil {
+				return GameDetails{}, wrap("gamedetails: product json", err)
+			}
+			gd.ProductJson = rendered
 		}
-		gd.ProductJson = rendered
 	}
 
-	downloads, err := fieldObject(product, "downloads")
-	if err != nil {
-		return GameDetails{}, wrap("gamedetails", err)
-	}
-
-	// Each vector is gated by its COMPOSITE mask and typed with the base bit.
-	// The composite gate is deliberate: with the DLC bit set and the base bit
-	// clear the base vector is still converted.
 	for _, v := range []struct {
-		gate uint32
-		spec uint32
-		key  string
-		dst  *[]GameFile
+		gate   uint32
+		spec   uint32
+		key    string
+		groups []rawFileGroup
+		dst    *[]GameFile
 	}{
-		{config.GFInstaller, config.GFBaseInstaller, "installers", &gd.Installers},
-		{config.GFExtra, config.GFBaseExtra, "bonus_content", &gd.Extras},
-		{config.GFPatch, config.GFBasePatch, "patches", &gd.Patches},
-		{config.GFLangPack, config.GFBaseLangPack, "language_packs", &gd.LanguagePacks},
+		{config.GFInstaller, config.GFBaseInstaller, "installers", p.Downloads.Installers, &gd.Installers},
+		{config.GFExtra, config.GFBaseExtra, "bonus_content", p.Downloads.BonusContent, &gd.Extras},
+		{config.GFPatch, config.GFBasePatch, "patches", p.Downloads.Patches, &gd.Patches},
+		{config.GFLangPack, config.GFBaseLangPack, "language_packs", p.Downloads.LanguagePacks, &gd.LanguagePacks},
 	} {
 		if cfg.Include&v.gate == 0 {
 			continue
 		}
-		nodes, err := fieldArray(downloads, v.key)
-		if err != nil {
-			return GameDetails{}, wrap("gamedetails: downloads", err)
-		}
-		files, err := gameFiles(ctx, gamename, gd.Title, v.key, nodes, v.spec, cfg, resolve)
+		files, err := gameFiles(ctx, gamename, gd.Title, v.key, v.groups, v.spec, cfg, resolve)
 		if err != nil {
 			return GameDetails{}, err
 		}
@@ -162,23 +271,16 @@ func convertProduct(ctx context.Context, product map[string]any, cfg config.Down
 	if cfg.Include&config.GFDLC == 0 {
 		return gd, nil
 	}
-	dlcs, err := fieldArray(product, "expanded_dlcs")
-	if err != nil {
-		return GameDetails{}, wrap("gamedetails", err)
-	}
-	for i, node := range dlcs {
-		dlc, err := jsonval.Object(node)
+	for i, dlc := range p.ExpandedDLCs {
+		where := fmt.Sprintf("gamedetails: expanded_dlcs[%d]", i)
+		id, err := readProductID(dlc.ID)
 		if err != nil {
-			return GameDetails{}, wrap(fmt.Sprintf("gamedetails: expanded_dlcs[%d]", i), err)
-		}
-		id, err := idString(dlc, "id")
-		if err != nil {
-			return GameDetails{}, wrap(fmt.Sprintf("gamedetails: expanded_dlcs[%d]", i), err)
+			return GameDetails{}, wrap(where, err)
 		}
 		if len(owned) > 0 && !owned[id] {
 			continue
 		}
-		sub, err := convertProduct(ctx, dlc, cfg, owned, resolve)
+		sub, err := convertDLC(ctx, dlc, cfg, owned, resolve)
 		if err != nil {
 			return GameDetails{}, err
 		}
@@ -194,38 +296,103 @@ func convertProduct(ctx context.Context, product map[string]any, cfg config.Down
 	return gd, nil
 }
 
+func convertDLC(ctx context.Context, dlc rawExpandedDLC, cfg config.DownloadConfig,
+	owned map[string]bool, resolve DownlinkResolver) (GameDetails, error) {
+	var gd GameDetails
+
+	gamename, err := readProductSlug(dlc.Slug)
+	if err != nil {
+		return GameDetails{}, wrap("gamedetails", err)
+	}
+	gd.Gamename = gamename
+
+	productID, err := readProductID(dlc.ID)
+	if err != nil {
+		return GameDetails{}, wrap("gamedetails", err)
+	}
+	gd.ProductID = productID
+	gd.Title = dlc.Title
+	gd.Changelog = dlc.Changelog
+
+	icon := dlc.Images.Icon
+	gd.Icon = httpsPrefix + icon
+	logo := dlc.Images.Logo
+	gd.Logo = strings.ReplaceAll(httpsPrefix+logo, logoNameInAPI, logoNameFinal)
+
+	if cfg.SaveProductJSON {
+		rendered, err := util.StyledJSON(dlc)
+		if err != nil {
+			return GameDetails{}, wrap("gamedetails: product json", err)
+		}
+		gd.ProductJson = rendered
+	}
+
+	for _, v := range []struct {
+		gate   uint32
+		spec   uint32
+		key    string
+		groups []rawFileGroup
+		dst    *[]GameFile
+	}{
+		{config.GFInstaller, config.GFBaseInstaller, "installers", dlc.Downloads.Installers, &gd.Installers},
+		{config.GFExtra, config.GFBaseExtra, "bonus_content", dlc.Downloads.BonusContent, &gd.Extras},
+		{config.GFPatch, config.GFBasePatch, "patches", dlc.Downloads.Patches, &gd.Patches},
+		{config.GFLangPack, config.GFBaseLangPack, "language_packs", dlc.Downloads.LanguagePacks, &gd.LanguagePacks},
+	} {
+		if cfg.Include&v.gate == 0 {
+			continue
+		}
+		files, err := gameFiles(ctx, gamename, gd.Title, v.key, v.groups, v.spec, cfg, resolve)
+		if err != nil {
+			return GameDetails{}, err
+		}
+		*v.dst = files
+	}
+
+	if cfg.Include&config.GFDLC == 0 {
+		return gd, nil
+	}
+	for i, subDLC := range dlc.ExpandedDLCs {
+		where := fmt.Sprintf("gamedetails: expanded_dlcs[%d]", i)
+		id, err := readProductID(subDLC.ID)
+		if err != nil {
+			return GameDetails{}, wrap(where, err)
+		}
+		if len(owned) > 0 && !owned[id] {
+			continue
+		}
+		sub, err := convertDLC(ctx, subDLC, cfg, owned, resolve)
+		if err != nil {
+			return GameDetails{}, err
+		}
+		sub.TitleBasegame = gd.Title
+		sub.GamenameBasegame = gd.Gamename
+		retypeDLC(&sub)
+		if len(sub.Installers)+len(sub.Extras)+len(sub.Patches)+len(sub.LanguagePacks) == 0 {
+			continue
+		}
+		gd.DLCs = append(gd.DLCs, sub)
+	}
+
+	return gd, nil
+}
+
 // gameFiles converts one downloads vector: the platform/language filter, the
 // empty-node skip and the per-file resolution.
-func gameFiles(ctx context.Context, gamename, title, label string, nodes []any, typeValue uint32,
+func gameFiles(ctx context.Context, gamename, title, label string, groups []rawFileGroup, typeValue uint32,
 	cfg config.DownloadConfig, resolve DownlinkResolver) ([]GameFile, error) {
 	var out []GameFile
 	// Extras carry no platform or language and are exempt from both filters.
 	isExtra := typeValue&config.GFBaseExtra != 0
 
-	for i, node := range nodes {
-		info, err := jsonval.Object(node)
-		if err != nil {
-			return nil, wrap(fmt.Sprintf("gamedetails: %s[%d]", label, i), err)
-		}
-		name, err := fieldString(info, "name")
-		if err != nil {
-			return nil, wrap(fmt.Sprintf("gamedetails: %s[%d]", label, i), err)
-		}
-		version, err := fieldString(info, "version")
-		if err != nil {
-			return nil, wrap(fmt.Sprintf("gamedetails: %s[%d]", label, i), err)
-		}
+	for i, info := range groups {
+		name := info.Name
+		version := info.Version
 
 		platform, language := config.PlatformWindows, config.LangEN
 		if !isExtra {
-			osName, err := fieldString(info, "os")
-			if err != nil {
-				return nil, wrap(fmt.Sprintf("gamedetails: %s[%d]", label, i), err)
-			}
-			langName, err := fieldString(info, "language")
-			if err != nil {
-				return nil, wrap(fmt.Sprintf("gamedetails: %s[%d]", label, i), err)
-			}
+			osName := info.OS
+			langName := info.Language
 			platform = util.OptionValue(osName, config.Platforms, false)
 			language = util.OptionValue(langName, config.Languages, false)
 			if platform&cfg.InstallerPlatform == 0 || language&cfg.InstallerLanguage == 0 {
@@ -233,37 +400,17 @@ func gameFiles(ctx context.Context, gamename, title, label string, nodes []any, 
 			}
 		}
 
-		count, err := fieldInt(info, "count")
-		if err != nil {
-			return nil, wrap(fmt.Sprintf("gamedetails: %s[%d]", label, i), err)
-		}
-		totalSize, err := fieldInt(info, "total_size")
-		if err != nil {
-			return nil, wrap(fmt.Sprintf("gamedetails: %s[%d]", label, i), err)
-		}
-		// An entry that advertises nothing is skipped.
-		if count == 0 && totalSize == 0 {
+		if info.Count == 0 && info.TotalSize == 0 {
 			continue
 		}
 
-		files, err := fieldArray(info, "files")
-		if err != nil {
-			return nil, wrap(fmt.Sprintf("gamedetails: %s[%d]", label, i), err)
-		}
-		for j, fileNode := range files {
-			entry, err := jsonval.Object(fileNode)
-			if err != nil {
-				return nil, wrap(fmt.Sprintf("gamedetails: %s[%d].files[%d]", label, i, j), err)
-			}
+		for j, file := range info.Files {
 			where := fmt.Sprintf("gamedetails: %s[%d].files[%d]", label, i, j)
-			id, err := idString(entry, "id")
+			id, err := readFileID(file.ID)
 			if err != nil {
 				return nil, wrap(where, err)
 			}
-			downlink, err := fieldString(entry, "downlink")
-			if err != nil {
-				return nil, wrap(where, err)
-			}
+			downlink := file.Downlink
 			resolved, err := resolve(ctx, gamename, downlink)
 			if err != nil {
 				// An unusable downlink skips the file, the same outcome as an
@@ -273,17 +420,15 @@ func gameFiles(ctx context.Context, gamename, title, label string, nodes []any, 
 			if unusablePath(resolved.Path) {
 				continue
 			}
-
 			gf := GameFile{
 				Gamename:              gamename,
-				Type:                  typeValue,
 				ID:                    id,
 				Name:                  name,
 				Path:                  resolved.Path,
-				Size:                  sizeString(entry["size"]),
+				GalaxyDownlinkJSONURL: downlink,
 				Version:               version,
 				Title:                 title,
-				GalaxyDownlinkJSONURL: downlink,
+				Type:                  typeValue,
 			}
 			if !isExtra {
 				gf.Platform, gf.Language = platform, language
@@ -297,6 +442,13 @@ func gameFiles(ctx context.Context, gamename, title, label string, nodes []any, 
 					}
 					continue
 				}
+			}
+			sz, ok, err := readFileSize(file.Size)
+			if err != nil {
+				return nil, wrap(where, err)
+			}
+			if ok {
+				gf.Size = strconv.FormatUint(sz, 10)
 			}
 			out = append(out, gf)
 		}
@@ -340,136 +492,6 @@ func indexByPath(files []GameFile, path string) int {
 	return -1
 }
 
-// wrap prefixes an error with where the conversion failed.
 func wrap(where string, err error) error {
 	return fmt.Errorf("%s: %w", where, err)
-}
-
-// The four readers below share one rule: a missing member (or a JSON null) is the
-// zero value; a present member of the wrong JSON type is an error.
-//
-// The shape gate is a Go-side type assertion, not jsonval's conversion: jsonval
-// deliberately coerces (a number is readable as a string), and that leniency must not
-// decide what a field is.
-
-// fieldString reads a string field.
-func fieldString(obj map[string]any, name string) (string, error) {
-	raw, ok := obj[name]
-	if !ok || raw == nil {
-		return "", nil
-	}
-	if _, isString := raw.(string); !isString {
-		return "", fmt.Errorf("%s: expected a JSON string, got %s", name, jsonval.Kind(raw))
-	}
-	return jsonval.Str(raw)
-}
-
-// idString reads one of the API's identifier fields — the product id, a DLC id, a
-// file id. It is a conversion, not a type test: the live product documents send these
-// ids as JSON numbers, and the same vector even mixes the shapes — an installer's id
-// is the string "en1installer0" while a bonus-content file's id is the number 13403.
-//
-// Accepted shapes: string as-is, number stringified the way jsonval.Str does it, bool
-// as "true"/"false", missing and null as "", object or array as an error. The split is
-// deliberate and narrow: slug, title, changelog, os, language, name, version and
-// downlink stay free strings under fieldString's strict gate, and `id` is the one
-// family read through a conversion.
-func idString(obj map[string]any, name string) (string, error) {
-	raw, ok := obj[name]
-	if !ok {
-		return "", nil
-	}
-	value, err := jsonval.Str(raw)
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", name, err)
-	}
-	return value, nil
-}
-
-// fieldObject reads an object field. jsonval.Object is itself a shape
-// assertion, so it needs no separate gate. A missing member yields a nil map,
-// which every reader below treats as empty.
-func fieldObject(obj map[string]any, name string) (map[string]any, error) {
-	raw, ok := obj[name]
-	if !ok || raw == nil {
-		return nil, nil
-	}
-	value, err := jsonval.Object(raw)
-	if err != nil {
-		return nil, wrap(name, err)
-	}
-	return value, nil
-}
-
-// fieldArray reads an array field; jsonval.Array is the shape assertion.
-func fieldArray(obj map[string]any, name string) ([]any, error) {
-	raw, ok := obj[name]
-	if !ok || raw == nil {
-		return nil, nil
-	}
-	value, err := jsonval.Array(raw)
-	if err != nil {
-		return nil, wrap(name, err)
-	}
-	return value, nil
-}
-
-// fieldInt reads an integer field under the same rule as fieldString: a number,
-// never a numeric string.
-func fieldInt(obj map[string]any, name string) (int64, error) {
-	raw, ok := obj[name]
-	if !ok || raw == nil {
-		return 0, nil
-	}
-	if !jsonval.IsNumber(raw) {
-		return 0, fmt.Errorf("%s: expected a JSON number, got %s", name, jsonval.Kind(raw))
-	}
-	value, err := jsonval.Int(raw)
-	if err != nil {
-		return 0, wrap(name, err)
-	}
-	return value, nil
-}
-
-// sizeString renders a file entry's size as the decimal text GameFile.Size carries: a
-// string value is taken verbatim, and any other value becomes its unsigned decimal text
-// when it is representable as one. A negative value, a non-integral number and a
-// boolean have no unsigned form and render as "" — a missing size must not turn into a
-// plausible-looking number.
-//
-// Values arrive decoded, so the shapes below are what encoding/json produces (float64,
-// json.Number) plus native integers.
-func sizeString(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	var u uint64
-	switch n := v.(type) {
-	case float64:
-		if n < 0 || n != float64(uint64(n)) {
-			return ""
-		}
-		u = uint64(n)
-	case json.Number:
-		i, err := n.Int64()
-		if err != nil || i < 0 {
-			return ""
-		}
-		u = uint64(i)
-	case int:
-		if n < 0 {
-			return ""
-		}
-		u = uint64(n)
-	case int64:
-		if n < 0 {
-			return ""
-		}
-		u = uint64(n)
-	case uint64:
-		u = n
-	default:
-		return ""
-	}
-	return strconv.FormatUint(u, 10)
 }

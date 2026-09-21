@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/webapi"
 )
@@ -66,7 +65,7 @@ func Wishlist(ctx context.Context, wx WishlistFetcher, opts WishlistOptions) ([]
 func mapWishlistItem(p map[string]any, opts WishlistOptions) (model.WishlistItem, bool, error) {
 	var item model.WishlistItem
 
-	isMovie, err := jsonval.Bool(p["isMovie"])
+	isMovie, err := boolValue(p["isMovie"])
 	if err != nil {
 		return item, false, fmt.Errorf("catalog: isMovie: %w", err)
 	}
@@ -82,11 +81,11 @@ func mapWishlistItem(p map[string]any, opts WishlistOptions) (model.WishlistItem
 		}
 	}
 
-	comingSoon, err := jsonval.Bool(p["isComingSoon"])
+	comingSoon, err := boolValue(p["isComingSoon"])
 	if err != nil {
 		return item, false, fmt.Errorf("catalog: isComingSoon: %w", err)
 	}
-	discounted, err := jsonval.Bool(p["isDiscounted"])
+	discounted, err := boolValue(p["isDiscounted"])
 	if err != nil {
 		return item, false, fmt.Errorf("catalog: isDiscounted: %w", err)
 	}
@@ -163,12 +162,12 @@ func wishlistReleaseDate(p map[string]any, comingSoon bool) (int64, error) {
 	}
 	switch v.(type) {
 	case int, int64, float64:
-		if n, err := jsonval.Int(v); err == nil {
+		if n, err := intValue(v); err == nil {
 			return n, nil
 		}
 		// A non-integral number takes the string path.
 	}
-	s, err := jsonval.Str(v)
+	s, err := scalarString(v)
 	if err != nil {
 		return 0, fmt.Errorf("catalog: releaseDate: %w", err)
 	}
@@ -197,7 +196,7 @@ func isEmptyJSON(v any) bool {
 //
 // An empty URL reaches the last branch.
 func wishlistURL(v any) (string, error) {
-	raw, err := jsonval.Str(v)
+	raw, err := scalarString(v)
 	if err != nil {
 		return "", fmt.Errorf("catalog: url: %w", err)
 	}
@@ -222,7 +221,7 @@ func asObject(v any) map[string]any {
 
 // stringField reads a string-valued member, reporting context on error.
 func stringField(obj map[string]any, key, field string) (string, error) {
-	s, err := jsonval.Str(obj[key])
+	s, err := scalarString(obj[key])
 	if err != nil {
 		return "", fmt.Errorf("catalog: %s: %w", field, err)
 	}
@@ -231,7 +230,7 @@ func stringField(obj map[string]any, key, field string) (string, error) {
 
 // boolField reads a boolean-valued member, reporting context on error.
 func boolField(obj map[string]any, key string) (bool, error) {
-	b, err := jsonval.Bool(obj[key])
+	b, err := boolValue(obj[key])
 	if err != nil {
 		return false, fmt.Errorf("catalog: %s: %w", key, err)
 	}
@@ -260,13 +259,16 @@ func percentField(obj map[string]any, key string) (string, error) {
 // anything else is stringified. Integer values are numbers too, so an integer
 // amount becomes "0.000000" rather than "0".
 func amountString(v any) (string, error) {
-	if jsonval.IsNumber(v) {
-		f, err := jsonval.Num(v)
-		if err != nil {
-			return "", err
-		}
-		// Six fixed decimals, never an exponent.
-		return strconv.FormatFloat(f, 'f', 6, 64), nil
+	switch t := v.(type) {
+	case float64:
+		return strconv.FormatFloat(t, 'f', 6, 64), nil
+	case int:
+		return strconv.FormatFloat(float64(t), 'f', 6, 64), nil
+	case int64:
+		return strconv.FormatFloat(float64(t), 'f', 6, 64), nil
+	case uint64:
+		return strconv.FormatFloat(float64(t), 'f', 6, 64), nil
+	default:
+		return scalarString(v)
 	}
-	return jsonval.Str(v)
 }

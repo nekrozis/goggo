@@ -11,11 +11,11 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 
 	"github.com/nekrozis/goggo/internal/config"
-	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/util"
 	"github.com/nekrozis/goggo/internal/webapi"
@@ -171,7 +171,7 @@ func fetchProducts(ctx context.Context, wx ProductFetcher, opts ListOptions) ([]
 // A failing details request is skipped: the game stays listed without DLC
 // information. No failure counter is kept, because no consumer needs one.
 func enrichDLC(ctx context.Context, wx ProductFetcher, product map[string]any, filters Filters, item *model.GameItem) error {
-	dlcCount, err := jsonval.Int(product["dlcCount"])
+	dlcCount, err := intValue(product["dlcCount"])
 	if err != nil {
 		return fmt.Errorf("catalog: dlcCount: %w", err)
 	}
@@ -197,7 +197,7 @@ func enrichDLC(ctx context.Context, wx ProductFetcher, product map[string]any, f
 
 // mapProduct turns one raw product into a GameItem plus its platform mask.
 func mapProduct(p map[string]any) (model.GameItem, uint32, error) {
-	name, err := jsonval.Str(p["slug"])
+	name, err := scalarString(p["slug"])
 	if err != nil {
 		return model.GameItem{}, 0, fmt.Errorf("catalog: slug: %w", err)
 	}
@@ -205,7 +205,7 @@ func mapProduct(p map[string]any) (model.GameItem, uint32, error) {
 	if err != nil {
 		return model.GameItem{}, 0, fmt.Errorf("catalog: id: %w", err)
 	}
-	isNew, err := jsonval.Bool(p["isNew"])
+	isNew, err := boolValue(p["isNew"])
 	if err != nil {
 		return model.GameItem{}, 0, fmt.Errorf("catalog: isNew: %w", err)
 	}
@@ -230,17 +230,17 @@ func productID(v any) (string, error) {
 // used for product ids and for the wishlist discount percentage.
 //
 // Only integer-shaped values enter the integer branch: a boolean, a string or null
-// must stringify instead. Do not widen this gate — jsonval.Int alone would coerce
+// must stringify instead. Do not widen this gate — intValue alone would coerce
 // true to "1".
 func intShapedString(v any) (string, error) {
 	switch v.(type) {
 	case int, int64, uint64, float64:
-		if n, err := jsonval.Int(v); err == nil {
+		if n, err := intValue(v); err == nil {
 			return strconv.FormatInt(n, 10), nil
 		}
 		// A non-integral number falls through to the string form below.
 	}
-	return jsonval.Str(v)
+	return scalarString(v)
 }
 
 // productUpdates reads the update count: an absent or null member leaves it at
@@ -249,15 +249,15 @@ func intShapedString(v any) (string, error) {
 //
 // An over-long number yields 0 instead of failing the listing.
 func productUpdates(v any) (int, error) {
-	switch v.(type) {
+	switch t := v.(type) {
 	case nil:
 		return 0, nil
 	case int:
-		return v.(int), nil
+		return t, nil
 	case int64:
-		return int(v.(int64)), nil
+		return int(t), nil
 	}
-	s, err := jsonval.Str(v)
+	s, err := scalarString(v)
 	if err != nil {
 		return 0, fmt.Errorf("catalog: updates: %w", err)
 	}
@@ -320,7 +320,7 @@ func platformBits(worksOn map[string]any) (uint32, error) {
 		{"Mac", config.PlatformMac},
 		{"Linux", config.PlatformLinux},
 	} {
-		on, err := jsonval.Bool(worksOn[entry.key])
+		on, err := boolValue(worksOn[entry.key])
 		if err != nil {
 			return 0, fmt.Errorf("catalog: worksOn.%s: %w", entry.key, err)
 		}
@@ -329,4 +329,99 @@ func platformBits(worksOn map[string]any) (uint32, error) {
 		}
 	}
 	return platform, nil
+}
+
+func mapKind(v any) string {
+	switch v.(type) {
+	case nil:
+		return "null"
+	case bool:
+		return "boolean"
+	case string:
+		return "string"
+	case float64, int, int64, uint64:
+		return "number"
+	case []any:
+		return "array"
+	case map[string]any:
+		return "object"
+	default:
+		return fmt.Sprintf("%T", v)
+	}
+}
+
+func boolValue(v any) (bool, error) {
+	switch t := v.(type) {
+	case nil:
+		return false, nil
+	case bool:
+		return t, nil
+	case int:
+		return t != 0, nil
+	case int64:
+		return t != 0, nil
+	case uint64:
+		return t != 0, nil
+	case float64:
+		return t != 0, nil
+	default:
+		return false, fmt.Errorf("expected a bool, got %s", mapKind(v))
+	}
+}
+
+const maxInt64Exclusive = float64(1 << 63)
+
+func intValue(v any) (int64, error) {
+	switch t := v.(type) {
+	case nil:
+		return 0, nil
+	case bool:
+		if t {
+			return 1, nil
+		}
+		return 0, nil
+	case int:
+		return int64(t), nil
+	case int64:
+		return t, nil
+	case uint64:
+		if t > math.MaxInt64 {
+			return 0, fmt.Errorf("integer %d overflows int64", t)
+		}
+		return int64(t), nil
+	case float64:
+		if math.IsNaN(t) || math.IsInf(t, 0) || t != math.Trunc(t) {
+			return 0, fmt.Errorf("expected an integer, got %v", t)
+		}
+		if t >= maxInt64Exclusive || t < -maxInt64Exclusive {
+			return 0, fmt.Errorf("integer %v overflows int64", t)
+		}
+		return int64(t), nil
+	default:
+		return 0, fmt.Errorf("expected an integer, got %s", mapKind(v))
+	}
+}
+
+func scalarString(v any) (string, error) {
+	switch t := v.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return t, nil
+	case bool:
+		if t {
+			return "true", nil
+		}
+		return "false", nil
+	case int:
+		return strconv.Itoa(t), nil
+	case int64:
+		return strconv.FormatInt(t, 10), nil
+	case uint64:
+		return strconv.FormatUint(t, 10), nil
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64), nil
+	default:
+		return "", fmt.Errorf("expected a string, got %s", mapKind(v))
+	}
 }

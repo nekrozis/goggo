@@ -227,21 +227,13 @@ func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[st
 	if err := resolver.refresh.refreshIfExpired(ctx); err != nil {
 		return gamedetails.GameDetails{}, fmt.Errorf("galaxy: refresh login: %w", err)
 	}
-	product, err := d.galaxy.Product(ctx, id)
+	prodDoc, err := d.galaxy.Product(ctx, id)
 	if err != nil {
 		return gamedetails.GameDetails{}, err
 	}
 	cfg := d.cfg.DownloadConfig
 	cfg.Include = include
-
-	// Temporary JSON bridge.
-	// galaxy.Product currently exposes map data.
-	// Removed after galaxy product transport migrates to raw JSON.
-	rawProduct, err := json.Marshal(product)
-	if err != nil {
-		return gamedetails.GameDetails{}, err
-	}
-	gd, err := gamedetails.ProductInfoToGameDetails(ctx, rawProduct, cfg, owned, resolver.Resolve)
+	gd, err := gamedetails.ProductInfoToGameDetails(ctx, prodDoc.JSON, cfg, owned, resolver.Resolve)
 	if err != nil {
 		return gamedetails.GameDetails{}, err
 	}

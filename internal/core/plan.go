@@ -209,7 +209,7 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 	// one, and it happens only when a request is actually about to go out.
 	installDirectory := ""
 	if d.cfg.Directories.SubDirectories {
-		var product map[string]any
+		var productSlug, productTitle string
 		if InstallSubdirNeedsProductInfo(req.SubdirTemplate) {
 			baseID, err := documentString(manifest, "baseProductId")
 			if err != nil {
@@ -223,12 +223,15 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 				if err := refresh.refreshIfExpired(ctx); err != nil {
 					return res, fmt.Errorf("galaxy: refresh login: %w", err)
 				}
-				if product, err = d.galaxy.Product(ctx, baseID); err != nil {
+				prodDoc, err := d.galaxy.Product(ctx, baseID)
+				if err != nil {
 					return res, err
 				}
+				productSlug = prodDoc.Slug
+				productTitle = prodDoc.Title
 			}
 		}
-		installDirectory, err = ResolveInstallSubdir(req.SubdirTemplate, manifest, product)
+		installDirectory, err = ResolveInstallSubdir(req.SubdirTemplate, manifest, productSlug, productTitle)
 		if err != nil {
 			return res, err
 		}

@@ -1,11 +1,14 @@
 package core
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -253,7 +256,7 @@ func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[st
 			return gd, nil
 		}
 		if cfg.SaveGameDetailsJSON && gd.GameDetailsJson == "" {
-			rendered, err := util.StyledJSON(details)
+			rendered, err := util.StyledJSONBytes(details)
 			if err != nil {
 				gd.MetadataDiag = err.Error()
 			} else {
@@ -264,20 +267,12 @@ func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[st
 			gd.Serials, gd.SerialsDiag = serialsFromDetails(details)
 		}
 		if cfg.SaveChangelogs && gd.Changelog == "" {
-			// Temporary JSON bridge.
-			// web.GameDetailsJSON currently exposes map data.
-			// Removed after webapi response transport migrates to raw JSON.
-			rawDetails, err := json.Marshal(details)
-			if err != nil {
+			cl, err := gamedetails.ChangelogFromJSON(details)
+			switch {
+			case err != nil:
 				gd.MetadataDiag = err.Error()
-			} else {
-				cl, err := gamedetails.ChangelogFromJSON(rawDetails)
-				switch {
-				case err != nil:
-					gd.MetadataDiag = err.Error()
-				case cl != "":
-					gd.Changelog = cl
-				}
+			case cl != "":
+				gd.Changelog = cl
 			}
 		}
 	}
@@ -287,12 +282,14 @@ func (d *Downloader) gameDetailsFor(ctx context.Context, id string, owned map[st
 // serialsFromDetails reads the cdKey member — a missing or null member is no
 // serials, a wrong shape is a diagnostic — and hands the text to the
 // extraction, whose fail-closed result travels as the second return value.
-func serialsFromDetails(details map[string]any) (text, diag string) {
-	raw, ok := details["cdKey"]
-	if !ok || raw == nil {
-		return "", ""
+func serialsFromDetails(details []byte) (text, diag string) {
+	var doc struct {
+		CDKey jsontext.Value `json:"cdKey"`
 	}
-	cdKey, err := scalarString(raw)
+	if err := jsonv2.Unmarshal(details, &doc); err != nil {
+		return "", "game details: " + err.Error()
+	}
+	cdKey, err := cdKeyString(doc.CDKey)
 	if err != nil {
 		return "", "game details: cdKey: " + err.Error()
 	}
@@ -301,6 +298,41 @@ func serialsFromDetails(details map[string]any) (text, diag string) {
 		return "", "cdKey carries <span> markup this build does not parse: serials not written"
 	}
 	return text, ""
+}
+
+// cdKeyString reads the cdKey member. It is one of the loosely typed members: a
+// number or a boolean is a value rather than a broken document, and a missing
+// member and a null one are the empty string. Only a container has no text form.
+//
+// A number keeps the text a decode into a Go value produced for it — a float64
+// rendered as fixed point, so 1e3 reads "1000" — rather than the spelling it
+// arrived in, and a magnitude a float64 cannot hold is out of range, which is
+// the boundary the typed decode drew as well. The document's own literal
+// survives only where the raw bytes are handed on; this projection is not that
+// place.
+func cdKeyString(v jsontext.Value) (string, error) {
+	switch v.Kind() {
+	case jsontext.KindInvalid, jsontext.KindNull:
+		return "", nil
+	case jsontext.KindString, jsontext.KindNumber, jsontext.KindTrue, jsontext.KindFalse:
+		tok, err := jsontext.NewDecoder(bytes.NewReader(v)).ReadToken()
+		if err != nil {
+			return "", err
+		}
+		if tok.Kind() == jsontext.KindNumber {
+			f, err := tok.Float()
+			if err != nil {
+				return "", err
+			}
+			return strconv.FormatFloat(f, 'f', -1, 64), nil
+		}
+		return tok.String(), nil
+	case jsontext.KindBeginObject:
+		return "", errors.New("expected a string, got object")
+	case jsontext.KindBeginArray:
+		return "", errors.New("expected a string, got array")
+	}
+	return "", fmt.Errorf("expected a string, got %s", v.Kind())
 }
 
 // effectiveInclude is the type mask an acquisition run consumes: the request's

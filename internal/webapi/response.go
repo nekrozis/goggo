@@ -31,24 +31,10 @@ func (c *Client) getResponseBytes(ctx context.Context, url string) ([]byte, erro
 	return c.hx.GetBytesWithRetry(ctx, url)
 }
 
-// getResponseJSON fetches url and decodes the body as a JSON object. A body that
-// is not an object is an error.
-func (c *Client) getResponseJSON(ctx context.Context, url string) (map[string]any, error) {
-	body, err := c.getResponseBytes(ctx, url)
-	if err != nil {
-		return nil, err
-	}
-	var obj map[string]any
-	if err := decodeObject(body, &obj); err != nil {
-		return nil, err
-	}
-	return obj, nil
-}
-
-// decodeJSONObject decodes a JSON object body. A body that is empty, malformed
-// or not a JSON object is reported as ErrNotJSON: this is a response-SHAPE
-// problem, which callers may want to translate into their own hint (the CLI
-// renders the "--login" advice). HTTP-level failures never reach here —
+// decodeJSONObject decodes a JSON object body into a Go value. A body that is
+// empty, malformed or not a JSON object is reported as ErrNotJSON: this is a
+// response-SHAPE problem, which callers may want to translate into their own hint
+// (the CLI renders the "--login" advice). HTTP-level failures never reach here —
 // getResponse has already turned >= 400 into a *httpx.StatusError.
 func decodeJSONObject(body string) (map[string]any, error) {
 	var obj map[string]any
@@ -58,22 +44,51 @@ func decodeJSONObject(body string) (map[string]any, error) {
 	return obj, nil
 }
 
-// decodeObject decodes an object-shaped JSON body. Empty, whitespace, malformed,
-// or non-object payloads are returned as ErrNotJSON.
-func decodeObject(body []byte, target any) error {
-	trimmed := bytes.TrimSpace(body)
-	if len(trimmed) == 0 {
+// requireJSONObject reports whether body is exactly one complete JSON object.
+//
+// It is a pure shape gate: it does not trim, does not build a Go value and does
+// not reorder members, and it neither clones nor modifies the caller's body.
+// That last part is the point — the bytes that pass here are handed on as the
+// document, so a gate that rewrote or normalised them would hand on something
+// the server did not send. The decoder does read the body into its own buffer;
+// the guarantee is about the caller's slice, not about the decoder.
+func requireJSONObject(body []byte) error {
+	if len(body) == 0 {
 		return fmt.Errorf("%w: empty body", ErrNotJSON)
 	}
-	dec := jsontext.NewDecoder(bytes.NewReader(trimmed))
-	tok, err := dec.ReadToken()
+	dec := jsontext.NewDecoder(bytes.NewReader(body))
+	val, err := dec.ReadValue()
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrNotJSON, err)
 	}
-	if tok.Kind() != jsontext.KindBeginObject {
-		return fmt.Errorf("%w: got %s", ErrNotJSON, tok.Kind())
+	// The kind has to be taken before the decoder is used again: ReadValue's
+	// result aliases the decoder's internal buffer, and the next read reuses it.
+	kind := val.Kind()
+	switch _, err := dec.ReadToken(); {
+	case err == nil:
+		return fmt.Errorf("%w: trailing content after the top-level value", ErrNotJSON)
+	case errors.Is(err, io.EOF):
+		// exactly one complete top-level value, as the shape contract requires
+	default:
+		return fmt.Errorf("%w: %w", ErrNotJSON, err)
 	}
-	if err := jsonv2.Unmarshal(trimmed, target); err != nil {
+	if kind != jsontext.KindBeginObject {
+		return fmt.Errorf("%w: got %s", ErrNotJSON, kind)
+	}
+	return nil
+}
+
+// decodeObject decodes an object-shaped JSON body into target. An empty,
+// malformed or non-object payload is ErrNotJSON, and the shape decision itself
+// belongs to requireJSONObject.
+//
+// The decoder is given the ORIGINAL bytes: whitespace the format does not accept
+// has to reach it and be rejected, which trimming the body first would prevent.
+func decodeObject(body []byte, target any) error {
+	if err := requireJSONObject(body); err != nil {
+		return err
+	}
+	if err := jsonv2.Unmarshal(body, target); err != nil {
 		return fmt.Errorf("%w: %w", ErrNotJSON, err)
 	}
 	return nil

@@ -1,16 +1,15 @@
 package util
 
-import "testing"
+import (
+	"encoding/json/jsontext"
+	"testing"
+)
 
 // TestManualURLsFromJSON locks the collection order: arrays keep their element
-// order, object members are visited in sorted key order so the result stays
-// deterministic even though Go's map does not preserve document order.
+// order, object members are visited in sorted key order.
 func TestManualURLsFromJSON(t *testing.T) {
 	t.Run("array keeps order", func(t *testing.T) {
-		in := []any{
-			map[string]any{"manualUrl": "b"},
-			map[string]any{"manualUrl": "a"},
-		}
+		in := jsontext.Value(`[{"manualUrl":"b"},{"manualUrl":"a"}]`)
 		got, err := ManualURLsFromJSON(in)
 		if err != nil {
 			t.Fatalf("ManualURLsFromJSON: %v", err)
@@ -21,11 +20,10 @@ func TestManualURLsFromJSON(t *testing.T) {
 	})
 
 	t.Run("object keys are sorted", func(t *testing.T) {
-		in := map[string]any{
-			"2": map[string]any{"manualUrl": "second"},
-			"1": map[string]any{"manualUrl": "first"},
-			"3": map[string]any{"manualUrl": "third"},
-		}
+		// The document spells its members out of order on purpose. A fixture
+		// built through a Go map would arrive already sorted and could not show
+		// that the walk does the sorting.
+		in := jsontext.Value(`{"2":{"manualUrl":"second"},"1":{"manualUrl":"first"},"3":{"manualUrl":"third"}}`)
 		got, err := ManualURLsFromJSON(in)
 		if err != nil {
 			t.Fatalf("ManualURLsFromJSON: %v", err)
@@ -36,11 +34,7 @@ func TestManualURLsFromJSON(t *testing.T) {
 	})
 
 	t.Run("nested containers are walked", func(t *testing.T) {
-		in := map[string]any{
-			"outer": []any{
-				map[string]any{"inner": map[string]any{"manualUrl": "deep"}},
-			},
-		}
+		in := jsontext.Value(`{"outer":[{"inner":{"manualUrl":"deep"}}]}`)
 		got, err := ManualURLsFromJSON(in)
 		if err != nil {
 			t.Fatalf("ManualURLsFromJSON: %v", err)
@@ -51,58 +45,76 @@ func TestManualURLsFromJSON(t *testing.T) {
 	})
 
 	t.Run("a manualUrl member is not recursed into", func(t *testing.T) {
-		in := map[string]any{"manualUrl": map[string]any{"manualUrl": "hidden"}}
+		in := jsontext.Value(`{"manualUrl":{"manualUrl":"hidden"}}`)
 		if _, err := ManualURLsFromJSON(in); err == nil {
 			t.Error("want error for a non-scalar manualUrl")
 		}
 	})
 
 	t.Run("manualUrl scalar coercion and container rejection", func(t *testing.T) {
+		// The numeric cases pin the RENDERING, not the spelling the member
+		// arrived in: a number is rendered the way a decode into a Go value
+		// rendered it — a float64 as fixed point — so an exponent form reads as
+		// its value and a magnitude float64 cannot hold is an error. 5.25 alone
+		// cannot show that, because its spelling and its rendering agree.
 		cases := []struct {
 			name    string
-			val     any
+			val     string
 			want    string
 			wantErr bool
 		}{
-			{name: "string", val: "https://example.com/dlc", want: "https://example.com/dlc"},
-			{name: "int", val: 12345, want: "12345"},
-			{name: "int64", val: int64(9876543210), want: "9876543210"},
-			{name: "uint64", val: uint64(1234567890123), want: "1234567890123"},
-			{name: "float64", val: 5.25, want: "5.25"},
-			{name: "bool true", val: true, want: "true"},
-			{name: "bool false", val: false, want: "false"},
-			{name: "null", val: nil, want: ""},
-			{name: "array rejected", val: []any{"a"}, wantErr: true},
-			{name: "object rejected", val: map[string]any{"a": 1}, wantErr: true},
+			{name: "string", val: `"https://example.com/dlc"`, want: "https://example.com/dlc"},
+			{name: "integer", val: `12345`, want: "12345"},
+			{name: "wide integer", val: `1234567890123`, want: "1234567890123"},
+			{name: "fraction", val: `5.25`, want: "5.25"},
+			{name: "exponent", val: `1e3`, want: "1000"},
+			{name: "negative exponent", val: `1e-7`, want: "0.0000001"},
+			{name: "negative zero", val: `-0`, want: "-0"},
+			// Beyond float64's precision but inside its exponent range: the
+			// rendering is the float64, not the document's literal. Precision
+			// preservation belongs to the paths that hand the raw bytes on.
+			{name: "integer beyond float64 precision", val: `58812465975493914`, want: "58812465975493910"},
+			{name: "number beyond float64 range", val: `1e400`, wantErr: true},
+			{name: "bool true", val: `true`, want: "true"},
+			{name: "bool false", val: `false`, want: "false"},
+			{name: "null", val: `null`, want: ""},
+			{name: "array rejected", val: `["a"]`, wantErr: true},
+			{name: "object rejected", val: `{"a":1}`, wantErr: true},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
-				in := map[string]any{"manualUrl": tc.val}
+				in := jsontext.Value(`{"manualUrl":` + tc.val + `}`)
 				got, err := ManualURLsFromJSON(in)
 				if tc.wantErr {
 					if err == nil {
-						t.Fatalf("ManualURLsFromJSON(%#v) expected error, got nil", tc.val)
+						t.Fatalf("ManualURLsFromJSON(%s) expected error, got nil", tc.val)
 					}
 					return
 				}
 				if err != nil {
-					t.Fatalf("ManualURLsFromJSON(%#v) unexpected error: %v", tc.val, err)
+					t.Fatalf("ManualURLsFromJSON(%s) unexpected error: %v", tc.val, err)
 				}
 				if len(got) != 1 || got[0] != tc.want {
-					t.Errorf("ManualURLsFromJSON(%#v) = %v, want [%q]", tc.val, got, tc.want)
+					t.Errorf("ManualURLsFromJSON(%s) = %v, want [%q]", tc.val, got, tc.want)
 				}
 			})
 		}
 	})
 
-	t.Run("scalars and empty input contribute nothing", func(t *testing.T) {
-		for _, in := range []any{nil, "text", float64(1), []any{}, map[string]any{}} {
+	t.Run("non-containers contribute nothing", func(t *testing.T) {
+		for _, in := range []jsontext.Value{
+			jsontext.Value("null"),
+			jsontext.Value(`"text"`),
+			jsontext.Value("1"),
+			jsontext.Value("[]"),
+			jsontext.Value("{}"),
+		} {
 			got, err := ManualURLsFromJSON(in)
 			if err != nil {
-				t.Fatalf("ManualURLsFromJSON(%#v): %v", in, err)
+				t.Fatalf("ManualURLsFromJSON(%s): %v", in, err)
 			}
 			if len(got) != 0 {
-				t.Errorf("ManualURLsFromJSON(%#v) = %v, want none", in, got)
+				t.Errorf("ManualURLsFromJSON(%s) = %v, want none", in, got)
 			}
 		}
 	})
@@ -113,37 +125,37 @@ func TestManualURLsFromJSON(t *testing.T) {
 func TestDLCNamesFromJSON(t *testing.T) {
 	cases := []struct {
 		name string
-		in   any
+		in   jsontext.Value
 		want []string
 	}{
 		{
 			name: "names between /downloads/ and the last slash",
-			in: []any{
-				map[string]any{"manualUrl": "https://www.gog.com/downloads/dlc_one/setup.exe"},
-				map[string]any{"manualUrl": "https://www.gog.com/downloads/dlc_two/patch.exe"},
-			},
+			in: jsontext.Value(`[
+				{"manualUrl":"https://www.gog.com/downloads/dlc_one/setup.exe"},
+				{"manualUrl":"https://www.gog.com/downloads/dlc_two/patch.exe"}
+			]`),
 			want: []string{"dlc_one", "dlc_two"},
 		},
 		{
 			name: "first occurrence wins",
-			in: []any{
-				map[string]any{"manualUrl": "https://x/downloads/dup/a"},
-				map[string]any{"manualUrl": "https://x/downloads/other/a"},
-				map[string]any{"manualUrl": "https://x/downloads/dup/b"},
-			},
+			in: jsontext.Value(`[
+				{"manualUrl":"https://x/downloads/dup/a"},
+				{"manualUrl":"https://x/downloads/other/a"},
+				{"manualUrl":"https://x/downloads/dup/b"}
+			]`),
 			want: []string{"dup", "other"},
 		},
 		{
 			name: "urls without the marker are skipped",
-			in: []any{
-				map[string]any{"manualUrl": "https://x/other/thing"},
-				map[string]any{"manualUrl": "https://x/downloads/kept/f"},
-			},
+			in: jsontext.Value(`[
+				{"manualUrl":"https://x/other/thing"},
+				{"manualUrl":"https://x/downloads/kept/f"}
+			]`),
 			want: []string{"kept"},
 		},
 		{
 			name: "marker without a following slash is skipped",
-			in:   []any{map[string]any{"manualUrl": "https://x/downloads/"}},
+			in:   jsontext.Value(`[{"manualUrl":"https://x/downloads/"}]`),
 			want: nil,
 		},
 		{name: "empty input", in: nil, want: nil},

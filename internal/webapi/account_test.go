@@ -29,7 +29,8 @@ func accountServer(t *testing.T, body string, status int) (*httptest.Server, *st
 }
 
 func TestGameDetailsJSONRequestAndDecode(t *testing.T) {
-	srv, lastURI := accountServer(t, `{"title":"Alpha","dlcs":[{"manualUrl":"x"}]}`, http.StatusOK)
+	const body = `{"title":"Alpha","dlcs":[{"manualUrl":"x"}]}`
+	srv, lastURI := accountServer(t, body, http.StatusOK)
 	cl, _ := newTestClient(t, srv, 0)
 
 	got, err := cl.GameDetailsJSON(context.Background(), "1207659156")
@@ -39,8 +40,8 @@ func TestGameDetailsJSONRequestAndDecode(t *testing.T) {
 	if *lastURI != "/www/account/gameDetails/1207659156.json" {
 		t.Errorf("request URI = %q", *lastURI)
 	}
-	if got["title"] != "Alpha" {
-		t.Errorf("details = %v", got)
+	if string(got) != body {
+		t.Errorf("details = %q, want the body exactly as the server sent it", got)
 	}
 }
 

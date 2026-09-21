@@ -13,7 +13,7 @@ type GameItem struct {
 
 	// GameDetailsJSON is the raw per-game details document, nil when it was
 	// not requested or the request failed.
-	GameDetailsJSON map[string]any
+	GameDetailsJSON []byte
 
 	// Updates is the product's update count.
 	Updates int

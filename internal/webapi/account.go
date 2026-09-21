@@ -7,10 +7,21 @@ import (
 	"fmt"
 )
 
-// GameDetailsJSON fetches the per-game details document. A response that is not
-// a JSON object is an error; the caller decides what to do with it.
-func (c *Client) GameDetailsJSON(ctx context.Context, gameID string) (map[string]any, error) {
-	return c.getResponseJSON(ctx, c.ep.www+"/account/gameDetails/"+gameID+".json")
+// GameDetailsJSON fetches the per-game details document as raw bytes. A response
+// that is not a JSON object is an error; the caller decides what to do with it.
+//
+// The document arrives as the server sent it: the members keep their order,
+// their number literals and their escape spellings, so a caller that only
+// reformats it never pays for a decode and never loses a digit.
+func (c *Client) GameDetailsJSON(ctx context.Context, gameID string) ([]byte, error) {
+	body, err := c.getResponseBytes(ctx, c.ep.www+"/account/gameDetails/"+gameID+".json")
+	if err != nil {
+		return nil, err
+	}
+	if err := requireJSONObject(body); err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
 // OwnedGameIDs fetches the ids of all owned products. It returns them rather

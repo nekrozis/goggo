@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -944,5 +945,80 @@ func TestGameDetailsToleratesASkippedFile(t *testing.T) {
 	}
 	if len(res[0].Installers) != 1 || !strings.Contains(res[0].Installers[0].Path, "good.exe") {
 		t.Errorf("installers = %+v, want only the resolvable file", res[0].Installers)
+	}
+}
+
+// TestCDKeyStringRendering locks the text a loosely typed cdKey reads as. The
+// member keeps the text a decode into a Go value produced for it — a float64
+// rendered as fixed point — rather than the spelling it arrived in: 1e3 reads
+// "1000", and a magnitude float64 cannot hold is out of range exactly as the
+// typed decode made it. Reading the member's own lexical form instead would be
+// the silent change these cases exist to catch, and 5.25 cannot catch it because
+// its spelling and its rendering agree.
+func TestCDKeyStringRendering(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{name: "string", in: `"KEY-1"`, want: "KEY-1"},
+		{name: "integer", in: `12345`, want: "12345"},
+		{name: "fraction", in: `5.25`, want: "5.25"},
+		{name: "exponent", in: `1e3`, want: "1000"},
+		{name: "negative exponent", in: `1e-7`, want: "0.0000001"},
+		{name: "negative zero", in: `-0`, want: "-0"},
+		// Beyond float64's precision but inside its exponent range: this
+		// projection stays lossy on purpose. The precision-preserving path is
+		// the game-details artifact, which hands the document's raw bytes on.
+		{name: "integer beyond float64 precision", in: `58812465975493914`, want: "58812465975493910"},
+		{name: "number beyond float64 range", in: `1e400`, wantErr: true},
+		{name: "bool true", in: `true`, want: "true"},
+		{name: "bool false", in: `false`, want: "false"},
+		{name: "null", in: `null`, want: ""},
+		{name: "absent", in: ``, want: ""},
+		{name: "object rejected", in: `{"a":1}`, wantErr: true},
+		{name: "array rejected", in: `["a"]`, wantErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := cdKeyString(jsontext.Value(c.in))
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("cdKeyString(%s) = %q, want an error", c.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("cdKeyString(%s): %v", c.in, err)
+			}
+			if got != c.want {
+				t.Errorf("cdKeyString(%s) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestSerialsFromDetailsKeepsTheCDKeyRendering locks the same rule one level up,
+// where the save flag consumes it: an exponent cdKey reaches the serials text as
+// its value, not as its spelling.
+func TestSerialsFromDetailsKeepsTheCDKeyRendering(t *testing.T) {
+	text, diag := serialsFromDetails([]byte(`{"cdKey":1e3}`))
+	if diag != "" {
+		t.Fatalf("diagnostic = %q, want none", diag)
+	}
+	if text != "1000\n" {
+		t.Errorf("serials = %q, want %q", text, "1000\n")
+	}
+}
+
+// TestSerialsFromDetailsAbsentAndNullCDKey locks the two shapes that are no
+// serials rather than a diagnostic.
+func TestSerialsFromDetailsAbsentAndNullCDKey(t *testing.T) {
+	for _, in := range []string{`{}`, `{"cdKey":null}`} {
+		text, diag := serialsFromDetails([]byte(in))
+		if text != "" || diag != "" {
+			t.Errorf("serialsFromDetails(%s) = %q/%q, want empty and no diagnostic", in, text, diag)
+		}
 	}
 }

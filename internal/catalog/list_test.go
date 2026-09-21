@@ -26,7 +26,7 @@ type fakeFetcher struct {
 	pageErr    error
 	owned      []string
 	ownedErr   error
-	details    map[string]map[string]any
+	details    map[string][]byte
 	detailsErr map[string]error
 	detailIDs  []string
 }
@@ -44,7 +44,7 @@ func (f *fakeFetcher) FilteredProductsPage(_ context.Context, q webapi.ProductQu
 	return pg, nil
 }
 
-func (f *fakeFetcher) GameDetailsJSON(_ context.Context, gameID string) (map[string]any, error) {
+func (f *fakeFetcher) GameDetailsJSON(_ context.Context, gameID string) ([]byte, error) {
 	f.detailIDs = append(f.detailIDs, gameID)
 	if err, ok := f.detailsErr[gameID]; ok {
 		return nil, err
@@ -297,12 +297,12 @@ func TestListInvalidRegexFailsBeforeFetching(t *testing.T) {
 // TestListDLCEnrichment covers the two triggers, the GFDLC gate and the
 // soft-skip behaviour.
 func TestListDLCEnrichment(t *testing.T) {
-	details := map[string]map[string]any{
-		"1": {"dlcs": []any{
-			map[string]any{"manualUrl": "https://www.gog.com/downloads/dlc_one/x"},
-			map[string]any{"manualUrl": "https://www.gog.com/downloads/dlc_two/y"},
-			map[string]any{"manualUrl": "https://www.gog.com/downloads/dlc_one/z"},
-		}},
+	details := map[string][]byte{
+		"1": []byte(`{"dlcs":[
+			{"manualUrl":"https://www.gog.com/downloads/dlc_one/x"},
+			{"manualUrl":"https://www.gog.com/downloads/dlc_two/y"},
+			{"manualUrl":"https://www.gog.com/downloads/dlc_one/z"}
+		]}`),
 	}
 
 	t.Run("dlcCount triggers", func(t *testing.T) {

@@ -10,6 +10,8 @@ package catalog
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"math"
 	"sort"
@@ -25,7 +27,7 @@ import (
 // satisfied by *webapi.Client; tests provide their own implementation.
 type ProductFetcher interface {
 	FilteredProductsPage(ctx context.Context, q webapi.ProductQuery, page int) (webapi.ProductPage, error)
-	GameDetailsJSON(ctx context.Context, gameID string) (map[string]any, error)
+	GameDetailsJSON(ctx context.Context, gameID string) ([]byte, error)
 	OwnedGameIDs(ctx context.Context) ([]string, error)
 }
 
@@ -186,7 +188,15 @@ func enrichDLC(ctx context.Context, wx ProductFetcher, product map[string]any, f
 	if err != nil {
 		return nil // soft skip
 	}
-	names, err := util.DLCNamesFromJSON(details["dlcs"])
+	// The walker is handed the subtree it knows how to walk; which member holds
+	// that subtree is this consumer's business, not the walker's.
+	var doc struct {
+		DLCs jsontext.Value `json:"dlcs"`
+	}
+	if err := jsonv2.Unmarshal(details, &doc); err != nil {
+		return nil // soft skip: the details document is unusable, the game is not
+	}
+	names, err := util.DLCNamesFromJSON(doc.DLCs)
 	if err != nil {
 		return nil // soft skip: the details document is unusable, the game is not
 	}

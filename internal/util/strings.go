@@ -1,6 +1,9 @@
 package util
 
 import (
+	"bytes"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"sort"
 	"strconv"
@@ -46,9 +49,9 @@ func StrippedString(s string) string {
 // "manualUrl" member is taken without recursing into it, any other value is walked.
 //
 // Ordering: JSON arrays keep their element order, while object members are visited
-// in sorted key order, because Go's map[string]any does not preserve document order
-// and the result must be deterministic.
-func ManualURLsFromJSON(v any) ([]string, error) {
+// in sorted key order. The walk gathers a set-like result, so it must not depend on
+// how the document happened to order an object's members.
+func ManualURLsFromJSON(v jsontext.Value) ([]string, error) {
 	var urls []string
 	if err := collectManualURLs(v, &urls); err != nil {
 		return nil, err
@@ -58,29 +61,37 @@ func ManualURLsFromJSON(v any) ([]string, error) {
 
 // collectManualURLs is the recursive core of ManualURLsFromJSON. A value that is
 // neither an array nor an object contributes nothing.
-func collectManualURLs(v any, urls *[]string) error {
-	switch t := v.(type) {
-	case map[string]any:
-		keys := make([]string, 0, len(t))
-		for k := range t {
+func collectManualURLs(v jsontext.Value, urls *[]string) error {
+	switch v.Kind() {
+	case jsontext.KindBeginObject:
+		var members map[string]jsontext.Value
+		if err := jsonv2.Unmarshal(v, &members); err != nil {
+			return err
+		}
+		keys := make([]string, 0, len(members))
+		for k := range members {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
 			if k == "manualUrl" {
-				s, err := manualURLString(t[k])
+				s, err := manualURLString(members[k])
 				if err != nil {
 					return fmt.Errorf("util: manualUrl: %w", err)
 				}
 				*urls = append(*urls, s)
 				continue
 			}
-			if err := collectManualURLs(t[k], urls); err != nil {
+			if err := collectManualURLs(members[k], urls); err != nil {
 				return err
 			}
 		}
-	case []any:
-		for _, child := range t {
+	case jsontext.KindBeginArray:
+		var elements []jsontext.Value
+		if err := jsonv2.Unmarshal(v, &elements); err != nil {
+			return err
+		}
+		for _, child := range elements {
 			if err := collectManualURLs(child, urls); err != nil {
 				return err
 			}
@@ -89,32 +100,39 @@ func collectManualURLs(v any, urls *[]string) error {
 	return nil
 }
 
-func manualURLString(v any) (string, error) {
-	switch t := v.(type) {
-	case nil:
+// manualURLString reads a manualUrl member. It is one of the loosely typed
+// members: a number or a boolean is a value rather than a broken document, and
+// only a container has no text form.
+//
+// A number keeps the text a decode into a Go value produced for it — a float64
+// rendered as fixed point, so 1e3 reads "1000" — rather than the spelling it
+// arrived in, and a magnitude a float64 cannot hold is out of range, which is
+// the boundary the typed decode drew as well.
+func manualURLString(v jsontext.Value) (string, error) {
+	switch v.Kind() {
+	case jsontext.KindInvalid, jsontext.KindNull:
 		return "", nil
-	case string:
-		return t, nil
-	case bool:
-		if t {
-			return "true", nil
+	case jsontext.KindString, jsontext.KindNumber, jsontext.KindTrue, jsontext.KindFalse:
+		tok, err := jsontext.NewDecoder(bytes.NewReader(v)).ReadToken()
+		if err != nil {
+			return "", err
 		}
-		return "false", nil
-	case int:
-		return strconv.Itoa(t), nil
-	case int64:
-		return strconv.FormatInt(t, 10), nil
-	case uint64:
-		return strconv.FormatUint(t, 10), nil
-	case float64:
-		return strconv.FormatFloat(t, 'f', -1, 64), nil
-	case map[string]any:
+		if tok.Kind() == jsontext.KindNumber {
+			f, err := tok.Float()
+			if err != nil {
+				return "", err
+			}
+			return strconv.FormatFloat(f, 'f', -1, 64), nil
+		}
+		return tok.String(), nil
+	case jsontext.KindBeginObject:
 		return "", fmt.Errorf("expected a string, got object")
-	case []any:
+	case jsontext.KindBeginArray:
 		return "", fmt.Errorf("expected a string, got array")
-	default:
-		return "", fmt.Errorf("expected a string, got %T", v)
 	}
+	// Value.Kind reports neither an end-object nor an end-array, so nothing else
+	// reaches here; the branch keeps the function total.
+	return "", fmt.Errorf("expected a string, got %s", v.Kind())
 }
 
 // dlcURLPrefix is the marker DLCNamesFromJSON keys on.
@@ -126,7 +144,7 @@ const dlcURLPrefix = "/downloads/"
 // is a DLC name, de-duplicated with the first occurrence winning.
 //
 // A URL whose "/downloads/" marker has no following '/' is skipped.
-func DLCNamesFromJSON(v any) ([]string, error) {
+func DLCNamesFromJSON(v jsontext.Value) ([]string, error) {
 	urls, err := ManualURLsFromJSON(v)
 	if err != nil {
 		return nil, err

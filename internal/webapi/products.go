@@ -2,11 +2,11 @@ package webapi
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // ProductQuery is one getFilteredProducts request.
@@ -58,8 +58,12 @@ func (q ProductQuery) queryString(page int) string {
 //   - a missing or non-array products field yields no products without an error;
 //   - a product that is not an object is an error.
 func (c *Client) productPage(ctx context.Context, url string) (ProductPage, error) {
-	root, err := c.getResponseJSON(ctx, url)
+	body, err := c.getResponseBytes(ctx, url)
 	if err != nil {
+		return ProductPage{}, err
+	}
+	var root map[string]jsontext.Value
+	if err := decodeObject(body, &root); err != nil {
 		return ProductPage{}, err
 	}
 	page, err := requiredInt(root, "page", url)
@@ -72,10 +76,18 @@ func (c *Client) productPage(ctx context.Context, url string) (ProductPage, erro
 	}
 
 	products := []map[string]any{}
-	if arr, ok := root["products"].([]any); ok {
-		for i, el := range arr {
-			obj, err := jsonval.Object(el)
-			if err != nil {
+	if rawProducts, ok := root["products"]; ok && len(rawProducts) > 0 && rawProducts.Kind() == jsontext.KindBeginArray {
+		var items []jsontext.Value
+		if err := jsonv2.Unmarshal(rawProducts, &items); err != nil {
+			return ProductPage{}, fmt.Errorf("webapi: %s: products: %w", url, err)
+		}
+		products = make([]map[string]any, 0, len(items))
+		for i, item := range items {
+			if item.Kind() != jsontext.KindBeginObject {
+				return ProductPage{}, fmt.Errorf("webapi: %s: products[%d]: expected a JSON object, got %s", url, i, item.Kind())
+			}
+			var obj map[string]any
+			if err := jsonv2.Unmarshal(item, &obj); err != nil {
 				return ProductPage{}, fmt.Errorf("webapi: %s: products[%d]: %w", url, i, err)
 			}
 			products = append(products, obj)
@@ -85,12 +97,23 @@ func (c *Client) productPage(ctx context.Context, url string) (ProductPage, erro
 }
 
 // requiredInt reads an integer field that must be present.
-func requiredInt(root map[string]any, key, url string) (int, error) {
+func requiredInt(root map[string]jsontext.Value, key, url string) (int, error) {
 	v, ok := root[key]
-	if !ok || v == nil {
+	if !ok || len(v) == 0 {
 		return 0, fmt.Errorf("webapi: %s: missing %q", url, key)
 	}
-	n, err := jsonval.Int(v)
+	if v.Kind() == jsontext.KindNull {
+		return 0, fmt.Errorf("webapi: %s: %q: expected a JSON integer, got null", url, key)
+	}
+	if v.Kind() != jsontext.KindNumber {
+		return 0, fmt.Errorf("webapi: %s: %q: expected a JSON integer, got %s", url, key, v.Kind())
+	}
+	// jsontext.Value retains the original JSON token bytes.
+	s := string(v)
+	if strings.Contains(s, ".") || strings.ContainsAny(s, "eE") {
+		return 0, fmt.Errorf("webapi: %s: %q: expected a JSON integer, got non-integral %s", url, key, s)
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("webapi: %s: %q: %w", url, key, err)
 	}

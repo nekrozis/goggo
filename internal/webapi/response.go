@@ -1,13 +1,13 @@
 package webapi
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
-	"strings"
-
-	"github.com/nekrozis/goggo/internal/jsonval"
+	"io"
 )
 
 // ErrNotJSON reports that a response body did not form the expected JSON
@@ -27,14 +27,22 @@ func (c *Client) getResponse(ctx context.Context, url string) (string, error) {
 	return string(body), nil
 }
 
+func (c *Client) getResponseBytes(ctx context.Context, url string) ([]byte, error) {
+	return c.hx.GetBytesWithRetry(ctx, url)
+}
+
 // getResponseJSON fetches url and decodes the body as a JSON object. A body that
 // is not an object is an error.
 func (c *Client) getResponseJSON(ctx context.Context, url string) (map[string]any, error) {
-	body, err := c.getResponse(ctx, url)
+	body, err := c.getResponseBytes(ctx, url)
 	if err != nil {
 		return nil, err
 	}
-	return decodeJSONObject(body)
+	var obj map[string]any
+	if err := decodeObject(body, &obj); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 // decodeJSONObject decodes a JSON object body. A body that is empty, malformed
@@ -43,16 +51,38 @@ func (c *Client) getResponseJSON(ctx context.Context, url string) (map[string]an
 // renders the "--login" advice). HTTP-level failures never reach here —
 // getResponse has already turned >= 400 into a *httpx.StatusError.
 func decodeJSONObject(body string) (map[string]any, error) {
-	if strings.TrimSpace(body) == "" {
-		return nil, fmt.Errorf("%w: empty body", ErrNotJSON)
-	}
-	var v any
-	if err := json.Unmarshal([]byte(body), &v); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrNotJSON, err)
-	}
-	obj, ok := v.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("%w: got %s", ErrNotJSON, jsonval.Kind(v))
+	var obj map[string]any
+	if err := decodeObject([]byte(body), &obj); err != nil {
+		return nil, err
 	}
 	return obj, nil
+}
+
+// decodeObject decodes an object-shaped JSON body. Empty, whitespace, malformed,
+// or non-object payloads are returned as ErrNotJSON.
+func decodeObject(body []byte, target any) error {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return fmt.Errorf("%w: empty body", ErrNotJSON)
+	}
+	dec := jsontext.NewDecoder(bytes.NewReader(trimmed))
+	tok, err := dec.ReadToken()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrNotJSON, err)
+	}
+	if tok.Kind() != jsontext.KindBeginObject {
+		return fmt.Errorf("%w: got %s", ErrNotJSON, tok.Kind())
+	}
+	if err := jsonv2.Unmarshal(trimmed, target); err != nil {
+		return fmt.Errorf("%w: %w", ErrNotJSON, err)
+	}
+	return nil
+}
+
+func token(v jsontext.Value) (jsontext.Token, error) {
+	if len(v) == 0 {
+		return jsontext.Token{}, io.ErrUnexpectedEOF
+	}
+	dec := jsontext.NewDecoder(bytes.NewReader(v))
+	return dec.ReadToken()
 }

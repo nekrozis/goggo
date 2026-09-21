@@ -232,3 +232,136 @@ func TestTagsHTTPError(t *testing.T) {
 		t.Fatalf("err = %v, want *httpx.StatusError 403", err)
 	}
 }
+
+func TestOwnedGameIDs64BitPrecision(t *testing.T) {
+	// 58812465975493914 > 2^53, exercises the path that would lose precision if decoded through float64.
+	srv, _ := accountServer(t, `{"owned":[58812465975493914]}`, http.StatusOK)
+	cl, _ := newTestClient(t, srv, 0)
+
+	got, err := cl.OwnedGameIDs(context.Background())
+	if err != nil {
+		t.Fatalf("OwnedGameIDs: %v", err)
+	}
+	want := []string{"58812465975493914"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("OwnedGameIDs = %v, want %v", got, want)
+	}
+}
+
+func TestTagsObjectKeyFallback(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want map[string]string
+	}{
+		{
+			name: "missing id field falls back to map key",
+			body: `{"tags":{"60":{"name":"Favorites"}}}`,
+			want: map[string]string{"60": "Favorites"},
+		},
+		{
+			name: "null id field falls back to map key",
+			body: `{"tags":{"60":{"id":null,"name":"Favorites"}}}`,
+			want: map[string]string{"60": "Favorites"},
+		},
+		{
+			name: "empty id field falls back to map key",
+			body: `{"tags":{"60":{"id":"","name":"Favorites"}}}`,
+			want: map[string]string{"60": "Favorites"},
+		},
+		{
+			name: "explicit id takes precedence over map key",
+			body: `{"tags":{"60":{"id":"custom-id","name":"Favorites"}}}`,
+			want: map[string]string{"custom-id": "Favorites"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := accountServer(t, tc.body, http.StatusOK)
+			cl, _ := newTestClient(t, srv, 0)
+
+			got, err := cl.Tags(context.Background())
+			if err != nil {
+				t.Fatalf("Tags: %v", err)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("got = %v, want %v", got, tc.want)
+			}
+			for k, wantVal := range tc.want {
+				if got[k] != wantVal {
+					t.Errorf("got[%q] = %q, want %q", k, got[k], wantVal)
+				}
+			}
+		})
+	}
+}
+
+func TestTagsContainerCompatibilityMatrix(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantErr bool
+		want    map[string]string
+	}{
+		{
+			name: "array tags",
+			body: `{"tags":[{"id":"1","name":"A"}]}`,
+			want: map[string]string{"1": "A"},
+		},
+		{
+			name: "object tags",
+			body: `{"tags":{"1":{"name":"A"}}}`,
+			want: map[string]string{"1": "A"},
+		},
+		{
+			name: "null tags",
+			body: `{"tags":null}`,
+			want: map[string]string{},
+		},
+		{
+			name: "missing tags",
+			body: `{}`,
+			want: map[string]string{},
+		},
+		{
+			name:    "string tags",
+			body:    `{"tags":"bad"}`,
+			wantErr: true,
+		},
+		{
+			name:    "number tags",
+			body:    `{"tags":123}`,
+			wantErr: true,
+		},
+		{
+			name:    "boolean tags",
+			body:    `{"tags":true}`,
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := accountServer(t, tc.body, http.StatusOK)
+			cl, _ := newTestClient(t, srv, 0)
+
+			got, err := cl.Tags(context.Background())
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("Tags on %s: want error, got nil", tc.name)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Tags on %s: unexpected error: %v", tc.name, err)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("got = %v, want %v", got, tc.want)
+			}
+			for k, wantVal := range tc.want {
+				if got[k] != wantVal {
+					t.Errorf("got[%q] = %q, want %q", k, got[k], wantVal)
+				}
+			}
+		})
+	}
+}

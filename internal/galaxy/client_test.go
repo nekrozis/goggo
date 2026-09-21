@@ -271,3 +271,107 @@ func TestHTTPErrorIsStatusError(t *testing.T) {
 		t.Errorf("err = %q must not carry the access token", err)
 	}
 }
+
+// TestDecodeDocumentV2StrictnessAndBoundary locks the v2 decoder syntax
+// requirements and the protocol-level whitespace boundary.
+//
+// Duplicate member names and invalid UTF-8 are syntax errors under v2; pure empty
+// bodies produce an "empty body" error, while JSON whitespace and non-JSON
+// whitespace (such as NBSP) are rejected by the decoder as syntax errors rather
+// than swallowed or classified as empty bodies.
+func TestDecodeDocumentV2StrictnessAndBoundary(t *testing.T) {
+	t.Run("v2 syntax strictness", func(t *testing.T) {
+		strictCases := []struct {
+			name string
+			body string
+		}{
+			{"duplicate keys", `{"a":1,"a":2}`},
+			{"invalid UTF-8", "{\"a\":\"\xff\"}"},
+		}
+		for _, tc := range strictCases {
+			t.Run(tc.name, func(t *testing.T) {
+				if _, err := decodeDocument(tc.body); !errors.Is(err, ErrNotJSON) {
+					t.Errorf("decodeDocument(%s) = %v, want ErrNotJSON", tc.name, err)
+				}
+				if _, err := decodeJSONObject(tc.body); !errors.Is(err, ErrNotJSON) {
+					t.Errorf("decodeJSONObject(%s) = %v, want ErrNotJSON", tc.name, err)
+				}
+			})
+		}
+	})
+
+	t.Run("protocol boundary and whitespace", func(t *testing.T) {
+		boundaryCases := []struct {
+			name         string
+			body         string
+			wantEmptyErr bool
+		}{
+			{"empty string", "", true},
+			{"JSON whitespace", "   \t\r\n ", false},
+			{"NBSP only", "\u00a0", false},
+			{"NBSP prefixed JSON", "\u00a0{\"a\":1}", false},
+		}
+		for _, tc := range boundaryCases {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := decodeDocument(tc.body)
+				if !errors.Is(err, ErrNotJSON) {
+					t.Fatalf("decodeDocument(%s) = %v, want ErrNotJSON", tc.name, err)
+				}
+				hasEmpty := strings.Contains(err.Error(), "empty body")
+				if tc.wantEmptyErr && !hasEmpty {
+					t.Errorf("decodeDocument(%s) err = %v, want 'empty body'", tc.name, err)
+				}
+				if !tc.wantEmptyErr && hasEmpty {
+					t.Errorf("decodeDocument(%s) err = %v, must not be classified as 'empty body'", tc.name, err)
+				}
+
+				// decodeJSONObject must also reject with identical classification
+				_, objErr := decodeJSONObject(tc.body)
+				if !errors.Is(objErr, ErrNotJSON) {
+					t.Fatalf("decodeJSONObject(%s) = %v, want ErrNotJSON", tc.name, objErr)
+				}
+				objHasEmpty := strings.Contains(objErr.Error(), "empty body")
+				if tc.wantEmptyErr && !objHasEmpty {
+					t.Errorf("decodeJSONObject(%s) err = %v, want 'empty body'", tc.name, objErr)
+				}
+				if !tc.wantEmptyErr && objHasEmpty {
+					t.Errorf("decodeJSONObject(%s) err = %v, must not be classified as 'empty body'", tc.name, objErr)
+				}
+			})
+		}
+	})
+
+	t.Run("container and scalar shapes", func(t *testing.T) {
+		v, err := decodeDocument(`{"k":"v"}`)
+		if err != nil {
+			t.Fatalf("decodeDocument(object): %v", err)
+		}
+		if _, ok := v.(map[string]any); !ok {
+			t.Errorf("decodeDocument(object) type = %T, want map[string]any", v)
+		}
+
+		v, err = decodeDocument(`[1, 2]`)
+		if err != nil {
+			t.Fatalf("decodeDocument(array): %v", err)
+		}
+		if _, ok := v.([]any); !ok {
+			t.Errorf("decodeDocument(array) type = %T, want []any", v)
+		}
+
+		v, err = decodeDocument(`"hello"`)
+		if err != nil {
+			t.Fatalf("decodeDocument(string): %v", err)
+		}
+		if s, ok := v.(string); !ok || s != "hello" {
+			t.Errorf("decodeDocument(string) = %v (%T), want 'hello'", v, v)
+		}
+
+		v, err = decodeDocument(`42`)
+		if err != nil {
+			t.Fatalf("decodeDocument(number): %v", err)
+		}
+		if f, ok := v.(float64); !ok || f != 42 {
+			t.Errorf("decodeDocument(number) = %v (%T), want 42", v, v)
+		}
+	})
+}

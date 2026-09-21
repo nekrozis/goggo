@@ -641,14 +641,21 @@ func TestProductPreservesDocumentFidelity(t *testing.T) {
 
 // TestProductRejectsMalformedDocument locks boundary errors on empty, whitespace,
 // or non-JSON payloads.
+//
+// Pure empty body produces an ErrNotJSON wrapping "empty body"; JSON whitespace,
+// non-JSON whitespace (such as NBSP), and syntax errors are rejected by the decoder
+// rather than classified as empty bodies.
 func TestProductRejectsMalformedDocument(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		body string
+		name         string
+		body         string
+		wantEmptyErr bool
 	}{
-		{"empty body", ""},
-		{"whitespace only", "   \n\t  "},
-		{"malformed JSON", "{not-valid-json"},
+		{"empty body", "", true},
+		{"whitespace only", "   \n\t  ", false},
+		{"NBSP only", "\u00a0", false},
+		{"NBSP with JSON", "\u00a0{\"slug\":\"game\"}", false},
+		{"malformed JSON", "{not-valid-json", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newProductFixture(t)
@@ -657,6 +664,13 @@ func TestProductRejectsMalformedDocument(t *testing.T) {
 			_, err := newProductClient(t, f.Server).Product(context.Background(), "1")
 			if !errors.Is(err, ErrNotJSON) {
 				t.Fatalf("Product on %s: err = %v, want ErrNotJSON", tc.name, err)
+			}
+			hasEmpty := strings.Contains(err.Error(), "empty body")
+			if tc.wantEmptyErr && !hasEmpty {
+				t.Errorf("Product on %s: err = %v, want 'empty body'", tc.name, err)
+			}
+			if !tc.wantEmptyErr && hasEmpty {
+				t.Errorf("Product on %s: err = %v, must not be classified as 'empty body'", tc.name, err)
 			}
 		})
 	}

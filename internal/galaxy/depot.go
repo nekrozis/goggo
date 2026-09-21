@@ -90,7 +90,7 @@ func (c *Client) DepotItems(ctx context.Context, hash string, opts DepotOptions)
 	if plain, ok := inflateZlibBytes(raw); ok {
 		raw = plain
 	}
-	if len(bytes.TrimSpace(raw)) == 0 {
+	if len(raw) == 0 {
 		return nil, fmt.Errorf("%w: empty body", ErrNotJSON)
 	}
 

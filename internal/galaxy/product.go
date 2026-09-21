@@ -52,7 +52,7 @@ func (c *Client) Product(ctx context.Context, productID string) (ProductDocument
 	if plain, ok := inflateZlibBytes(raw); ok {
 		raw = plain
 	}
-	if len(bytes.TrimSpace(raw)) == 0 {
+	if len(raw) == 0 {
 		return ProductDocument{}, fmt.Errorf("%w: empty body", ErrNotJSON)
 	}
 

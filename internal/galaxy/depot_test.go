@@ -785,3 +785,37 @@ func TestDepotItemsInvalidByteCountMatrix(t *testing.T) {
 		})
 	}
 }
+
+// TestDepotItemsManifestBoundary locks boundary errors on empty, whitespace,
+// or non-JSON manifest payloads.
+//
+// Pure empty body produces an ErrNotJSON wrapping "empty body"; JSON whitespace,
+// non-JSON whitespace (such as NBSP), and syntax errors are rejected by the decoder
+// rather than classified as empty bodies.
+func TestDepotItemsManifestBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		body         string
+		wantEmptyErr bool
+	}{
+		{"empty body", "", true},
+		{"whitespace only", "   \n\t  ", false},
+		{"NBSP only", "\u00a0", false},
+		{"NBSP with JSON", "\u00a0{\"depot\":{}}", false},
+		{"malformed JSON", "{not-valid-json", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := depotItems(t, tc.body, DepotOptions{})
+			if !errors.Is(err, ErrNotJSON) {
+				t.Fatalf("DepotItems on %s: err = %v, want ErrNotJSON", tc.name, err)
+			}
+			hasEmpty := strings.Contains(err.Error(), "empty body")
+			if tc.wantEmptyErr && !hasEmpty {
+				t.Errorf("DepotItems on %s: err = %v, want 'empty body'", tc.name, err)
+			}
+			if !tc.wantEmptyErr && hasEmpty {
+				t.Errorf("DepotItems on %s: err = %v, must not be classified as 'empty body'", tc.name, err)
+			}
+		})
+	}
+}

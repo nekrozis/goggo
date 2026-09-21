@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/nekrozis/goggo/internal/httpx"
 )
@@ -165,11 +164,11 @@ func decodeDocument(body string) (any, error) {
 // decodeAny decodes one JSON document of any type, with no compression
 // handling and no shape opinion.
 func decodeAny(body string) (any, error) {
-	if strings.TrimSpace(body) == "" {
+	if len(body) == 0 {
 		return nil, fmt.Errorf("%w: empty body", ErrNotJSON)
 	}
 	var v any
-	if err := json.Unmarshal([]byte(body), &v); err != nil {
+	if err := jsonv2.Unmarshal([]byte(body), &v); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNotJSON, err)
 	}
 	return v, nil

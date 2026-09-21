@@ -609,3 +609,179 @@ func TestDepotItemsRejectsNonStringIdentifiers(t *testing.T) {
 		})
 	}
 }
+
+// TestDepotItemsChunkBatchDecode locks the batch decoding and accumulation behavior
+// across multiple chunks: element order is preserved, properties are mapped correctly,
+// and running byte offsets accumulate without drift.
+func TestDepotItemsChunkBatchDecode(t *testing.T) {
+	const body = `{"depot":{"items":[{` +
+		`"path":"batch.bin",` +
+		`"chunks":[` +
+		`{"compressedMd5":"c0","md5":"u0","compressedSize":100,"size":200},` +
+		`{"compressedMd5":"c1","md5":"u1","compressedSize":150,"size":250},` +
+		`{"compressedMd5":"c2","md5":"u2","compressedSize":300,"size":400},` +
+		`{"compressedMd5":"c3","md5":"u3","compressedSize":50,"size":80},` +
+		`{"compressedMd5":"c4","md5":"u4","compressedSize":120,"size":180}` +
+		`]}]}}`
+
+	srv, _ := depotServer(t, body)
+	cl := newTestClient(t, srv, nil)
+	items, err := cl.DepotItems(context.Background(), "abcdef", DepotOptions{})
+	if err != nil {
+		t.Fatalf("DepotItems: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	item := items[0]
+	if len(item.Chunks) != 5 {
+		t.Fatalf("len(item.Chunks) = %d, want 5", len(item.Chunks))
+	}
+
+	expected := []struct {
+		cMD5    string
+		uMD5    string
+		cSize   uint64
+		size    uint64
+		cOffset uint64
+		offset  uint64
+	}{
+		{"c0", "u0", 100, 200, 0, 0},
+		{"c1", "u1", 150, 250, 100, 200},
+		{"c2", "u2", 300, 400, 250, 450},
+		{"c3", "u3", 50, 80, 550, 850},
+		{"c4", "u4", 120, 180, 600, 930},
+	}
+
+	for i, want := range expected {
+		got := item.Chunks[i]
+		if got.CompressedMD5 != want.cMD5 || got.MD5 != want.uMD5 {
+			t.Errorf("chunk[%d] hashes = (%q, %q), want (%q, %q)", i, got.CompressedMD5, got.MD5, want.cMD5, want.uMD5)
+		}
+		if got.CompressedSize != want.cSize || got.Size != want.size {
+			t.Errorf("chunk[%d] sizes = (%d, %d), want (%d, %d)", i, got.CompressedSize, got.Size, want.cSize, want.size)
+		}
+		if got.CompressedOffset != want.cOffset || got.Offset != want.offset {
+			t.Errorf("chunk[%d] offsets = (%d, %d), want (%d, %d)", i, got.CompressedOffset, got.Offset, want.cOffset, want.offset)
+		}
+	}
+
+	const wantTotalCompressed = 720
+	const wantTotal = 1110
+	if item.TotalCompressedSize != wantTotalCompressed {
+		t.Errorf("TotalCompressedSize = %d, want %d", item.TotalCompressedSize, wantTotalCompressed)
+	}
+	if item.TotalSize != wantTotal {
+		t.Errorf("TotalSize = %d, want %d", item.TotalSize, wantTotal)
+	}
+}
+
+// TestDepotItemsNullableStringFields locks Route B behavior: path, compressedMd5,
+// and md5 accept missing or explicit null values, decoding them to empty strings
+// without reporting errors.
+func TestDepotItemsNullableStringFields(t *testing.T) {
+	cases := []struct {
+		name              string
+		body              string
+		wantPath          string
+		wantChunkMD5      string
+		wantCompressedMD5 string
+	}{
+		{
+			name:              "null path resolves to empty string",
+			body:              `{"depot":{"items":[{"path":null,"chunks":[{"compressedMd5":"c","md5":"u","compressedSize":1,"size":1}]}]}}`,
+			wantPath:          "",
+			wantChunkMD5:      "u",
+			wantCompressedMD5: "c",
+		},
+		{
+			name:              "missing path resolves to empty string",
+			body:              `{"depot":{"items":[{"chunks":[{"compressedMd5":"c","md5":"u","compressedSize":1,"size":1}]}]}}`,
+			wantPath:          "",
+			wantChunkMD5:      "u",
+			wantCompressedMD5: "c",
+		},
+		{
+			name:              "null chunk md5 and compressedMd5 resolve to empty string",
+			body:              `{"depot":{"items":[{"path":"a.bin","chunks":[{"compressedMd5":null,"md5":null,"compressedSize":1,"size":1}]}]}}`,
+			wantPath:          "a.bin",
+			wantChunkMD5:      "",
+			wantCompressedMD5: "",
+		},
+		{
+			name:              "missing chunk md5 and compressedMd5 resolve to empty string",
+			body:              `{"depot":{"items":[{"path":"a.bin","chunks":[{"compressedSize":1,"size":1}]}]}}`,
+			wantPath:          "a.bin",
+			wantChunkMD5:      "",
+			wantCompressedMD5: "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv, _ := depotServer(t, c.body)
+			cl := newTestClient(t, srv, nil)
+			items, err := cl.DepotItems(context.Background(), "abcdef", DepotOptions{})
+			if err != nil {
+				t.Fatalf("DepotItems unexpected error: %v", err)
+			}
+			if len(items) != 1 {
+				t.Fatalf("len(items) = %d, want 1", len(items))
+			}
+			if items[0].Path != c.wantPath {
+				t.Errorf("Path = %q, want %q", items[0].Path, c.wantPath)
+			}
+			if len(items[0].Chunks) != 1 {
+				t.Fatalf("len(chunks) = %d, want 1", len(items[0].Chunks))
+			}
+			if items[0].Chunks[0].MD5 != c.wantChunkMD5 {
+				t.Errorf("chunk.MD5 = %q, want %q", items[0].Chunks[0].MD5, c.wantChunkMD5)
+			}
+			if items[0].Chunks[0].CompressedMD5 != c.wantCompressedMD5 {
+				t.Errorf("chunk.CompressedMD5 = %q, want %q", items[0].Chunks[0].CompressedMD5, c.wantCompressedMD5)
+			}
+		})
+	}
+}
+
+// TestDepotItemsInvalidByteCountMatrix locks the rejection of non-numeric,
+// negative, and fractional values across the full DepotItems pipeline for both
+// chunk sizes and sfcRef ranges.
+func TestDepotItemsInvalidByteCountMatrix(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "negative chunk compressedSize",
+			body: `{"depot":{"items":[{"path":"a.bin","chunks":[{"compressedMd5":"c","md5":"u","compressedSize":-1,"size":1}]}]}}`,
+		},
+		{
+			name: "fractional chunk size",
+			body: `{"depot":{"items":[{"path":"a.bin","chunks":[{"compressedMd5":"c","md5":"u","compressedSize":1,"size":1.5}]}]}}`,
+		},
+		{
+			name: "negative sfcRef offset",
+			body: `{"depot":{"items":[{"path":"a.bin","chunks":[{"compressedMd5":"c","md5":"u","compressedSize":1,"size":1}],"sfcRef":{"offset":-10,"size":5}}]}}`,
+		},
+		{
+			name: "numeric string sfcRef size",
+			body: `{"depot":{"items":[{"path":"a.bin","chunks":[{"compressedMd5":"c","md5":"u","compressedSize":1,"size":1}],"sfcRef":{"offset":10,"size":"50"}}]}}`,
+		},
+		{
+			name: "boolean sfcRef size",
+			body: `{"depot":{"items":[{"path":"a.bin","chunks":[{"compressedMd5":"c","md5":"u","compressedSize":1,"size":1}],"sfcRef":{"offset":10,"size":true}}]}}`,
+		},
+		{
+			name: "non-object sfcRef container",
+			body: `{"depot":{"items":[{"path":"a.bin","chunks":[{"compressedMd5":"c","md5":"u","compressedSize":1,"size":1}],"sfcRef":[]}]}}`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := depotItems(t, c.body, DepotOptions{})
+			if err == nil {
+				t.Fatalf("expected error for invalid byte count in %s", c.name)
+			}
+		})
+	}
+}

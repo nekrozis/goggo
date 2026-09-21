@@ -298,7 +298,7 @@ func TestProductBatchesDLCIDs(t *testing.T) {
 // API sends dlcs.products ids as JSON numbers, and that read only happens on the
 // batching branch — more than maxDLCBatchSize ids — so this fixture crosses the
 // 45 boundary on purpose. The ids= list must carry the numbers stringified, in
-// order.
+// order, without floating-point precision loss.
 func TestProductExpandsNumericDLCIDs(t *testing.T) {
 	const total = maxDLCBatchSize + 1
 	entries := make([]any, 0, total)
@@ -307,7 +307,9 @@ func TestProductExpandsNumericDLCIDs(t *testing.T) {
 		case 0:
 			entries = append(entries, map[string]any{"id": 1523284508})
 		case 1:
-			entries = append(entries, map[string]any{"id": 1523284509})
+			// 58812465975493914 > 2^53, exercises the path that would lose
+			// precision if decoded through float64.
+			entries = append(entries, map[string]any{"id": 58812465975493914})
 		default:
 			entries = append(entries, map[string]any{"id": fmt.Sprintf("s%03d", i)})
 		}
@@ -346,8 +348,8 @@ func TestProductExpandsNumericDLCIDs(t *testing.T) {
 	if len(batches) != 2 || len(batches[0]) != maxDLCBatchSize || len(batches[1]) != 1 {
 		t.Fatalf("batches = %v, want %d then 1", batches, maxDLCBatchSize)
 	}
-	if batches[0][0] != "1523284508" || batches[0][1] != "1523284509" {
-		t.Errorf("first ids = %q,%q, want the numeric ids stringified", batches[0][0], batches[0][1])
+	if batches[0][0] != "1523284508" || batches[0][1] != "58812465975493914" {
+		t.Errorf("first ids = %q,%q, want the numeric ids stringified without precision loss", batches[0][0], batches[0][1])
 	}
 	var doc struct {
 		ExpandedDLCs []struct {
@@ -362,32 +364,45 @@ func TestProductExpandsNumericDLCIDs(t *testing.T) {
 	}
 }
 
-// TestProductRejectsAStructuredDLCID locks the one shape the identifier read
-// refuses: a structured value is reported instead of being turned into some
-// invented text form. The read lives on the batching branch, so the entry list
-// crosses the boundary.
-func TestProductRejectsAStructuredDLCID(t *testing.T) {
-	entries := make([]any, 0, maxDLCBatchSize+1)
-	entries = append(entries, map[string]any{"id": map[string]any{}})
-	for i := 1; i <= maxDLCBatchSize; i++ {
-		entries = append(entries, map[string]any{"id": fmt.Sprintf("s%03d", i)})
-	}
+// TestProductRejectsInvalidDLCID locks the identifier read rules: structured
+// values (objects, arrays) and booleans are refused instead of being converted into
+// an arbitrary string representation. The read lives on the batching branch, so the
+// entry list crosses the boundary.
+func TestProductRejectsInvalidDLCID(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		val  any
+	}{
+		{"object", map[string]any{}},
+		{"array", []any{1, 2}},
+		{"boolean true", true},
+		{"boolean false", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entries := make([]any, 0, maxDLCBatchSize+1)
+			entries = append(entries, map[string]any{"id": tc.val})
+			for i := 1; i <= maxDLCBatchSize; i++ {
+				entries = append(entries, map[string]any{"id": fmt.Sprintf("s%03d", i)})
+			}
 
-	f := newProductFixture(t)
-	f.setServe(func(string) (string, int) {
-		return mustJSON(t, map[string]any{"id": "1", "dlcs": map[string]any{
-			"products": entries, "expanded_all_products_url": "unused",
-		}}), http.StatusOK
-	})
-	_, err := newProductClient(t, f.Server).Product(context.Background(), "1")
-	if err == nil {
-		t.Fatal("a structured dlc id must fail")
-	}
-	if !strings.Contains(err.Error(), "dlcs.products[0].id") {
-		t.Errorf("error = %v, want it to name the entry", err)
-	}
-	if uris := f.requestURIs(); len(uris) != 1 {
-		t.Errorf("requests = %v, want no batch attempt", uris)
+			f := newProductFixture(t)
+			f.setServe(func(string) (string, int) {
+				return mustJSON(t, map[string]any{"id": "1", "dlcs": map[string]any{
+					"products":                  entries,
+					"expanded_all_products_url": "unused",
+				}}), http.StatusOK
+			})
+			_, err := newProductClient(t, f.Server).Product(context.Background(), "1")
+			if err == nil {
+				t.Fatalf("Product must reject %s dlc id", tc.name)
+			}
+			if !strings.Contains(err.Error(), "dlcs.products[0].id") {
+				t.Errorf("error = %v, want it to name the entry", err)
+			}
+			if uris := f.requestURIs(); len(uris) != 1 {
+				t.Errorf("requests = %v, want no batch attempt", uris)
+			}
+		})
 	}
 }
 
@@ -561,5 +576,88 @@ func TestDecodeDocumentHandlesZlibArraysAndObjects(t *testing.T) {
 	}
 	if _, ok := obj.(map[string]any); !ok {
 		t.Errorf("decodeDocument(zlib object) = %T, want map[string]any", obj)
+	}
+}
+
+// TestProductPreservesDocumentFidelity tests that:
+//  1. Without DLC expansion, the exact response bytes (including custom whitespace,
+//     formatting, and unknown fields) are preserved byte-for-byte.
+//  2. With DLC expansion, top-level unknown fields and 64-bit integer values in the
+//     parent document are preserved without float64 precision degradation.
+func TestProductPreservesDocumentFidelity(t *testing.T) {
+	t.Run("byte-for-byte fidelity without expansion", func(t *testing.T) {
+		const rawDoc = "  {\n\t\"id\": 58812465975493914,\n\t\"slug\": \"fidelity-test\",\n\t\"title\": \"Fidelity Test\",\n\t\"extra_metric\": 9007199254740993,\n\t\"dlcs\": []\n  }"
+		f := newProductFixture(t)
+		f.setServe(func(string) (string, int) { return rawDoc, http.StatusOK })
+
+		got, err := newProductClient(t, f.Server).Product(context.Background(), "1")
+		if err != nil {
+			t.Fatalf("Product: %v", err)
+		}
+		if !bytes.Equal(got.JSON, []byte(rawDoc)) {
+			t.Fatalf("got.JSON != rawDoc:\ngot:  %q\nwant: %q", got.JSON, rawDoc)
+		}
+		if got.Slug != "fidelity-test" {
+			t.Errorf("Slug = %q, want fidelity-test", got.Slug)
+		}
+		if got.Title != "Fidelity Test" {
+			t.Errorf("Title = %q, want Fidelity Test", got.Title)
+		}
+	})
+
+	t.Run("field preservation with expansion", func(t *testing.T) {
+		f := newProductFixture(t)
+		f.setServe(func(uri string) (string, int) {
+			if strings.HasPrefix(uri, "/products/1") {
+				return fmt.Sprintf(`{"id":58812465975493914,"slug":"witcher-3","title":"The Witcher 3","unknown_large_int":9007199254740993,"dlcs":{"products":[{"id":"dlc-1"}],"expanded_all_products_url":"%s/expanded"}}`, f.Server.URL), http.StatusOK
+			}
+			return `[{"id":"dlc-1","title":"Hearts of Stone"}]`, http.StatusOK
+		})
+
+		got, err := newProductClient(t, f.Server).Product(context.Background(), "1")
+		if err != nil {
+			t.Fatalf("Product: %v", err)
+		}
+		if got.Slug != "witcher-3" {
+			t.Errorf("Slug = %q, want witcher-3", got.Slug)
+		}
+		if got.Title != "The Witcher 3" {
+			t.Errorf("Title = %q, want The Witcher 3", got.Title)
+		}
+
+		// Ensure 64-bit integer was not converted to float64 (58812465975493920 / 9007199254740992)
+		jsonStr := string(got.JSON)
+		if !strings.Contains(jsonStr, "58812465975493914") {
+			t.Errorf("got.JSON does not contain 58812465975493914 verbatim: %s", jsonStr)
+		}
+		if !strings.Contains(jsonStr, "9007199254740993") {
+			t.Errorf("got.JSON does not contain 9007199254740993 verbatim: %s", jsonStr)
+		}
+		if !strings.Contains(jsonStr, `"expanded_dlcs"`) {
+			t.Errorf("got.JSON does not contain expanded_dlcs: %s", jsonStr)
+		}
+	})
+}
+
+// TestProductRejectsMalformedDocument locks boundary errors on empty, whitespace,
+// or non-JSON payloads.
+func TestProductRejectsMalformedDocument(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"empty body", ""},
+		{"whitespace only", "   \n\t  "},
+		{"malformed JSON", "{not-valid-json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newProductFixture(t)
+			f.setServe(func(string) (string, int) { return tc.body, http.StatusOK })
+
+			_, err := newProductClient(t, f.Server).Product(context.Background(), "1")
+			if !errors.Is(err, ErrNotJSON) {
+				t.Fatalf("Product on %s: err = %v, want ErrNotJSON", tc.name, err)
+			}
+		})
 	}
 }

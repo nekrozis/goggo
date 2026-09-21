@@ -741,3 +741,129 @@ func TestBuildPlanInstallDirTemplateNeedsProductInfo(t *testing.T) {
 		})
 	}
 }
+
+// TestManifestProductNameContract locks that manifestProductName handles missing,
+// null, empty array, wrong-shape, and non-object elements by silently returning "".
+func TestManifestProductNameContract(t *testing.T) {
+	cases := []struct {
+		name     string
+		manifest map[string]any
+		want     string
+	}{
+		{name: "normal name", manifest: map[string]any{"products": []any{map[string]any{"name": "Cyberpunk"}}}, want: "Cyberpunk"},
+		{name: "missing products", manifest: map[string]any{}, want: ""},
+		{name: "null products", manifest: map[string]any{"products": nil}, want: ""},
+		{name: "empty products", manifest: map[string]any{"products": []any{}}, want: ""},
+		{name: "products not array", manifest: map[string]any{"products": "foo"}, want: ""},
+		{name: "first product not object", manifest: map[string]any{"products": []any{"foo"}}, want: ""},
+		{name: "name missing", manifest: map[string]any{"products": []any{map[string]any{}}}, want: ""},
+		{name: "name null", manifest: map[string]any{"products": []any{map[string]any{"name": nil}}}, want: ""},
+		{name: "name numeric coercion", manifest: map[string]any{"products": []any{map[string]any{"name": 12345}}}, want: "12345"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := manifestProductName(tc.manifest)
+			if got != tc.want {
+				t.Errorf("manifestProductName(%v) = %q, want %q", tc.manifest, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestReadInfoBuildIDContract locks readInfoBuildID contract: valid string buildId
+// read, missing file returns error, invalid json returns "", numeric buildId rejected.
+func TestReadInfoBuildIDContract(t *testing.T) {
+	t.Run("valid string buildId", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "goggame-123.info")
+		if err := os.WriteFile(p, []byte(`{"buildId":"58812465975493914"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := readInfoBuildID(p)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "58812465975493914" {
+			t.Errorf("readInfoBuildID = %q, want %q", got, "58812465975493914")
+		}
+	})
+
+	t.Run("numeric buildId rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "goggame-123.info")
+		if err := os.WriteFile(p, []byte(`{"buildId":58812465975493914}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := readInfoBuildID(p)
+		if err == nil {
+			t.Fatal("readInfoBuildID must reject numeric buildId")
+		}
+	})
+
+	t.Run("missing file returns error", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "nonexistent.info")
+		_, err := readInfoBuildID(p)
+		if err == nil {
+			t.Fatal("readInfoBuildID must return error for nonexistent file")
+		}
+	})
+
+	t.Run("invalid json returns empty string", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "corrupt.info")
+		if err := os.WriteFile(p, []byte(`not json`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := readInfoBuildID(p)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "" {
+			t.Errorf("readInfoBuildID = %q, want empty string", got)
+		}
+	})
+}
+
+// TestPlanDependenciesNumericRejected verifies that numeric items in manifest
+// dependencies or repository dependencyId are rejected to prevent float64 distortion.
+func TestPlanDependenciesNumericRejected(t *testing.T) {
+	t.Run("numeric manifest dependency rejected", func(t *testing.T) {
+		f := newPlanFixture(t)
+		f.setDefaultBodies()
+		manifestWithNumericDep := `{"products":[{"name":"My Game"}],"dependencies":[58812465975493914]}`
+		f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(planBuildHashNew), manifestWithNumericDep)
+
+		cfg := planTestConfig(t)
+		cfg.DownloadConfig.GalaxyDependencies = true
+		d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+
+		_, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
+		if err == nil {
+			t.Fatal("BuildPlan must reject numeric manifest dependencies")
+		}
+		if !strings.Contains(err.Error(), "expected a string identifier") {
+			t.Errorf("error = %v, want 'expected a string identifier'", err)
+		}
+	})
+
+	t.Run("numeric repository dependencyId rejected", func(t *testing.T) {
+		f := newPlanFixture(t)
+		f.setDefaultBodies()
+		manifestWithDep := `{"products":[{"name":"My Game"}],"dependencies":["58812465975493914"]}`
+		f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(planBuildHashNew), manifestWithDep)
+		f.set("/dep/repo-manifest", `{"depots":[{"dependencyId":58812465975493914}]}`)
+
+		cfg := planTestConfig(t)
+		cfg.DownloadConfig.GalaxyDependencies = true
+		d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+
+		_, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
+		if err == nil {
+			t.Fatal("BuildPlan must reject numeric repository dependencyId")
+		}
+		if !strings.Contains(err.Error(), "expected a string identifier") {
+			t.Errorf("error = %v, want 'expected a string identifier'", err)
+		}
+	})
+}

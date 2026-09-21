@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -666,5 +667,144 @@ func TestEndpointNamesShapeErrors(t *testing.T) {
 	}
 	if _, err := endpointNames(map[string]any{"urls": []any{"not an object"}}); err == nil {
 		t.Error("a non-object entry must be an error")
+	}
+}
+
+// TestIdentifierStringContract locks that identifier fields strictly accept strings
+// and nil (as empty string), rejecting numbers, booleans, and containers.
+func TestIdentifierStringContract(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      any
+		want    string
+		wantErr bool
+	}{
+		{name: "string normal", in: "58812465975493914", want: "58812465975493914"},
+		{name: "string branch name", in: "b-new", want: "b-new"},
+		{name: "null is empty", in: nil, want: ""},
+		{name: "float64 rejected", in: float64(58812465975493914), wantErr: true},
+		{name: "int rejected", in: 12345, wantErr: true},
+		{name: "int64 rejected", in: int64(12345), wantErr: true},
+		{name: "uint64 rejected", in: uint64(12345), wantErr: true},
+		{name: "bool true rejected", in: true, wantErr: true},
+		{name: "bool false rejected", in: false, wantErr: true},
+		{name: "array rejected", in: []any{"123"}, wantErr: true},
+		{name: "object rejected", in: map[string]any{"id": "123"}, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := identifierString(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("identifierString(%#v) expected error, got %q", tc.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("identifierString(%#v) unexpected error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("identifierString(%#v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestScalarStringContract locks scalarString coercion behavior.
+func TestScalarStringContract(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      any
+		want    string
+		wantErr bool
+	}{
+		{name: "string value", in: "hello", want: "hello"},
+		{name: "null is empty", in: nil, want: ""},
+		{name: "bool true", in: true, want: "true"},
+		{name: "bool false", in: false, want: "false"},
+		{name: "int value", in: int(42), want: "42"},
+		{name: "int64 value", in: int64(-42), want: "-42"},
+		{name: "uint64 value", in: uint64(100), want: "100"},
+		{name: "float64 value", in: float64(3.5), want: "3.5"},
+		{name: "array rejected", in: []any{"a"}, wantErr: true},
+		{name: "object rejected", in: map[string]any{"k": "v"}, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := scalarString(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("scalarString(%#v) expected error, got %q", tc.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("scalarString(%#v) unexpected error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("scalarString(%#v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIntValueContract locks intValue conversion and range checking.
+func TestIntValueContract(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      any
+		want    int64
+		wantErr bool
+	}{
+		{name: "int value", in: int(42), want: 42},
+		{name: "int64 value", in: int64(-100), want: -100},
+		{name: "uint64 in range", in: uint64(1000), want: 1000},
+		{name: "uint64 overflow", in: uint64(0x8000000000000000), wantErr: true},
+		{name: "float64 integral", in: float64(50), want: 50},
+		{name: "float64 fractional rejected", in: float64(50.5), wantErr: true},
+		{name: "float64 NaN rejected", in: math.NaN(), wantErr: true},
+		{name: "float64 +Inf rejected", in: math.Inf(1), wantErr: true},
+		{name: "float64 -Inf rejected", in: math.Inf(-1), wantErr: true},
+		{name: "float64 overflow positive", in: float64(1 << 63), wantErr: true},
+		{name: "float64 overflow negative", in: -1e20, wantErr: true},
+		{name: "bool true is 1", in: true, want: 1},
+		{name: "bool false is 0", in: false, want: 0},
+		{name: "null is 0", in: nil, want: 0},
+		{name: "string rejected", in: "42", wantErr: true},
+		{name: "array rejected", in: []any{1}, wantErr: true},
+		{name: "object rejected", in: map[string]any{"a": 1}, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := intValue(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("intValue(%#v) expected error, got %d", tc.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("intValue(%#v) unexpected error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("intValue(%#v) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestShowBuildsNumericBuildIDRejected verifies that a numeric build_id is rejected
+// with an error, preventing float64 precision corruption on large identifiers.
+func TestShowBuildsNumericBuildIDRejected(t *testing.T) {
+	srv := newFixtureServer(t)
+	srv.setBuilds(`{"items":[{"build_id":58812465975493914,"version_name":"1.0","generation":2,"link":"https://cdn.gog.com/manifest"}]}`)
+	d := newOfflineDownloader(t, srv.Server, galaxyTestConfig(t, "score"), newFakeConsole())
+
+	_, err := d.ShowBuilds(context.Background(), fixtureProductID, "", ProductRefExact)
+	if err == nil {
+		t.Fatal("ShowBuilds must reject numeric build_id to protect identifier fidelity")
+	}
+	if !strings.Contains(err.Error(), "expected a string identifier") {
+		t.Errorf("error = %v, want 'expected a string identifier'", err)
 	}
 }

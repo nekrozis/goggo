@@ -363,8 +363,8 @@ func jsonString(m map[string]any, key string) (string, bool) {
 	return s, ok
 }
 
-// jsonInt64 reads an integer field, tolerating the numeric types encoding/json
-// produces (float64, json.Number) plus native integers. Numbers that cannot be
+// jsonInt64 reads an integer field, tolerating the numeric types JSON decoders
+// produce (float64) plus native integers. Numbers that cannot be
 // represented as int64 are reported as absent rather than converted: Go's
 // float→int conversion is implementation-defined for them, and a malformed
 // expires_in/expires_at must not fabricate a value.
@@ -379,12 +379,6 @@ func jsonInt64(m map[string]any, key string) (int64, bool) {
 			return 0, false
 		}
 		return int64(n), true
-	case json.Number:
-		i, err := n.Int64()
-		if err != nil {
-			return 0, false
-		}
-		return i, true
 	case int:
 		return int64(n), true
 	case int64:

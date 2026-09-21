@@ -1,10 +1,12 @@
 package gamedetails
 
 import (
+	"bytes"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
+	"fmt"
 	"regexp"
 	"strings"
-
-	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // This file holds the two extractions the save-* output face performs on the
@@ -14,7 +16,7 @@ import (
 // brRE matches the "<br>" line-break markup, with optional horizontal
 // whitespace and an optional closing slash. Matching is case-sensitive, so
 // "<BR>" is not a line break.
-var brRE = regexp.MustCompile("<br[ \\t]*/?>")
+var brRE = regexp.MustCompile(`<br[ \t]*/?>`)
 
 // SerialsFromCDKey extracts the serials text from the cdKey member. A cdKey
 // without <span> markup is plain text whose <br> tags become line breaks,
@@ -36,25 +38,48 @@ func SerialsFromCDKey(cdKey string) (text string, unsupported bool) {
 // the member — present-but-empty counts — and plain "Changelog" otherwise; an
 // absent or empty changelog yields nothing. A member of the wrong shape is an
 // error, never a coercion.
-func ChangelogFromJSON(doc map[string]any) (string, error) {
-	raw, ok := doc["changelog"]
-	if !ok || raw == nil {
+func ChangelogFromJSON(raw []byte) (string, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
 		return "", nil
 	}
-	changelog, err := jsonval.Str(raw)
+	var doc struct {
+		Changelog jsontext.Value `json:"changelog"`
+		Title     jsontext.Value `json:"title"`
+	}
+	if err := jsonv2.Unmarshal(raw, &doc); err != nil {
+		return "", err
+	}
+	if len(doc.Changelog) == 0 {
+		return "", nil
+	}
+	cTok, err := readToken(doc.Changelog)
 	if err != nil {
 		return "", err
 	}
+	if cTok.Kind() == jsontext.KindNull {
+		return "", nil
+	}
+	if cTok.Kind() != jsontext.KindString {
+		return "", fmt.Errorf("changelog: expected a JSON string, got %s", cTok.Kind())
+	}
+	changelog := cTok.String()
 	if changelog == "" {
 		return "", nil
 	}
 	title := "Changelog"
-	if rawTitle, has := doc["title"]; has {
-		t, err := jsonval.Str(rawTitle)
+	if len(doc.Title) > 0 {
+		tTok, err := readToken(doc.Title)
 		if err != nil {
 			return "", err
 		}
-		title = "Changelog: " + t
+		switch tTok.Kind() {
+		case jsontext.KindNull:
+			title = "Changelog: "
+		case jsontext.KindString:
+			title = "Changelog: " + tTok.String()
+		default:
+			return "", fmt.Errorf("title: expected a JSON string, got %s", tTok.Kind())
+		}
 	}
 	return "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"UTF-8\">\n<title>" +
 		title + "</title>\n</head>\n<body>" + changelog + "</body>\n</html>", nil

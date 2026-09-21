@@ -3,6 +3,7 @@ package gamedetails
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"go/parser"
 	"go/token"
@@ -75,8 +76,8 @@ func nodeList(nodes ...map[string]any) []any {
 	return list
 }
 
-// product builds a minimal product document. Pass a nil value to omit a field.
-func product(fields map[string]any) map[string]any {
+// product builds a minimal product document bytes. Pass a nil value to omit a field.
+func product(fields map[string]any) []byte {
 	base := map[string]any{
 		"slug":  "the_game",
 		"id":    "42",
@@ -89,7 +90,11 @@ func product(fields map[string]any) map[string]any {
 		}
 		base[k] = v
 	}
-	return base
+	b, err := json.Marshal(base)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
 
 // TestProductInfoToGameDetailsMapsStringsAndImages locks the metadata mapping:
@@ -416,6 +421,18 @@ func TestIdentifierFieldsLiveAPIShapes(t *testing.T) {
 		})
 	}
 
+	// M4: 64-bit integer id > 2^53 (58812465975493914) must not lose precision.
+	t.Run("64-bit integer id > 2^53", func(t *testing.T) {
+		m4Doc := mustDocumentJSON(t, `{"slug":"s","title":"t","id":58812465975493914}`)
+		m4GD, err := ProductInfoToGameDetails(context.Background(), m4Doc, testConfig(), nil, stubResolver(nil))
+		if err != nil {
+			t.Fatalf("convert: %v", err)
+		}
+		if m4GD.ProductID != "58812465975493914" {
+			t.Errorf("ProductID = %q, want 58812465975493914", m4GD.ProductID)
+		}
+	})
+
 	// The structured id is the one shape the identifier reader still refuses.
 	_, err = ProductInfoToGameDetails(context.Background(),
 		mustDocumentJSON(t, `{"slug":"s","title":"t","id":{}}`), testConfig(), nil, stubResolver(nil))
@@ -456,16 +473,14 @@ func TestIdentifierFieldsLiveAPIShapes(t *testing.T) {
 	}
 }
 
-// mustDocumentJSON parses fixture text the way the wire does, so a JSON number
-// arrives as the float64 json.Unmarshal yields — the exact shape that broke
-// the strict gate on live data.
-func mustDocumentJSON(t *testing.T, body string) map[string]any {
+// mustDocumentJSON validates that body is valid JSON text and returns it as []byte.
+func mustDocumentJSON(t *testing.T, body string) []byte {
 	t.Helper()
-	var doc map[string]any
+	var doc any
 	if err := json.Unmarshal([]byte(body), &doc); err != nil {
 		t.Fatalf("fixture JSON: %v", err)
 	}
-	return doc
+	return []byte(body)
 }
 
 // dlcNode is one expanded DLC entry.
@@ -594,12 +609,12 @@ func TestProductInfoToGameDetailsNestedDLCs(t *testing.T) {
 // error, and the caller gets the ZERO GameDetails — never a half-built tree it
 // could mistake for a result.
 func TestProductInfoToGameDetailsRejectsWrongFieldShapes(t *testing.T) {
-	withDownloads := func(downloads any) map[string]any {
+	withDownloads := func(downloads any) []byte {
 		return product(map[string]any{"downloads": downloads})
 	}
 	cases := []struct {
 		name string
-		doc  map[string]any
+		doc  []byte
 	}{
 		{"slug is not a string", product(map[string]any{"slug": 42})},
 		{"images is not an object", product(map[string]any{"images": "nope"})},
@@ -746,22 +761,53 @@ func TestProductInfoToGameDetailsAbsentOptionalFields(t *testing.T) {
 	}
 }
 
-func TestSizeString(t *testing.T) {
+func TestReadFileSize(t *testing.T) {
 	cases := []struct {
-		in   any
-		want string
+		name    string
+		in      string
+		wantSz  uint64
+		wantOk  bool
+		wantErr bool
 	}{
-		{"hello", "hello"},
-		{float64(42), "42"},
-		{float64(-1), ""},
-		{float64(1.5), ""},
-		{int64(7), "7"},
-		{uint64(9), "9"},
-		{true, ""},
+		{"string decimal", `"42"`, 42, true, false},
+		{"number decimal", `42`, 42, true, false},
+		{"zero number", `0`, 0, true, false},
+		{"zero string", `"0"`, 0, true, false},
+		{"empty string", `""`, 0, false, false},
+		{"null", `null`, 0, false, false},
+		{"non-numeric string", `"hello"`, 0, false, false},
+		{"negative number", `-1`, 0, false, false},
+		{"boolean", `true`, 0, false, false},
 	}
 	for _, c := range cases {
-		if got := sizeString(c.in); got != c.want {
-			t.Errorf("sizeString(%#v) = %q, want %q", c.in, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			sz, ok, err := readFileSize(jsontext.Value(c.in))
+			if (err != nil) != c.wantErr {
+				t.Fatalf("readFileSize(%s) err = %v, wantErr = %v", c.in, err, c.wantErr)
+			}
+			if ok != c.wantOk {
+				t.Errorf("readFileSize(%s) ok = %v, want %v", c.in, ok, c.wantOk)
+			}
+			if sz != c.wantSz {
+				t.Errorf("readFileSize(%s) sz = %d, want %d", c.in, sz, c.wantSz)
+			}
+		})
+	}
+}
+
+func TestProductInfoToGameDetailsUnknownFieldsPass(t *testing.T) {
+	doc := []byte(`{
+		"slug": "game",
+		"id": "123",
+		"title": "Game Title",
+		"future_field": {"new_api": "x"},
+		"unrecognized_array": [1, 2, 3]
+	}`)
+	gd, err := ProductInfoToGameDetails(context.Background(), doc, config.DownloadConfig{}, nil, stubResolver(nil))
+	if err != nil {
+		t.Fatalf("unexpected error on unknown fields: %v", err)
+	}
+	if gd.Gamename != "game" || gd.ProductID != "123" || gd.Title != "Game Title" {
+		t.Fatalf("unexpected gd values: %+v", gd)
 	}
 }

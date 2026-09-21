@@ -270,7 +270,7 @@ func TestCredentialsNeverReachTheOutput(t *testing.T) {
 	}{
 		{
 			name:     "HTTP status error whose URL carries the token",
-			args:     []string{"download", "sentinel_game"},
+			args:     []string{"backup", "download", "sentinel_game"},
 			download: "https://cdn.gog.com/games/sentinel/base.exe?access_token=" + sentinel,
 			wantErr: []string{"Failed:", "HTTP 404",
 				"https://cdn.gog.com/games/sentinel/base.exe"},
@@ -278,14 +278,14 @@ func TestCredentialsNeverReachTheOutput(t *testing.T) {
 		},
 		{
 			name:     "transport failure whose URL carries the token",
-			args:     []string{"download", "file", "sentinel_game/base.exe"},
+			args:     []string{"backup", "download", "sentinel_game", "base.exe"},
 			download: "http://127.0.0.1:1/x?access_token=" + sentinel,
 			wantErr:  []string{"Failed: sentinel_game/base.exe", "http://127.0.0.1:1/x"},
 			wantHits: []string{"/dl/base.exe"},
 		},
 		{
 			name: "unparsable URL carrying the token",
-			args: []string{"download", "file", "sentinel_game/base.exe"},
+			args: []string{"backup", "download", "sentinel_game", "base.exe"},
 			// The host is what url.Parse rejects; the game segment keeps the
 			// derived destination a name the filesystem accepts, so the failure
 			// stays the unparsable URL and not a file-creation error.
@@ -310,7 +310,7 @@ func TestCredentialsNeverReachTheOutput(t *testing.T) {
 			// was made (wantHits) and that it produced nothing on either
 			// stream.
 			name:        "OAuth refresh failure whose URL carries the refresh token",
-			args:        []string{"download", "sentinel_game"},
+			args:        []string{"backup", "download", "sentinel_game"},
 			download:    "https://cdn.gog.com/games/sentinel/base.exe",
 			tokenStatus: http.StatusInternalServerError,
 			expired:     true,
@@ -377,7 +377,7 @@ func TestCredentialsNeverReachTheOutput(t *testing.T) {
 // isDownloadCommand reports whether the command line opens a transfer, which
 // is what decides whether --directory applies.
 func isDownloadCommand(args []string) bool {
-	return len(args) > 0 && args[0] == "download"
+	return len(args) >= 2 && args[0] == "backup" && args[1] == "download"
 }
 
 // runSentinel drives one command line through the real dispatcher, with stdin

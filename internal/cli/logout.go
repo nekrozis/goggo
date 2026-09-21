@@ -11,7 +11,7 @@ import (
 	"github.com/nekrozis/goggo/internal/config"
 )
 
-// logout clears the local login state: the Galaxy token store and the cookie
+// clearAuth clears the local login state: the Galaxy token store and the cookie
 // jar, and nothing else — the configuration directory's other files and the
 // cache root are left alone.
 //
@@ -23,7 +23,7 @@ import (
 // Removal is idempotent — an already-gone path counts as success, so only a
 // genuine removal failure returns an error, naming the path; the success line is
 // then not printed, and a failure on the second path leaves the first gone.
-func logout(cfg config.Config, out io.Writer) error {
+func clearAuth(cfg config.Config, out io.Writer) error {
 	if err := auth.RemoveStore(auth.StorePath(cfg)); err != nil {
 		return err
 	}

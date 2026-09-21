@@ -111,7 +111,7 @@ func leafInvocations(t *testing.T) map[string][]string {
 			args := append([]string{}, here...)
 			if _, count := commandArity(n.id); count != 0 {
 				switch count {
-				case 1, -1:
+				case 1, 2, -1:
 					args = append(args, "some_game")
 				case -2:
 					// zero-or-more: an empty selection is legal

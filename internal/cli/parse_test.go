@@ -45,16 +45,24 @@ func TestCommandTreeResolution(t *testing.T) {
 		want commandID
 	}{
 		{[]string{"auth", "login"}, cmdAuthLogin},
-		{[]string{"auth", "logout"}, cmdAuthLogout},
+		{[]string{"auth", "clear"}, cmdAuthClear},
 		{[]string{"auth", "status"}, cmdAuthStatus},
 		{[]string{"list", "games"}, cmdListGames},
 		{[]string{"list", "tags"}, cmdListTags},
 		{[]string{"list", "wishlist"}, cmdListWishlist},
-		{[]string{"show", "builds", "123"}, cmdShowBuilds},
-		{[]string{"show", "manifest", "123/2"}, cmdShowManifest},
-		{[]string{"show", "cdns", "123"}, cmdShowCDNs},
+		{[]string{"game", "123"}, cmdGame},
+		{[]string{"galaxy", "builds", "123"}, cmdGalaxyBuilds},
+		{[]string{"galaxy", "manifest", "123/2"}, cmdGalaxyManifest},
+		{[]string{"galaxy", "manifest", "123", "2"}, cmdGalaxyManifest},
+		{[]string{"galaxy", "cdns", "123"}, cmdGalaxyCDNs},
+		{[]string{"galaxy", "cdns", "123", "2"}, cmdGalaxyCDNs},
 		{[]string{"install", "123"}, cmdInstall},
+		{[]string{"install", "options", "123"}, cmdInstallOptions},
 		{[]string{"verify", "123"}, cmdVerify},
+		{[]string{"backup", "list"}, cmdBackupList},
+		{[]string{"backup", "list", "123"}, cmdBackupList},
+		{[]string{"backup", "download", "123"}, cmdBackupDownload},
+		{[]string{"backup", "download", "123", "file1"}, cmdBackupDownload},
 		{[]string{"orphans", "check", "123"}, cmdOrphansCheck},
 		{[]string{"orphans", "remove", "123"}, cmdOrphansRemove},
 	}
@@ -67,8 +75,8 @@ func TestCommandTreeResolution(t *testing.T) {
 	// A namespace is not runnable, and a wrong subcommand is as unknown as a
 	// wrong verb.
 	for _, args := range [][]string{
-		{"auth"}, {"list"}, {"show"}, {"orphans"},
-		{"auth", "bogus"}, {"list", "bogus"}, {"orphans", "bogus"},
+		{"auth"}, {"list"}, {"galaxy"}, {"orphans"}, {"backup"},
+		{"auth", "bogus"}, {"list", "bogus"}, {"galaxy", "bogus"}, {"orphans", "bogus"}, {"backup", "bogus"},
 	} {
 		err := mustUsageError(t, args...)
 		if !strings.Contains(err.Error(), "subcommand") {
@@ -233,13 +241,71 @@ func TestUnknownAndMalformedAreUsageErrors(t *testing.T) {
 		{"install", "1", "2"},
 		{"verify", "1", "2"},
 		{"list", "games", "extra"},
-		{"show", "builds", "1/2"},
-		{"show", "builds"},
+		{"galaxy", "builds", "1/2"},
+		{"galaxy", "builds"},
+		{"galaxy", "manifest"},
 		{"auth", "login", "extra"},
 		{"version", "extra"},
 		{"install", "123", "--verbose=yes"},
 	} {
 		mustUsageError(t, args...)
+	}
+}
+
+// TestDeprecatedCommandsProvideActionableHints locks the migration ergonomics:
+// former commands from CLI 1 produce actionable hints pointing directly to their
+// CLI 2 replacements, while unknown commands that merely share a prefix do not.
+func TestDeprecatedCommandsProvideActionableHints(t *testing.T) {
+	exact := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"show", "builds", "123"}, "goggo galaxy builds"},
+		{[]string{"show", "manifest", "123"}, "goggo galaxy manifest"},
+		{[]string{"show", "cdns", "123"}, "goggo galaxy cdns"},
+		{[]string{"download", "123"}, "goggo backup download"},
+		{[]string{"download", "file", "123", "f1"}, "goggo backup download"},
+		{[]string{"list", "details"}, "goggo backup list"},
+		{[]string{"list", "json"}, "--json"},
+		{[]string{"auth", "logout"}, "goggo auth clear"},
+	}
+	for _, tc := range exact {
+		err := mustUsageError(t, tc.args...)
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("parseArgs(%v) = %v, want hint mentioning %q", tc.args, err, tc.want)
+		}
+	}
+
+	// Help topics on deprecated commands also yield actionable hints.
+	for _, topic := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"help", "show"}, "galaxy"},
+		{[]string{"help", "download"}, "backup download"},
+		{[]string{"help", "list", "details"}, "backup list"},
+		{[]string{"help", "list", "json"}, "--json"},
+		{[]string{"help", "auth", "logout"}, "auth clear"},
+	} {
+		err := mustUsageError(t, topic.args...)
+		if !strings.Contains(err.Error(), topic.want) {
+			t.Errorf("parseArgs(%v) = %v, want hint mentioning %q", topic.args, err, topic.want)
+		}
+	}
+
+	// Negative boundary tests: words that merely share a prefix must not trigger deprecation hints.
+	negative := [][]string{
+		{"showfoo"},
+		{"downloadable"},
+		{"list", "detail"},
+		{"auth", "logoutx"},
+	}
+	for _, args := range negative {
+		err := mustUsageError(t, args...)
+		msg := err.Error()
+		if strings.Contains(msg, "goggo galaxy") || strings.Contains(msg, "goggo backup") || strings.Contains(msg, "goggo auth clear") {
+			t.Errorf("parseArgs(%v) = %v, must not produce a replacement hint", args, err)
+		}
 	}
 }
 
@@ -404,9 +470,14 @@ func TestHelpTopicResolution(t *testing.T) {
 		{[]string{"help"}, ""},
 		{[]string{"install", "-h"}, "install"},
 		{[]string{"install", "--help", "123"}, "install"}, // help does not require the game
-		{[]string{"help", "install"}, "install"},
 		{[]string{"help", "auth", "login"}, "auth login"},
 		{[]string{"auth", "-h"}, "auth"}, // a namespace has a topic too
+		{[]string{"help", "galaxy"}, "galaxy"},
+		{[]string{"help", "galaxy", "builds"}, "galaxy builds"},
+		{[]string{"help", "backup"}, "backup"},
+		{[]string{"help", "backup", "list"}, "backup list"},
+		{[]string{"help", "backup", "download"}, "backup download"},
+		{[]string{"help", "install", "options"}, "install options"},
 		{[]string{"help", "orphans"}, "orphans"},
 		{[]string{"help", "version"}, "version"},
 	}

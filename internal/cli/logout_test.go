@@ -74,7 +74,7 @@ func TestLogoutClearsAuthenticationStateOnly(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := logout(cfg, &out); err != nil {
+	if err := clearAuth(cfg, &out); err != nil {
 		t.Fatalf("logout: %v", err)
 	}
 	if got := out.String(); got != logoutClearedLine {
@@ -103,7 +103,7 @@ func TestLogoutIsIdempotent(t *testing.T) {
 
 	for i := 1; i <= 3; i++ {
 		var out bytes.Buffer
-		if err := logout(cfg, &out); err != nil {
+		if err := clearAuth(cfg, &out); err != nil {
 			t.Fatalf("logout #%d: %v", i, err)
 		}
 		if got := out.String(); got != logoutClearedLine {
@@ -120,7 +120,7 @@ func TestLogoutOnMissingDirectoryIsSuccess(t *testing.T) {
 	cfg := config.NewConfig(filepath.Join(root, "absent"), filepath.Join(root, "absent"))
 
 	var out bytes.Buffer
-	if err := logout(cfg, &out); err != nil {
+	if err := clearAuth(cfg, &out); err != nil {
 		t.Fatalf("logout: %v", err)
 	}
 	if got := out.String(); got != logoutClearedLine {
@@ -145,7 +145,7 @@ func TestLogoutPropagatesRemovalFailure(t *testing.T) {
 	cfg.Curl.CookiePath = invalidPath
 
 	var out bytes.Buffer
-	err := logout(cfg, &out)
+	err := clearAuth(cfg, &out)
 	if err == nil {
 		t.Fatal("logout must report a removal failure")
 	}

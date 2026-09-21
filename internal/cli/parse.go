@@ -630,12 +630,12 @@ var removedOptions = map[string]string{
 	"login":                  "goggo auth login",
 	"browser-login":          "goggo auth login --browser",
 	"check-login-status":     "goggo auth status",
-	"logout":                 "goggo auth logout",
+	"logout":                 "goggo auth clear",
 	"login-email":            "goggo auth login --email <address>",
 	"login-password":         "goggo auth login (the password is asked for interactively)",
 	"galaxy-install":         "goggo install <game>",
-	"galaxy-show-builds":     "goggo show builds <game>",
-	"galaxy-list-cdns":       "goggo show cdns <game>",
+	"galaxy-show-builds":     "goggo galaxy builds <game>",
+	"galaxy-list-cdns":       "goggo galaxy cdns <game>",
 	"status":                 "goggo verify <game>",
 	"check-orphans":          "goggo orphans check <game>",
 	"delete-orphans":         "goggo orphans remove <game>",
@@ -645,9 +645,9 @@ var removedOptions = map[string]string{
 	"galaxy-arch":            "goggo install <game> --arch x64",
 	"galaxy-cdn-priority":    "goggo install <game> --cdn-priority <a,b>",
 	"galaxy-no-dependencies": "goggo install <game> --no-dependencies",
-	"galaxy-builds-sort":     "goggo show builds <game> --sort <order>",
-	"download":               "goggo download <game>",
-	"download-file":          "goggo download file <game>/<fileid>",
+	"galaxy-builds-sort":     "goggo galaxy builds <game> --sort <order>",
+	"download":               "goggo backup download <game>",
+	"download-file":          "goggo backup download <game> <fileid>",
 	"platform":               "goggo list games --installer-platform <spec>",
 	"language":               "goggo list games --installer-language <spec>",
 	"list":                   "goggo list games (also: list tags, list wishlist)",
@@ -848,16 +848,32 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 	switch {
 	case count == 0 && len(rest) != 0:
 		return invocation{}, usagef("%s takes no arguments", strings.Join(path, " "))
-	case (count == 1 || count == -1) && len(rest) == 0:
+	case (count == 1 || count == 2 || count == -1) && len(rest) == 0:
 		return invocation{}, usagef("%s needs a %s", strings.Join(path, " "), argName)
 	case count == 1 && len(rest) != 1:
 		return invocation{}, usagef("%s takes one %s, got %d", strings.Join(path, " "), argName, len(rest))
+	case count == 2 && len(rest) > 2:
+		return invocation{}, usagef("%s takes at most two arguments, got %d", strings.Join(path, " "), len(rest))
 	case count == 1:
 		tgt, err := parseTarget(rest[0])
 		if err != nil {
 			return invocation{}, err
 		}
 		inv.target = tgt
+	case count == 2:
+		if len(rest) == 1 {
+			tgt, err := parseTarget(rest[0])
+			if err != nil {
+				return invocation{}, err
+			}
+			inv.target = tgt
+		} else {
+			// len(rest) == 2: first is game, second is build
+			if strings.Contains(rest[0], "/") {
+				return invocation{}, usagef("invalid target %q: build specified twice", rest[0])
+			}
+			inv.target = target{Product: rest[0], Build: rest[1]}
+		}
 	case count < 0:
 		// -1 requires at least one (checked above), -2 accepts none — the
 		// empty set means "the whole account", a read-only default the
@@ -865,26 +881,16 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 		inv.args = append([]string{}, rest...)
 	}
 
-	// A batch game is a name, never a spec: a slash means the user meant the
-	// subcommand, and guessing which half is a file id is not the parser's to do.
-	if node.id == cmdDownload {
-		for _, game := range inv.args {
-			if strings.Contains(game, "/") {
-				return invocation{}, usagef("download takes game names; to fetch one file use %q", "download file "+game+"/<fileid>")
-			}
-		}
+	// -o names one output file, so it belongs to a single file download;
+	// if not exactly two arguments (<game> <fileid>) are given with -o, refuse.
+	if node.id == cmdBackupDownload && inv.outputFile != "" && len(inv.args) != 2 {
+		return invocation{}, usagef("backup download takes -o with exactly one file (<game> <fileid>), got %d arguments", len(inv.args))
 	}
 
-	// -o names one output file, so it belongs to exactly one spec; the parser
-	// refuses it where the shape is known.
-	if node.id == cmdDownloadFile && inv.outputFile != "" && len(inv.args) > 1 {
-		return invocation{}, usagef("download file takes -o with exactly one spec, got %d", len(inv.args))
-	}
-
-	// "show builds" lists the builds of a product; a build in the argument is
-	// not a filter there, it is a different command (show manifest).
-	if node.id == cmdShowBuilds && inv.target.Build != "" {
-		return invocation{}, usagef("show builds takes a game, not a build (use show manifest %s)", rest[0])
+	// "galaxy builds" lists the builds of a product; a build in the argument is
+	// not a filter there, it is a different command (galaxy manifest).
+	if node.id == cmdGalaxyBuilds && inv.target.Build != "" {
+		return invocation{}, usagef("galaxy builds takes a game, not a build (use galaxy manifest %s)", rest[0])
 	}
 
 	inv.cmd = node.id
@@ -931,6 +937,14 @@ func resolveCommand(words []string) (commandNode, []string, []string, error) {
 		nodes = child.children
 	}
 	if len(path) == 0 {
+		if words[0] == "show" {
+			return commandNode{}, nil, nil, usagef("command %q has been replaced; use %q, %q or %q",
+				"show", "goggo galaxy builds <game>", "goggo galaxy manifest <game> [build]", "goggo galaxy cdns <game> [build]")
+		}
+		if words[0] == "download" {
+			return commandNode{}, nil, nil, usagef("command %q has been moved; use %q",
+				"download", "goggo backup download <game> [file-id]")
+		}
 		return commandNode{}, nil, nil, unknownCommand(words[0])
 	}
 	if len(node.children) != 0 && node.id == cmdNone {
@@ -938,9 +952,21 @@ func resolveCommand(words []string) (commandNode, []string, []string, error) {
 		if idx == len(words) {
 			return commandNode{}, nil, nil, usagef("command %q needs a subcommand (%s)", strings.Join(path, " "), childNames(node))
 		}
+		if len(path) == 1 && path[0] == "list" && words[idx] == "details" {
+			return commandNode{}, nil, nil, usagef("command %q has been moved; use %q",
+				"list details", "goggo backup list <game>")
+		}
+		if len(path) == 1 && path[0] == "list" && words[idx] == "json" {
+			return commandNode{}, nil, nil, usagef("command %q has been replaced; use %q with commands that support JSON output",
+				"list json", "--json")
+		}
+		if len(path) == 1 && path[0] == "auth" && words[idx] == "logout" {
+			return commandNode{}, nil, nil, usagef("command %q has been renamed to %q to reflect that only local credentials are removed; use %q",
+				"auth logout", "auth clear", "goggo auth clear")
+		}
 		return commandNode{}, nil, nil, usagef("unknown subcommand %q for %q (%s)", words[idx], strings.Join(path, " "), childNames(node))
 	}
-	// A node that is both leaf and namespace ("download") that got here with
+	// A node that is both leaf and namespace ("install") that got here with
 	// a first word no child matched dispatches as the leaf: the leftover
 	// words are its arguments.
 	return node, path, words[idx:], nil
@@ -955,19 +981,19 @@ func childNames(node commandNode) string {
 }
 
 // commandArity says what a command takes after its path: the argument's name
-// and how many — 0 for none, 1 for exactly one, -1 for one or more (the
-// download commands), -2 for zero or more (list details/json, where the empty
-// set means the whole account, read-only).
+// and how many — 0 for none, 1 for exactly one, 2 for one or two (<game> [build]),
+// -1 for one or more (the download commands), -2 for zero or more (backup list,
+// where the empty set means the whole account, read-only).
 func commandArity(id commandID) (string, int) {
 	switch id {
-	case cmdInstall, cmdVerify, cmdShowBuilds, cmdShowManifest, cmdShowCDNs,
+	case cmdInstall, cmdVerify, cmdGalaxyBuilds, cmdInstallOptions, cmdGame,
 		cmdOrphansCheck, cmdOrphansRemove:
 		return "game", 1
-	case cmdDownload:
+	case cmdGalaxyManifest, cmdGalaxyCDNs:
+		return "game", 2
+	case cmdBackupDownload:
 		return "game", -1
-	case cmdDownloadFile:
-		return "spec", -1
-	case cmdListDetails, cmdListJSON:
+	case cmdBackupList:
 		return "game", -2
 	}
 	return "", 0
@@ -1033,10 +1059,30 @@ func resolveHelpTopic(words []string) ([]string, error) {
 		nodes = child.children
 	}
 	if len(path) == 0 {
+		if words[0] == "show" {
+			return nil, usagef("command %q has been replaced; use %q, %q or %q",
+				"show", "goggo galaxy builds <game>", "goggo galaxy manifest <game> [build]", "goggo galaxy cdns <game> [build]")
+		}
+		if words[0] == "download" {
+			return nil, usagef("command %q has been moved; use %q",
+				"download", "goggo backup download <game> [file-id]")
+		}
 		return nil, unknownCommand(words[0])
 	}
 	if len(node.children) != 0 && node.id == cmdNone {
 		if idx < len(words) {
+			if len(path) == 1 && path[0] == "list" && words[idx] == "details" {
+				return nil, usagef("command %q has been moved; use %q",
+					"list details", "goggo backup list <game>")
+			}
+			if len(path) == 1 && path[0] == "list" && words[idx] == "json" {
+				return nil, usagef("command %q has been replaced; use %q with commands that support JSON output",
+					"list json", "--json")
+			}
+			if len(path) == 1 && path[0] == "auth" && words[idx] == "logout" {
+				return nil, usagef("command %q has been renamed to %q to reflect that only local credentials are removed; use %q",
+					"auth logout", "auth clear", "goggo auth clear")
+			}
 			return nil, usagef("unknown subcommand %q for %q (%s)", words[idx], strings.Join(path, " "), childNames(node))
 		}
 		return path, nil
@@ -1044,6 +1090,9 @@ func resolveHelpTopic(words []string) ([]string, error) {
 	if want, count := commandArity(node.id); count != 0 {
 		if count == 1 && len(words)-idx > 1 {
 			return nil, usagef("%s takes one %s, got %d", strings.Join(path, " "), want, len(words)-idx)
+		}
+		if count == 2 && len(words)-idx > 2 {
+			return nil, usagef("%s takes at most two arguments, got %d", strings.Join(path, " "), len(words)-idx)
 		}
 		return path, nil
 	}

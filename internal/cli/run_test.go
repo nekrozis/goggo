@@ -218,7 +218,7 @@ func TestRunFailures(t *testing.T) {
 		{"unaccepted option", []string{"list", "games", "--threads", "8"}, "not accepted", ""},
 		{"missing game", []string{"install"}, "needs a game", ""},
 		{"malformed target", []string{"install", "/2"}, "the game is empty", ""},
-		{"show builds with a build", []string{"show", "builds", "123/2"}, "not a build", ""},
+		{"galaxy builds with a build", []string{"galaxy", "builds", "123/2"}, "not a build", ""},
 		{"bare invocation", nil, "Usage:", ""},
 		{"password argument", []string{"auth", "login", "--password", "hunter2"}, "unknown option", "hunter2"},
 		{"password stdin", []string{"auth", "login", "--password-stdin"}, "unknown option", ""},
@@ -386,9 +386,9 @@ func TestRenderWishlist(t *testing.T) {
 // request is made.
 func TestRunMalformedTargetFailsOffline(t *testing.T) {
 	for _, args := range [][]string{
-		{"show", "builds", "/"},
+		{"galaxy", "builds", "/"},
 		{"install", "/"},
-		{"show", "cdns", "1/2/3"},
+		{"galaxy", "cdns", "1/2/3"},
 	} {
 		code, out, errOut := run(t, "", args...)
 		if code != 2 {

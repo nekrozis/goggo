@@ -148,13 +148,12 @@ func TestReferenceReadReachesTheSelector(t *testing.T) {
 		{"verify", "Game"},
 		{"orphans", "check", "Game"},
 		{"orphans", "remove", "Game", "--yes"},
-		{"list", "details", "Game"},
-		{"list", "json", "Game"},
-		{"show", "builds", "Game"},
-		{"show", "manifest", "Game"},
-		{"show", "cdns", "Game"},
-		{"download", "Game"},
-		{"download", "file", "Game/1"},
+		{"backup", "list", "Game"},
+		{"galaxy", "builds", "Game"},
+		{"galaxy", "manifest", "Game"},
+		{"galaxy", "cdns", "Game"},
+		{"backup", "download", "Game"},
+		{"backup", "download", "Game", "1"},
 	}
 	for _, base := range cases {
 		t.Run(strings.Join(base, " "), func(t *testing.T) {
@@ -181,7 +180,7 @@ func TestReferenceReadReachesTheSelector(t *testing.T) {
 func TestExactReferenceResolvesThroughTheAccount(t *testing.T) {
 	deps := newReferenceFixture(t)
 
-	code, _, errOut := runReference(t, deps, "list", "details", "Some Game A")
+	code, _, errOut := runReference(t, deps, "backup", "list", "Some Game A")
 	if code != 0 {
 		t.Errorf("exit = %d, want 0 for a name the account holds:\n%s", code, errOut)
 	}
@@ -201,13 +200,12 @@ func TestZeroMatchExitCodes(t *testing.T) {
 		{args: []string{"verify", "Game"}, want: 1},
 		{args: []string{"orphans", "check", "Game"}, want: 1},
 		{args: []string{"orphans", "remove", "Game", "--yes"}, want: 1},
-		{args: []string{"list", "details", "Game"}, want: 1},
-		{args: []string{"list", "json", "Game"}, want: 1},
-		{args: []string{"download", "Game"}, want: 1},
-		{args: []string{"download", "file", "Game/1"}, want: 1},
-		{args: []string{"show", "builds", "Game"}, want: 0},
-		{args: []string{"show", "manifest", "Game"}, want: 0},
-		{args: []string{"show", "cdns", "Game"}, want: 0},
+		{args: []string{"backup", "list", "Game"}, want: 1},
+		{args: []string{"backup", "download", "Game"}, want: 1},
+		{args: []string{"backup", "download", "Game", "1"}, want: 1},
+		{args: []string{"galaxy", "builds", "Game"}, want: 0},
+		{args: []string{"galaxy", "manifest", "Game"}, want: 0},
+		{args: []string{"galaxy", "cdns", "Game"}, want: 0},
 	}
 	for _, c := range cases {
 		t.Run(strings.Join(c.args, " "), func(t *testing.T) {
@@ -220,7 +218,7 @@ func TestZeroMatchExitCodes(t *testing.T) {
 	}
 }
 
-// TestSelectionFailureExitCodes locks the other half of the show contract: a
+// TestSelectionFailureExitCodes locks the other half of the galaxy contract: a
 // reference that matches several products and cannot be chosen is a FAILED
 // command, so it exits 1. It is deliberately paired with TestZeroMatchExitCodes,
 // which asserts exit 0 for a reference that matches nothing — the two together
@@ -230,9 +228,9 @@ func TestSelectionFailureExitCodes(t *testing.T) {
 	// The fixture holds two products whose slugs share the word "Game", so an
 	// expression matching both cannot be resolved without a terminal.
 	for _, args := range [][]string{
-		{"show", "builds", "Game", "--regex"},
-		{"show", "manifest", "Game", "--regex"},
-		{"show", "cdns", "Game", "--regex"},
+		{"galaxy", "builds", "Game", "--regex"},
+		{"galaxy", "manifest", "Game", "--regex"},
+		{"galaxy", "cdns", "Game", "--regex"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			deps := newReferenceFixture(t)
@@ -255,7 +253,7 @@ func TestSelectionFailureExitCodes(t *testing.T) {
 func TestShowExactNameResolvesAndExitsZero(t *testing.T) {
 	deps := newReferenceFixture(t)
 
-	code, out, errOut := runReference(t, deps, "show", "builds", "Some Game A")
+	code, out, errOut := runReference(t, deps, "galaxy", "builds", "Some Game A")
 	if code != 0 {
 		t.Errorf("exit = %d, want 0 for a name the account holds:\n%s", code, errOut)
 	}

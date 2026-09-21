@@ -1,6 +1,10 @@
 package cli
 
-import "github.com/nekrozis/goggo/internal/config"
+import (
+	"strings"
+
+	"github.com/nekrozis/goggo/internal/config"
+)
 
 // The command tree the CLI is built on: this CLI's own product surface,
 // organised by user concept rather than by the upstream flag set.
@@ -25,7 +29,7 @@ const (
 	sessionUnset sessionClass = iota
 
 	// sessionNone runs without a session, so a missing one is not a failure:
-	// `auth status` answers "Not logged in" itself and `auth logout` only
+	// `auth status` answers "Not logged in" itself and `auth clear` only
 	// removes local files.
 	sessionNone
 
@@ -64,7 +68,7 @@ func (c sessionClass) String() string {
 
 // commandID identifies one leaf command: a node that can actually run.
 //
-// Namespaces (auth, list, show, orphans) have no id; they only group their
+// Namespaces (auth, list, galaxy, backup, orphans) have no id; they only group their
 // children.
 type commandID uint8
 
@@ -72,24 +76,26 @@ const (
 	cmdNone commandID = iota
 
 	cmdAuthLogin
-	cmdAuthLogout
+	cmdAuthClear
 	cmdAuthStatus
 
 	cmdListGames
 	cmdListTags
 	cmdListWishlist
-	cmdListDetails
-	cmdListJSON
 
-	cmdShowBuilds
-	cmdShowManifest
-	cmdShowCDNs
+	cmdGame
+
+	cmdGalaxyBuilds
+	cmdGalaxyManifest
+	cmdGalaxyCDNs
 
 	cmdInstall
+	cmdInstallOptions
+
 	cmdVerify
 
-	cmdDownload
-	cmdDownloadFile
+	cmdBackupList
+	cmdBackupDownload
 
 	cmdOrphansCheck
 	cmdOrphansRemove
@@ -283,7 +289,7 @@ var commandTree = []commandNode{
 		children: []commandNode{
 			{name: "login", summary: "Log in", id: cmdAuthLogin,
 				session: sessionExplicitLogin, options: []optionID{optBrowser, optEmail}},
-			{name: "logout", summary: "Log out (clear local login state)", id: cmdAuthLogout,
+			{name: "clear", summary: "Clear local login state", id: cmdAuthClear,
 				session: sessionNone},
 			{name: "status", summary: "Report the authentication state", id: cmdAuthStatus,
 				session: sessionNone},
@@ -297,21 +303,24 @@ var commandTree = []commandNode{
 				session: sessionRequired, options: listGamesOptions},
 			{name: "tags", summary: "List tags", id: cmdListTags, session: sessionRequired},
 			{name: "wishlist", summary: "List the wishlist", id: cmdListWishlist, session: sessionRequired},
-			{name: "details", summary: "Show each game's download face", id: cmdListDetails,
-				session: sessionRequired, options: detailsOptions, notes: listDetailsNotes},
-			{name: "json", summary: "Print the download face as JSON", id: cmdListJSON,
-				session: sessionRequired, options: detailsOptions, notes: listDetailsNotes},
 		},
 	},
 	{
-		name:    "show",
-		summary: "Show one product's builds or endpoints",
+		name:    "game",
+		summary: "Show game information",
+		id:      cmdGame,
+		session: sessionNone,
+		options: productRefOptions,
+	},
+	{
+		name:    "galaxy",
+		summary: "Inspect GOG Galaxy resources",
 		children: []commandNode{
-			{name: "builds", summary: "List a product's builds", id: cmdShowBuilds,
+			{name: "builds", summary: "List a product's builds", id: cmdGalaxyBuilds,
 				session: sessionRequired, options: []optionID{optSort, optRegex}},
-			{name: "manifest", summary: "Show a build's manifest", id: cmdShowManifest,
+			{name: "manifest", summary: "Show a build's manifest", id: cmdGalaxyManifest,
 				session: sessionRequired, options: productRefOptions},
-			{name: "cdns", summary: "List a build's CDN endpoints", id: cmdShowCDNs,
+			{name: "cdns", summary: "List a build's CDN endpoints", id: cmdGalaxyCDNs,
 				session: sessionRequired, options: productRefOptions},
 		},
 	},
@@ -327,38 +336,14 @@ var commandTree = []commandNode{
 			optNoDependencies,
 			optCheckFreeSpace,
 		}),
-	},
-	{
-		// "download" is both a leaf (batch download of games) and a
-		// namespace (download file). The word "file" after "download"
-		// always selects the subcommand — a game literally named "file"
-		// cannot be batch-downloaded by name.
-		name:    "download",
-		summary: "Download website files (installers, patches, extras, language packs)",
-		id:      cmdDownload,
-		session: sessionImplicitLogin,
-		options: joinOptions([]optionID{optDirectory, optNoSubdirectories}, subdirOptions,
-			[]optionID{
-				optInclude, optExclude, optBlacklist,
-				optInstallerPlatform, optInstallerLanguage,
-				optThreads, optProgressInterval, optCheckFreeSpace, optInfoThreads,
-			}, saveOptions, productRefOptions),
-		notes: []string{
-			"Every selected game's files are queued and run to the end: a failing",
-			"file does not stop the others, but the command exits 1 if any failed.",
-			"Nothing is downloaded without an explicit game argument.",
-		},
 		children: []commandNode{
-			{name: "file", summary: "Download single files by game/file id", id: cmdDownloadFile,
-				session: sessionImplicitLogin,
-				options: joinOptions([]optionID{optDirectory, optNoSubdirectories, optOutputFile, optInfoThreads},
-					subdirOptions, []optionID{optThreads, optProgressInterval}, productRefOptions),
-				notes: []string{
-					"Specs are <gamename>/<fileid> or <gamename>/<dlc_gamename>/<fileid>;",
-					"the gogdownloader:// prefix is accepted and stripped.",
-					"All specs run to the end and successful downloads are kept;",
-					"-o names the output file for exactly one spec.",
-				}},
+			{
+				name:    "options",
+				summary: "List available installation options",
+				id:      cmdInstallOptions,
+				session: sessionRequired,
+				options: productRefOptions,
+			},
 		},
 	},
 	{
@@ -385,6 +370,37 @@ var commandTree = []commandNode{
 			{name: "remove", summary: "Delete them", id: cmdOrphansRemove,
 				session: sessionImplicitLogin,
 				options: joinOptions(installTargetOptions, productRefOptions, orphansOptions, []optionID{optYes}), notes: orphanNotes},
+		},
+	},
+	{
+		name:    "backup",
+		summary: "Manage offline backup files",
+		children: []commandNode{
+			{
+				name:    "list",
+				summary: "Show each game's offline backup files",
+				id:      cmdBackupList,
+				session: sessionRequired,
+				options: detailsOptions,
+				notes:   listDetailsNotes,
+			},
+			{
+				name:    "download",
+				summary: "Download offline backup files (installers, patches, extras, language packs)",
+				id:      cmdBackupDownload,
+				session: sessionImplicitLogin,
+				options: joinOptions([]optionID{optDirectory, optNoSubdirectories, optOutputFile, optInfoThreads},
+					subdirOptions,
+					[]optionID{
+						optInclude, optExclude, optBlacklist,
+						optInstallerPlatform, optInstallerLanguage,
+						optThreads, optProgressInterval, optCheckFreeSpace,
+					}, saveOptions, productRefOptions),
+				notes: []string{
+					"Downloads offline backup files for the specified game or single file.",
+					"-o names the output file when downloading a single file.",
+				},
+			},
 		},
 	},
 }
@@ -430,27 +446,25 @@ type optionSet []optionID
 
 func (s optionSet) contains(id optionID) bool { return containsOption(s, id) }
 
-// commandPaths maps every command to the verb path a user types. Diagnostics use
-// it so a failure names the command the way the help does.
-var commandPaths = map[commandID]string{
-	cmdAuthLogin:     "auth login",
-	cmdAuthLogout:    "auth logout",
-	cmdAuthStatus:    "auth status",
-	cmdListGames:     "list games",
-	cmdListTags:      "list tags",
-	cmdListWishlist:  "list wishlist",
-	cmdListDetails:   "list details",
-	cmdListJSON:      "list json",
-	cmdShowBuilds:    "show builds",
-	cmdShowManifest:  "show manifest",
-	cmdShowCDNs:      "show cdns",
-	cmdInstall:       "install",
-	cmdVerify:        "verify",
-	cmdDownload:      "download",
-	cmdDownloadFile:  "download file",
-	cmdOrphansCheck:  "orphans check",
-	cmdOrphansRemove: "orphans remove",
-}
+// commandPaths is derived directly from commandTree: commandTree is the single
+// source of truth for command topology and paths.
+var commandPaths = func() map[commandID]string {
+	m := make(map[commandID]string)
+	var walk func([]string, []commandNode)
+	walk = func(prefix []string, nodes []commandNode) {
+		for _, n := range nodes {
+			path := append(append([]string{}, prefix...), n.name)
+			if n.id != cmdNone {
+				m[n.id] = strings.Join(path, " ")
+			}
+			if len(n.children) > 0 {
+				walk(path, n.children)
+			}
+		}
+	}
+	walk(nil, commandTree)
+	return m
+}()
 
 // path is the command's verb path, or "?" for a command that has none.
 func (id commandID) path() string {

@@ -34,23 +34,23 @@ func walkCommandTree(visit func(commandNode)) {
 // parser tests only sample it.
 func TestCommandTreeDeclaresASessionClass(t *testing.T) {
 	want := map[commandID]sessionClass{
-		cmdAuthLogin:     sessionExplicitLogin,
-		cmdAuthLogout:    sessionNone,
-		cmdAuthStatus:    sessionNone,
-		cmdListGames:     sessionRequired,
-		cmdListTags:      sessionRequired,
-		cmdListWishlist:  sessionRequired,
-		cmdListDetails:   sessionRequired,
-		cmdListJSON:      sessionRequired,
-		cmdShowBuilds:    sessionRequired,
-		cmdShowManifest:  sessionRequired,
-		cmdShowCDNs:      sessionRequired,
-		cmdInstall:       sessionImplicitLogin,
-		cmdVerify:        sessionRequired,
-		cmdDownload:      sessionImplicitLogin,
-		cmdDownloadFile:  sessionImplicitLogin,
-		cmdOrphansCheck:  sessionRequired,
-		cmdOrphansRemove: sessionImplicitLogin,
+		cmdAuthLogin:      sessionExplicitLogin,
+		cmdAuthClear:      sessionNone,
+		cmdAuthStatus:     sessionNone,
+		cmdListGames:      sessionRequired,
+		cmdListTags:       sessionRequired,
+		cmdListWishlist:   sessionRequired,
+		cmdGame:           sessionNone,
+		cmdGalaxyBuilds:   sessionRequired,
+		cmdGalaxyManifest: sessionRequired,
+		cmdGalaxyCDNs:     sessionRequired,
+		cmdInstall:        sessionImplicitLogin,
+		cmdInstallOptions: sessionRequired,
+		cmdVerify:         sessionRequired,
+		cmdBackupList:     sessionRequired,
+		cmdBackupDownload: sessionImplicitLogin,
+		cmdOrphansCheck:   sessionRequired,
+		cmdOrphansRemove:  sessionImplicitLogin,
 	}
 
 	seen := map[commandID]bool{}
@@ -82,7 +82,7 @@ func TestParseCarriesTheDeclaredSessionClass(t *testing.T) {
 		want sessionClass
 	}{
 		{[]string{"auth", "login"}, sessionExplicitLogin},
-		{[]string{"auth", "logout"}, sessionNone},
+		{[]string{"auth", "clear"}, sessionNone},
 		{[]string{"list", "games"}, sessionRequired},
 		{[]string{"install", "123"}, sessionImplicitLogin},
 	}
@@ -135,16 +135,15 @@ func TestSessionRequestPanicsOnAnUndeclaredClass(t *testing.T) {
 
 // TestOnlyWritingCommandsMayLogIn states the contract as a property of the whole
 // tree rather than as individual mappings: outside the
-// downloading commands (install, download, download file), the destructive
+// downloading commands (install, backup download), the destructive
 // orphans remove and an explicit login, no command may ever be handed a request
 // that lets it log in.
 func TestOnlyWritingCommandsMayLogIn(t *testing.T) {
 	may := map[commandID]bool{
-		cmdInstall:       true,
-		cmdDownload:      true,
-		cmdDownloadFile:  true,
-		cmdOrphansRemove: true,
-		cmdAuthLogin:     true,
+		cmdInstall:        true,
+		cmdBackupDownload: true,
+		cmdOrphansRemove:  true,
+		cmdAuthLogin:      true,
 	}
 	walkCommandTree(func(n commandNode) {
 		if may[n.id] {

@@ -105,21 +105,19 @@ func TestRenderGameDetailsTextGolden(t *testing.T) {
 	}
 }
 
-// TestSaveFlagAcceptance locks the three-leaf registration: download writes,
-// list details/json gate the display, and download file refuses the flags
+// TestSaveFlagAcceptance locks the save flags registration: backup download writes,
+// backup list gates the display, and commands like list games refuse the flags
 // outright.
 func TestSaveFlagAcceptance(t *testing.T) {
-	inv := mustParse(t, "download", "g", "--save-serials", "--save-product-json")
+	inv := mustParse(t, "backup", "download", "g", "--save-serials", "--save-product-json")
 	if !inv.cfg.DownloadConfig.SaveSerials || !inv.cfg.DownloadConfig.SaveProductJSON {
-		t.Error("download batch must accept the save flags")
+		t.Error("backup download must accept the save flags")
 	}
-	inv = mustParse(t, "list", "details", "--save-changelogs")
+	inv = mustParse(t, "backup", "list", "--save-changelogs")
 	if !inv.cfg.DownloadConfig.SaveChangelogs {
-		t.Error("list details must accept the save flags as display gates")
+		t.Error("backup list must accept the save flags as display gates")
 	}
-	mustParse(t, "list", "json", "--save-game-details-json")
 	for _, args := range [][]string{
-		{"download", "file", "g/1", "--save-serials"},
 		{"list", "games", "--save-serials"},
 		{"install", "123", "--save-serials"},
 	} {
@@ -130,11 +128,11 @@ func TestSaveFlagAcceptance(t *testing.T) {
 	}
 }
 
-// TestInfoThreadsAcceptance locks the four acquisition leaves and the value
+// TestInfoThreadsAcceptance locks the acquisition leaves and the value
 // rule: positive integers only.
 func TestInfoThreadsAcceptance(t *testing.T) {
 	for _, args := range [][]string{
-		{"download", "g"}, {"download", "file", "g/1"}, {"list", "details"}, {"list", "json"},
+		{"backup", "download", "g"}, {"backup", "download", "g", "1"}, {"backup", "list"},
 	} {
 		inv := mustParse(t, append(args, "--info-threads", "8")...)
 		if inv.cfg.InfoThreads != 8 {
@@ -142,7 +140,7 @@ func TestInfoThreadsAcceptance(t *testing.T) {
 		}
 	}
 	for _, bad := range []string{"0", "-1", "x"} {
-		err := mustUsageError(t, "list", "details", "--info-threads", bad)
+		err := mustUsageError(t, "backup", "list", "--info-threads", bad)
 		if !strings.Contains(err.Error(), "info-threads") {
 			t.Errorf("--info-threads %s = %v, want the value refusal", bad, err)
 		}
@@ -153,33 +151,33 @@ func TestInfoThreadsAcceptance(t *testing.T) {
 	}
 }
 
-// TestListDetailsArityAndHelp locks the arity at the parse surface: zero
+// TestBackupListArityAndHelp locks the arity at the parse surface: zero
 // arguments is legal (the whole account), arguments select, and the topic
 // says so — with the usage line, the notes and the options the node itself
 // declares.
-func TestListDetailsArityAndHelp(t *testing.T) {
-	inv := mustParse(t, "list", "details")
-	if len(inv.args) != 0 || inv.cmd != cmdListDetails {
-		t.Errorf("bare list details = %v/%v, want the whole-account default", inv.cmd, inv.args)
+func TestBackupListArityAndHelp(t *testing.T) {
+	inv := mustParse(t, "backup", "list")
+	if len(inv.args) != 0 || inv.cmd != cmdBackupList {
+		t.Errorf("bare backup list = %v/%v, want the whole-account default", inv.cmd, inv.args)
 	}
-	inv = mustParse(t, "list", "json", "a", "b")
-	if len(inv.args) != 2 || inv.cmd != cmdListJSON {
-		t.Errorf("list json a b = %v %v", inv.cmd, inv.args)
+	inv = mustParse(t, "backup", "list", "a", "b")
+	if len(inv.args) != 2 || inv.cmd != cmdBackupList {
+		t.Errorf("backup list a b = %v %v", inv.cmd, inv.args)
 	}
 
-	details := topicNode(t, "list", "details")
-	_, topic, _ := run(t, "", "list", "details", "-h")
-	if want := commandUsageLine(t, "list", "details"); !strings.Contains(topic, want) {
-		t.Errorf("list details topic missing its usage line %q:\n%s", want, topic)
+	details := topicNode(t, "backup", "list")
+	_, topic, _ := run(t, "", "backup", "list", "-h")
+	if want := commandUsageLine(t, "backup", "list"); !strings.Contains(topic, want) {
+		t.Errorf("backup list topic missing its usage line %q:\n%s", want, topic)
 	}
-	for _, note := range nodeNotes(t, "list", "details") {
+	for _, note := range nodeNotes(t, "backup", "list") {
 		if !strings.Contains(topic, note) {
-			t.Errorf("list details topic missing its note %q:\n%s", note, topic)
+			t.Errorf("backup list topic missing its note %q:\n%s", note, topic)
 		}
 	}
 	for _, long := range nodeOptionLongs(details) {
 		if !strings.Contains(topic, long) {
-			t.Errorf("list details topic missing %s:\n%s", long, topic)
+			t.Errorf("backup list topic missing %s:\n%s", long, topic)
 		}
 	}
 }

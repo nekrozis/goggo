@@ -258,16 +258,16 @@ func TestParseBrowserLogin(t *testing.T) {
 	}
 }
 
-// TestParseLogout locks the local logout command and the grammar that replaced
+// TestParseClearAuth locks the local clear command and the grammar that replaced
 // the old conflict checks: one command per line, so there is nothing to
 // conflict with.
-func TestParseLogout(t *testing.T) {
-	if inv := parseOpts(t, "auth", "logout"); inv.cmd != cmdAuthLogout {
-		t.Errorf("auth logout = cmd %d", inv.cmd)
+func TestParseClearAuth(t *testing.T) {
+	if inv := parseOpts(t, "auth", "clear"); inv.cmd != cmdAuthClear {
+		t.Errorf("auth clear = cmd %d", inv.cmd)
 	}
 	for _, args := range [][]string{
-		{"auth", "logout", "--login"}, // the removed option
-		{"auth", "logout", "login"},   // a second verb is an argument
+		{"auth", "clear", "--login"}, // the removed option
+		{"auth", "clear", "login"},   // a second verb is an argument
 	} {
 		_, err := parseArgs(args, testDefaults())
 		if err == nil || !isUsageError(err) {
@@ -288,22 +288,26 @@ func TestParseEqualsForm(t *testing.T) {
 	}
 }
 
-// TestParseShowCommands locks the show family and the target split it carries.
-func TestParseShowCommands(t *testing.T) {
-	if inv := parseOpts(t, "show", "builds", "123"); inv.cmd != cmdShowBuilds || inv.target.Build != "" {
-		t.Errorf("show builds = cmd %d target %+v", inv.cmd, inv.target)
+// TestParseGalaxyCommands locks the galaxy family and the target split it carries.
+func TestParseGalaxyCommands(t *testing.T) {
+	if inv := parseOpts(t, "galaxy", "builds", "123"); inv.cmd != cmdGalaxyBuilds || inv.target.Build != "" {
+		t.Errorf("galaxy builds = cmd %d target %+v", inv.cmd, inv.target)
 	}
-	manifest := parseOpts(t, "show", "manifest", "123/2")
-	if manifest.cmd != cmdShowManifest || manifest.target.Product != "123" || manifest.target.Build != "2" {
-		t.Errorf("show manifest = cmd %d target %+v", manifest.cmd, manifest.target)
+	manifest := parseOpts(t, "galaxy", "manifest", "123/2")
+	if manifest.cmd != cmdGalaxyManifest || manifest.target.Product != "123" || manifest.target.Build != "2" {
+		t.Errorf("galaxy manifest = cmd %d target %+v", manifest.cmd, manifest.target)
 	}
-	if inv := parseOpts(t, "show", "cdns", "123"); inv.cmd != cmdShowCDNs {
-		t.Errorf("show cdns = cmd %d", inv.cmd)
+	manifest2 := parseOpts(t, "galaxy", "manifest", "123", "2")
+	if manifest2.cmd != cmdGalaxyManifest || manifest2.target.Product != "123" || manifest2.target.Build != "2" {
+		t.Errorf("galaxy manifest 123 2 = cmd %d target %+v", manifest2.cmd, manifest2.target)
 	}
-	// "show builds" lists builds; a build in the argument is a different
+	if inv := parseOpts(t, "galaxy", "cdns", "123"); inv.cmd != cmdGalaxyCDNs {
+		t.Errorf("galaxy cdns = cmd %d", inv.cmd)
+	}
+	// "galaxy builds" lists builds; a build in the argument is a different
 	// command, not a filter.
-	if _, err := parseArgs([]string{"show", "builds", "123/2"}, testDefaults()); err == nil {
-		t.Error("show builds with a build must be refused")
+	if _, err := parseArgs([]string{"galaxy", "builds", "123/2"}, testDefaults()); err == nil {
+		t.Error("galaxy builds with a build must be refused")
 	}
 }
 

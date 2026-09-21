@@ -101,10 +101,10 @@ func TestTheLegacyFileSurvivesAnAuthCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// logout is the command that removes authentication state, so it is the one
+	// clear is the command that removes authentication state, so it is the one
 	// that could plausibly overreach.
-	if _, _, errOut := runReference(t, core.Dependencies{}, "auth", "logout"); strings.Contains(errOut, "Error:") {
-		t.Fatalf("auth logout: %s", errOut)
+	if _, _, errOut := runReference(t, core.Dependencies{}, "auth", "clear"); strings.Contains(errOut, "Error:") {
+		t.Fatalf("auth clear: %s", errOut)
 	}
 
 	after, err := os.ReadFile(legacy)
@@ -121,11 +121,11 @@ func TestTheLegacyFileSurvivesAnAuthCommand(t *testing.T) {
 // build's to read or to delete.
 const legacyCookieName = "cookies.txt"
 
-// TestLogoutRemovesTheCookieFileAndSparesTheLegacyOne is the cookie half of the
-// same rule, at the level a user sees: --logout clears the file this build
+// TestClearAuthRemovesTheCookieFileAndSparesTheLegacyOne is the cookie half of the
+// same rule, at the level a user sees: auth clear removes the file this build
 // owns — the cookie path the configuration names, whatever that is — and leaves
 // the earlier build's file byte-identical.
-func TestLogoutRemovesTheCookieFileAndSparesTheLegacyOne(t *testing.T) {
+func TestClearAuthRemovesTheCookieFileAndSparesTheLegacyOne(t *testing.T) {
 	isolateRoots(t)
 	cfg, err := newConfig()
 	if err != nil {
@@ -143,8 +143,8 @@ func TestLogoutRemovesTheCookieFileAndSparesTheLegacyOne(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, errOut := runReference(t, core.Dependencies{}, "auth", "logout"); strings.Contains(errOut, "Error:") {
-		t.Fatalf("auth logout: %s", errOut)
+	if _, _, errOut := runReference(t, core.Dependencies{}, "auth", "clear"); strings.Contains(errOut, "Error:") {
+		t.Fatalf("auth clear: %s", errOut)
 	}
 
 	if _, err := os.Stat(cfg.Curl.CookiePath); !os.IsNotExist(err) {

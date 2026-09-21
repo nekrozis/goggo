@@ -75,6 +75,8 @@ func commandUsage(node commandNode, path []string) string {
 			fmt.Fprintf(&b, " [%s]...", want)
 		case count < 0:
 			fmt.Fprintf(&b, " <%s>...", want)
+		case count == 2:
+			fmt.Fprintf(&b, " <%s> [build]", want)
 		default:
 			fmt.Fprintf(&b, " <%s>", want)
 		}

@@ -175,8 +175,8 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		}
 		fmt.Fprintln(stdout, "Login status: Not logged in")
 		return outcomeOperationFailure
-	case cmdAuthLogout:
-		if err := logout(inv.cfg, stdout); err != nil {
+	case cmdAuthClear:
+		if err := clearAuth(inv.cfg, stdout); err != nil {
 			return reportError(stderr, err)
 		}
 		return outcomeOK
@@ -203,7 +203,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 	// and the renderer reads it back. Every other command opens without one,
 	// which is the nil case transfer skips entirely.
 	var progress *transfer.Progress
-	if inv.cmd == cmdInstall || inv.cmd == cmdDownload || inv.cmd == cmdDownloadFile {
+	if inv.cmd == cmdInstall || inv.cmd == cmdBackupDownload {
 		progress = transfer.NewProgress()
 	}
 
@@ -233,13 +233,13 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		// The login already happened: the tree declares sessionExplicitLogin,
 		// sessionRequest turned that into AllowLogin, and OpenWith ran the flow
 		// before this switch was reached, so the command's work is done.
-		//
-		// Its absence was invisible: `auth login` completed the login, stored
-		// the credentials, and then fell through to the no-handler default,
-		// reporting failure for a command that had just succeeded. The coverage
-		// test in dispatch_coverage_test.go now walks the tree so no command can
-		// reach that default again.
 		return outcomeOK
+
+	case cmdGame:
+		return reportError(stderr, errors.New("goggo game is not yet implemented (scheduled for P2)"))
+
+	case cmdInstallOptions:
+		return reportError(stderr, errors.New("goggo install options is not yet implemented (scheduled for P3)"))
 
 	case cmdListGames, cmdListTags, cmdListWishlist:
 		if err := renderList(ctx, d, listFormat(inv.cmd), stdout); err != nil {
@@ -247,16 +247,16 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		}
 		return outcomeOK
 
-	case cmdListDetails, cmdListJSON:
+	case cmdBackupList:
 		return runListDetails(ctx, d, inv, stdout, stderr)
 
-	case cmdShowBuilds, cmdShowManifest:
-		// "show builds" lists a product's builds; "show manifest" shows one
+	case cmdGalaxyBuilds, cmdGalaxyManifest:
+		// "galaxy builds" lists a product's builds; "galaxy manifest" shows one
 		// build's manifest. They are separate commands, so a manifest request
 		// without a build means the build a plain install would pick (index 0),
 		// not "list them".
 		build := inv.target.Build
-		if inv.cmd == cmdShowManifest && build == "" {
+		if inv.cmd == cmdGalaxyManifest && build == "" {
 			build = "0"
 		}
 		res, err := d.ShowBuilds(ctx, inv.target.Product, build, productRefMode(inv))
@@ -278,7 +278,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		}
 		return outcomeOK
 
-	case cmdShowCDNs:
+	case cmdGalaxyCDNs:
 		res, err := d.ListCDNs(ctx, inv.target.Product, inv.target.Build, productRefMode(inv))
 		renderNotice(stdout, stderr, res.Notice)
 		if err != nil {
@@ -307,11 +307,13 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 	case cmdOrphansCheck:
 		return ui.runOrphansCheck(ctx, d, inv, stdout, stderr)
 
-	case cmdDownload:
+	case cmdBackupDownload:
+		if len(inv.args) == 2 {
+			singleInv := inv
+			singleInv.args = []string{inv.args[0] + "/" + inv.args[1]}
+			return ui.runWebsiteFiles(ctx, d, singleInv, stdout, stderr, progress)
+		}
 		return ui.runWebsiteDownload(ctx, d, inv, stdout, stderr, progress)
-
-	case cmdDownloadFile:
-		return ui.runWebsiteFiles(ctx, d, inv, stdout, stderr, progress)
 
 	case cmdOrphansRemove:
 		return ui.runOrphansRemove(ctx, d, inv, stdout, stderr)

@@ -2,11 +2,10 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/url"
-	"strings"
 
 	"github.com/nekrozis/goggo/internal/httpx"
 )
@@ -84,12 +83,15 @@ func (c *Client) refreshRequest(ctx context.Context, refreshToken, clientID, cli
 // decodeObject decodes a JSON object body. An empty body or a non-object
 // JSON value is an error.
 func decodeObject(body string) (map[string]any, error) {
-	if strings.TrimSpace(body) == "" {
+	if len(body) == 0 {
 		return nil, errors.New("empty JSON response")
 	}
 	var obj map[string]any
-	if err := json.Unmarshal([]byte(body), &obj); err != nil {
-		return nil, err
+	if err := jsonv2.Unmarshal([]byte(body), &obj); err != nil || obj == nil {
+		if err != nil {
+			return nil, err
+		}
+		return nil, errors.New("JSON response was not an object")
 	}
 	return obj, nil
 }

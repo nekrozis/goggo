@@ -2,7 +2,8 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -278,7 +279,14 @@ var errStorePayload = errors.New("store payload is not a JSON object")
 
 // encodeStore serialises a token tree into the on-disk envelope.
 func encodeStore(store map[string]any) ([]byte, error) {
-	plain, err := json.Marshal(store)
+	plain, err := jsonv2.Marshal(
+		store,
+		jsonv2.Deterministic(true),
+		jsontext.EscapeForHTML(true),
+		jsontext.EscapeForJS(true),
+		jsonv2.FormatNilMapAsNull(true),
+		jsonv2.FormatNilSliceAsNull(true),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("auth: marshal credential store: %w", err)
 	}
@@ -294,7 +302,7 @@ func decodeStore(data []byte) (map[string]any, error) {
 		return nil, err
 	}
 	var obj map[string]any
-	if err := json.Unmarshal(plain, &obj); err != nil || obj == nil {
+	if err := jsonv2.Unmarshal(plain, &obj); err != nil || obj == nil {
 		return nil, errStorePayload
 	}
 	return obj, nil
@@ -401,7 +409,7 @@ func jsonInt64Value(v any) int64 {
 	return n
 }
 
-// cloneJSONMap deep-copies a token map. Only the shapes encoding/json produces
+// cloneJSONMap deep-copies a token map. Only the shapes JSON decoders produce
 // are copied; anything else is dropped, because the store is a JSON tree and a
 // caller must not be able to alias it.
 func cloneJSONMap(m map[string]any) map[string]any {

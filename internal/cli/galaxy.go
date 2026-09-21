@@ -1,11 +1,11 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 
 	"github.com/nekrozis/goggo/internal/core"
+	"github.com/nekrozis/goggo/internal/util"
 )
 
 // renderBuilds prints the build listing.
@@ -19,18 +19,10 @@ func renderBuilds(w io.Writer, rows []core.BuildRow) error {
 	return nil
 }
 
-// renderManifest prints the fetched manifest as styled JSON.
-//
-// Three properties matter, which is why this is not a bare Marshal: keys come out
-// in byte order (Go's map marshalling), HTML escaping is OFF (the default would
-// turn a URL's "&" and "<" into \u0026 and \u003c), and the indentation is a tab
-// with a trailing newline. Numbers are re-serialised from Go's float64 values, so
-// values beyond 2^53 are not reproduced exactly.
+// renderManifest prints the fetched manifest as styled JSON, through the writer
+// every stored document goes through. See util.WriteStyledJSON for the style.
 func renderManifest(w io.Writer, doc map[string]any) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "\t")
-	enc.SetEscapeHTML(false)
-	return enc.Encode(doc)
+	return util.WriteStyledJSON(w, doc)
 }
 
 // renderCDNNames prints one endpoint name per line.

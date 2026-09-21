@@ -3,9 +3,8 @@ package util
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
-
-	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // strippedAllowed reports whether a byte survives StrippedString: an ASCII
@@ -69,7 +68,7 @@ func collectManualURLs(v any, urls *[]string) error {
 		sort.Strings(keys)
 		for _, k := range keys {
 			if k == "manualUrl" {
-				s, err := jsonval.Str(t[k])
+				s, err := manualURLString(t[k])
 				if err != nil {
 					return fmt.Errorf("util: manualUrl: %w", err)
 				}
@@ -88,6 +87,34 @@ func collectManualURLs(v any, urls *[]string) error {
 		}
 	}
 	return nil
+}
+
+func manualURLString(v any) (string, error) {
+	switch t := v.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return t, nil
+	case bool:
+		if t {
+			return "true", nil
+		}
+		return "false", nil
+	case int:
+		return strconv.Itoa(t), nil
+	case int64:
+		return strconv.FormatInt(t, 10), nil
+	case uint64:
+		return strconv.FormatUint(t, 10), nil
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64), nil
+	case map[string]any:
+		return "", fmt.Errorf("expected a string, got object")
+	case []any:
+		return "", fmt.Errorf("expected a string, got array")
+	default:
+		return "", fmt.Errorf("expected a string, got %T", v)
+	}
 }
 
 // dlcURLPrefix is the marker DLCNamesFromJSON keys on.

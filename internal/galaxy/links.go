@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/nekrozis/goggo/internal/jsonval"
 )
 
 // SecureLink fetches the CDN link document that a product's chunks are served
@@ -49,7 +47,7 @@ func (c *Client) DependenciesJSON(ctx context.Context) (map[string]any, error) {
 		return nil, err
 	}
 
-	manifestURL, err := jsonval.Str(repository["repository_manifest"])
+	manifestURL, err := scalarString(repository["repository_manifest"])
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: dependencies: repository_manifest: %w", err)
 	}

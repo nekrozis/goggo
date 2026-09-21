@@ -145,19 +145,23 @@ func TestSubdirOptionsAreDownloadOnly(t *testing.T) {
 }
 
 // TestBackupDownloadDualStateResolution locks the dual-state resolution:
-// "backup download <game>..." is full game download, "backup download <game> <fileid>" is single file.
+// "backup download <game>" is full game download, "backup download <game> [<file>...]" is specific file selector(s).
 func TestBackupDownloadDualStateResolution(t *testing.T) {
 	inv := mustParse(t, "backup", "download", "terraria")
 	if inv.cmd != cmdBackupDownload || len(inv.args) != 1 || inv.args[0] != "terraria" {
 		t.Errorf("backup download terraria = cmd %v args %v", inv.cmd, inv.args)
 	}
-	inv = mustParse(t, "backup", "download", "a", "b", "c")
-	if inv.cmd != cmdBackupDownload || len(inv.args) != 3 {
-		t.Errorf("variadic games = %v", inv.args)
-	}
 	inv = mustParse(t, "backup", "download", "terraria", "123")
 	if inv.cmd != cmdBackupDownload || len(inv.args) != 2 {
 		t.Errorf("backup download single file = cmd %v args %v", inv.cmd, inv.args)
+	}
+	inv = mustParse(t, "backup", "download", "a", "b", "c")
+	if inv.cmd != cmdBackupDownload || len(inv.args) != 3 {
+		t.Errorf("variadic files = %v", inv.args)
+	}
+	inv = mustParse(t, "backup", "download", "terraria/123")
+	if inv.cmd != cmdBackupDownload || len(inv.args) != 1 || inv.args[0] != "terraria/123" {
+		t.Errorf("backup download shorthand = cmd %v args %v", inv.cmd, inv.args)
 	}
 	// The download leaf keeps the no-argument refusal.
 	err := mustUsageError(t, "backup", "download")
@@ -166,12 +170,16 @@ func TestBackupDownloadDualStateResolution(t *testing.T) {
 	}
 }
 
-// TestOutputFileRules locks -o: only backup download with single file (<game> <fileid>) accepts it,
+// TestOutputFileRules locks -o: only backup download with a single file selector (<game> <fileid> or <game>/<fileid>) accepts it,
 // and the value is kept raw for the dispatcher (which refuses directories).
 func TestOutputFileRules(t *testing.T) {
 	inv := mustParse(t, "backup", "download", "g", "1", "-o", "out.zip")
 	if inv.outputFile != "out.zip" {
 		t.Errorf("-o = %q, want it stored", inv.outputFile)
+	}
+	inv = mustParse(t, "backup", "download", "g/1", "-o", "out.zip")
+	if inv.outputFile != "out.zip" {
+		t.Errorf("-o with slash spec = %q, want it stored", inv.outputFile)
 	}
 	err := mustUsageError(t, "backup", "download", "g", "1", "2", "-o", "out.zip")
 	if !strings.Contains(err.Error(), "exactly one file") {
@@ -180,6 +188,10 @@ func TestOutputFileRules(t *testing.T) {
 	err = mustUsageError(t, "backup", "download", "g", "-o", "out.zip")
 	if !strings.Contains(err.Error(), "exactly one file") {
 		t.Errorf("-o on full game download = %v, want the refusal", err)
+	}
+	err = mustUsageError(t, "backup", "download", "g", "--type", "extras", "-o", "out.zip")
+	if !strings.Contains(err.Error(), "exactly one file") {
+		t.Errorf("-o with --type = %v, want the refusal", err)
 	}
 }
 

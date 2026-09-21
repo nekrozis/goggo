@@ -56,6 +56,10 @@ func commandUsageLine(t *testing.T, path ...string) string {
 	switch want, count := commandArity(node.id); {
 	case count == -2:
 		line += " [" + want + "]..."
+	case node.id == cmdBackupDownload:
+		line += " <" + want + "> [<file>...]"
+	case count == 2:
+		line += " <" + want + "> [build]"
 	case count < 0:
 		line += " <" + want + ">..."
 	case count > 0:

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/core"
@@ -337,10 +338,21 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		return ui.runOrphansCheck(ctx, d, inv, stdout, stderr)
 
 	case cmdBackupDownload:
-		if len(inv.args) == 2 {
-			singleInv := inv
-			singleInv.args = []string{inv.args[0] + "/" + inv.args[1]}
-			return ui.runWebsiteFiles(ctx, d, singleInv, stdout, stderr, progress)
+		if len(inv.args) == 1 && strings.Contains(inv.args[0], "/") {
+			return ui.runWebsiteFiles(ctx, d, inv, stdout, stderr, progress)
+		}
+		if len(inv.args) >= 2 {
+			filesInv := inv
+			game := inv.args[0]
+			specs := make([]string, 0, len(inv.args)-1)
+			for _, fileID := range inv.args[1:] {
+				specs = append(specs, game+"/"+fileID)
+			}
+			filesInv.args = specs
+			return ui.runWebsiteFiles(ctx, d, filesInv, stdout, stderr, progress)
+		}
+		if inv.typeSet {
+			inv.cfg.DownloadConfig.Include = inv.typeMask
 		}
 		return ui.runWebsiteDownload(ctx, d, inv, stdout, stderr, progress)
 

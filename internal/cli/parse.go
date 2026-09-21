@@ -102,6 +102,9 @@ const (
 
 	// game --json.
 	optJSON
+
+	// backup download --type.
+	optType
 )
 
 // sharedOptions are accepted by every command that renders output or talks to
@@ -543,6 +546,19 @@ var optionTable = append([]optionSpec{
 		summary: "Format output as JSON",
 		parse:   func(inv *invocation, _ string) error { inv.json = true; return nil },
 	},
+	{
+		id: optType, long: "type", value: valueRequired, arg: "<category>",
+		summary: "Download files of a specific category (installers, patches, extras, language-packs, dlcs)",
+		parse: func(inv *invocation, v string) error {
+			mask, err := parseTypeOption(v)
+			if err != nil {
+				return err
+			}
+			inv.typeMask |= mask
+			inv.typeSet = true
+			return nil
+		},
+	},
 }, subdirOptionSpecs()...)
 
 // subdirOptionIDs maps each config.SubdirOptions name onto its option id.
@@ -890,10 +906,24 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 		inv.args = append([]string{}, rest...)
 	}
 
-	// -o names one output file, so it belongs to a single file download;
-	// if not exactly two arguments (<game> <fileid>) are given with -o, refuse.
-	if node.id == cmdBackupDownload && inv.outputFile != "" && len(inv.args) != 2 {
-		return invocation{}, usagef("backup download takes -o with exactly one file (<game> <fileid>), got %d arguments", len(inv.args))
+	// cmdBackupDownload validations:
+	// 1. file selectors and --type are mutually exclusive.
+	// 2. --type and --include/--exclude are mutually exclusive.
+	// 3. -o belongs strictly to a single file download (<game> <fileid> or <game>/<fileid>).
+	if node.id == cmdBackupDownload {
+		hasFileSelectors := len(inv.args) >= 2 || (len(inv.args) == 1 && strings.Contains(inv.args[0], "/"))
+		if hasFileSelectors && inv.typeSet {
+			return invocation{}, usagef("cannot combine file selectors with --type")
+		}
+		if inv.typeSet && (includeSet || excludeSet) {
+			return invocation{}, usagef("cannot combine --type with --include/--exclude")
+		}
+		if inv.outputFile != "" {
+			isSingleFile := (len(inv.args) == 2 || (len(inv.args) == 1 && strings.Contains(inv.args[0], "/"))) && !inv.typeSet
+			if !isSingleFile {
+				return invocation{}, usagef("backup download takes -o with exactly one file (<game> <fileid>), got %d arguments", len(inv.args))
+			}
+		}
 	}
 
 	// "galaxy builds" lists the builds of a product; a build in the argument is
@@ -952,7 +982,7 @@ func resolveCommand(words []string) (commandNode, []string, []string, error) {
 		}
 		if words[0] == "download" {
 			return commandNode{}, nil, nil, usagef("command %q has been moved; use %q",
-				"download", "goggo backup download <game> [file-id]")
+				"download", "goggo backup download <game> [<file>...]")
 		}
 		return commandNode{}, nil, nil, unknownCommand(words[0])
 	}
@@ -963,7 +993,7 @@ func resolveCommand(words []string) (commandNode, []string, []string, error) {
 		}
 		if len(path) == 1 && path[0] == "list" && words[idx] == "details" {
 			return commandNode{}, nil, nil, usagef("command %q has been moved; use %q",
-				"list details", "goggo backup list <game>")
+				"list details", "goggo backup list [<game>...]")
 		}
 		if len(path) == 1 && path[0] == "list" && words[idx] == "json" {
 			return commandNode{}, nil, nil, usagef("command %q has been replaced; use %q with commands that support JSON output",
@@ -1074,7 +1104,7 @@ func resolveHelpTopic(words []string) ([]string, error) {
 		}
 		if words[0] == "download" {
 			return nil, usagef("command %q has been moved; use %q",
-				"download", "goggo backup download <game> [file-id]")
+				"download", "goggo backup download <game> [<file>...]")
 		}
 		return nil, unknownCommand(words[0])
 	}
@@ -1082,7 +1112,7 @@ func resolveHelpTopic(words []string) ([]string, error) {
 		if idx < len(words) {
 			if len(path) == 1 && path[0] == "list" && words[idx] == "details" {
 				return nil, usagef("command %q has been moved; use %q",
-					"list details", "goggo backup list <game>")
+					"list details", "goggo backup list [<game>...]")
 			}
 			if len(path) == 1 && path[0] == "list" && words[idx] == "json" {
 				return nil, usagef("command %q has been replaced; use %q with commands that support JSON output",
@@ -1189,4 +1219,28 @@ func setNonNegative(dst *int, value, option string) error {
 	}
 	*dst = n
 	return nil
+}
+
+// parseTypeOption parses a comma-separated list of category names for --type into an include mask.
+func parseTypeOption(v string) (uint32, error) {
+	var mask uint32
+	parts := strings.Split(v, ",")
+	for _, p := range parts {
+		token := strings.TrimSpace(strings.ToLower(p))
+		switch token {
+		case "installers", "installer", "i":
+			mask |= config.GFInstaller
+		case "patches", "patch", "p":
+			mask |= config.GFPatch
+		case "extras", "extra", "e":
+			mask |= config.GFExtra
+		case "language-packs", "languagepacks", "langpacks", "l":
+			mask |= config.GFLangPack
+		case "dlcs", "dlc", "d":
+			mask |= config.GFDLC
+		default:
+			return 0, usagef("invalid value for --type: %q (valid: installers, patches, extras, language-packs, dlcs)", token)
+		}
+	}
+	return mask, nil
 }

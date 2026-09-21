@@ -73,6 +73,8 @@ func commandUsage(node commandNode, path []string) string {
 		case count == -2:
 			// Zero-or-more reads as an optional list in the usage line.
 			fmt.Fprintf(&b, " [%s]...", want)
+		case node.id == cmdBackupDownload:
+			fmt.Fprintf(&b, " <%s> [<file>...]", want)
 		case count < 0:
 			fmt.Fprintf(&b, " <%s>...", want)
 		case count == 2:

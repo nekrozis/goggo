@@ -151,6 +151,9 @@ type invocation struct {
 	productRefRegex bool
 	// json carries --json: format command output as JSON.
 	json bool
+	// typeMask and typeSet carry --type: backup download category filtering.
+	typeMask uint32
+	typeSet  bool
 }
 
 // commandNode is one node of the tree.
@@ -391,7 +394,7 @@ var commandTree = []commandNode{
 				summary: "Download offline backup files (installers, patches, extras, language packs)",
 				id:      cmdBackupDownload,
 				session: sessionImplicitLogin,
-				options: joinOptions([]optionID{optDirectory, optNoSubdirectories, optOutputFile, optInfoThreads},
+				options: joinOptions([]optionID{optDirectory, optNoSubdirectories, optOutputFile, optInfoThreads, optType},
 					subdirOptions,
 					[]optionID{
 						optInclude, optExclude, optBlacklist,
@@ -399,7 +402,10 @@ var commandTree = []commandNode{
 						optThreads, optProgressInterval, optCheckFreeSpace,
 					}, saveOptions, productRefOptions),
 				notes: []string{
-					"Downloads offline backup files for the specified game or single file.",
+					"Downloads offline backup files for the specified game, specific files, or by category.",
+					"<file> specifies an exact backup file selector (file-id or dlc/file-id).",
+					"--type selects all files of a category (installers, patches, extras, language-packs, dlcs).",
+					"<file> and --type are mutually exclusive.",
 					"-o names the output file when downloading a single file.",
 				},
 			},

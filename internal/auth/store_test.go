@@ -1,7 +1,7 @@
 package auth
 
 import (
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"io/fs"
 	"math"
@@ -431,11 +431,11 @@ func TestSaveOpenRoundTrip(t *testing.T) {
 	// by JSON text rather than by Go type.
 	stored := readStoredFile(t, path)
 	for k, want := range token {
-		wantJSON, err := json.Marshal(want)
+		wantJSON, err := jsonv2.Marshal(want, jsonv2.Deterministic(true))
 		if err != nil {
 			t.Fatal(err)
 		}
-		gotJSON, err := json.Marshal(stored[k])
+		gotJSON, err := jsonv2.Marshal(stored[k], jsonv2.Deterministic(true))
 		if err != nil {
 			t.Fatal(err)
 		}

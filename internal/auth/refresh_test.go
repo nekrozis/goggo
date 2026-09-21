@@ -2,7 +2,7 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"io/fs"
 	"net/http"
@@ -28,7 +28,7 @@ func refreshServer(t *testing.T, resp map[string]any, status int) (*httptest.Ser
 		captor.rawQuery = r.URL.RawQuery
 		w.WriteHeader(status)
 		if resp != nil {
-			_ = json.NewEncoder(w).Encode(resp)
+			_ = jsonv2.MarshalWrite(w, resp)
 		}
 	}))
 	t.Cleanup(srv.Close)

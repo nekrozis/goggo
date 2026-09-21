@@ -51,16 +51,6 @@ func WriteStyledJSON(w io.Writer, v any) error {
 	return err
 }
 
-// StyledJSON renders v as the same styled text, minus the trailing newline —
-// the form stored inside documents and artifact strings.
-func StyledJSON(v any) (string, error) {
-	var b bytes.Buffer
-	if err := WriteStyledJSON(&b, v); err != nil {
-		return "", err
-	}
-	return strings.TrimRight(b.String(), "\n"), nil
-}
-
 // WriteStyledJSONBytes reformats raw — an already-encoded JSON document — in the
 // same style WITHOUT decoding it into Go values: member order, number literals
 // and string escape spellings come out as they went in, and only the whitespace

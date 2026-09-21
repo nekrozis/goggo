@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"github.com/nekrozis/goggo/internal/auth"
 	"net/http"
@@ -101,7 +101,7 @@ func newReferenceFixture(t *testing.T) core.Dependencies {
 		t.Fatalf("auth.Open: %v", err)
 	}
 	var fields map[string]any
-	if err := json.Unmarshal([]byte(token), &fields); err != nil {
+	if err := jsonv2.Unmarshal([]byte(token), &fields); err != nil {
 		t.Fatal(err)
 	}
 	seed.StoreLoginResponse(fields)

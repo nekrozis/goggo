@@ -2,7 +2,7 @@ package core
 
 import (
 	"context"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -742,7 +742,7 @@ func readInfoBuildID(path string) (string, error) {
 		return "", err
 	}
 	var doc map[string]any
-	if err := json.Unmarshal(data, &doc); err != nil {
+	if err := jsonv2.Unmarshal(data, &doc); err != nil {
 		return "", nil
 	}
 	if doc == nil {

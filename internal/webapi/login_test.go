@@ -2,7 +2,7 @@ package webapi
 
 import (
 	"context"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -61,7 +61,7 @@ func loginFormPage(withRecaptcha bool) string {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+	_ = jsonv2.MarshalWrite(w, v)
 }
 
 func tokenJSON() map[string]any {

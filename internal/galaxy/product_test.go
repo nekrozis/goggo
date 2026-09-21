@@ -3,7 +3,7 @@ package galaxy
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -64,7 +64,7 @@ func newProductClient(t *testing.T, srv *httptest.Server) *Client {
 
 func mustJSON(t *testing.T, v any) string {
 	t.Helper()
-	b, err := json.Marshal(v)
+	b, err := jsonv2.Marshal(v, jsonv2.Deterministic(true))
 	if err != nil {
 		t.Fatalf("marshal fixture: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestProductExpandsDLCsInOneRequest(t *testing.T) {
 			ID string `json:"id"`
 		} `json:"expanded_dlcs"`
 	}
-	if err := json.Unmarshal(got.JSON, &doc); err != nil {
+	if err := jsonv2.Unmarshal(got.JSON, &doc); err != nil {
 		t.Fatalf("unmarshal got.JSON: %v", err)
 	}
 	if len(doc.ExpandedDLCs) != 2 {
@@ -279,7 +279,7 @@ func TestProductBatchesDLCIDs(t *testing.T) {
 					ID string `json:"id"`
 				} `json:"expanded_dlcs"`
 			}
-			if err := json.Unmarshal(got.JSON, &doc); err != nil {
+			if err := jsonv2.Unmarshal(got.JSON, &doc); err != nil {
 				t.Fatalf("unmarshal got.JSON: %v", err)
 			}
 			if len(doc.ExpandedDLCs) != tc.count {
@@ -356,7 +356,7 @@ func TestProductExpandsNumericDLCIDs(t *testing.T) {
 			ID any `json:"id"`
 		} `json:"expanded_dlcs"`
 	}
-	if err := json.Unmarshal(got.JSON, &doc); err != nil {
+	if err := jsonv2.Unmarshal(got.JSON, &doc); err != nil {
 		t.Fatalf("unmarshal got.JSON: %v", err)
 	}
 	if len(doc.ExpandedDLCs) != total {
@@ -430,7 +430,7 @@ func TestProductSkipsTheRequestForAnUnusableExpansionURL(t *testing.T) {
 			var doc struct {
 				ExpandedDLCs []any `json:"expanded_dlcs"`
 			}
-			if err := json.Unmarshal(got.JSON, &doc); err != nil {
+			if err := jsonv2.Unmarshal(got.JSON, &doc); err != nil {
 				t.Fatalf("unmarshal got.JSON: %v", err)
 			}
 			if doc.ExpandedDLCs == nil || len(doc.ExpandedDLCs) != 0 {

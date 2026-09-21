@@ -823,6 +823,66 @@ func TestReadInfoBuildIDContract(t *testing.T) {
 			t.Errorf("readInfoBuildID = %q, want empty string", got)
 		}
 	})
+
+	t.Run("duplicate keys treated as invalid info", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "goggame-123.info")
+		if err := os.WriteFile(p, []byte(`{"buildId":"58812465975493914","buildId":"other"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := readInfoBuildID(p)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "" {
+			t.Errorf("readInfoBuildID = %q, want empty string", got)
+		}
+	})
+
+	t.Run("invalid UTF-8 treated as invalid info", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "goggame-123.info")
+		if err := os.WriteFile(p, []byte("{\"buildId\":\"\xff\"}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := readInfoBuildID(p)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "" {
+			t.Errorf("readInfoBuildID = %q, want empty string", got)
+		}
+	})
+
+	t.Run("empty file treated as invalid info", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "goggame-123.info")
+		if err := os.WriteFile(p, []byte(""), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := readInfoBuildID(p)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "" {
+			t.Errorf("readInfoBuildID = %q, want empty string", got)
+		}
+	})
+
+	t.Run("null document treated as invalid info", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "goggame-123.info")
+		if err := os.WriteFile(p, []byte("null"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := readInfoBuildID(p)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "" {
+			t.Errorf("readInfoBuildID = %q, want empty string", got)
+		}
+	})
 }
 
 // TestPlanDependenciesNumericRejected verifies that numeric items in manifest

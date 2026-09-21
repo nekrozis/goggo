@@ -2,8 +2,8 @@ package gamedetails
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"go/parser"
 	"go/token"
@@ -90,7 +90,7 @@ func product(fields map[string]any) []byte {
 		}
 		base[k] = v
 	}
-	b, err := json.Marshal(base)
+	b, err := jsonv2.Marshal(base, jsonv2.Deterministic(true))
 	if err != nil {
 		panic(err)
 	}
@@ -477,7 +477,7 @@ func TestIdentifierFieldsLiveAPIShapes(t *testing.T) {
 func mustDocumentJSON(t *testing.T, body string) []byte {
 	t.Helper()
 	var doc any
-	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+	if err := jsonv2.Unmarshal([]byte(body), &doc); err != nil {
 		t.Fatalf("fixture JSON: %v", err)
 	}
 	return []byte(body)

@@ -1,7 +1,7 @@
 package galaxy
 
 import (
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"strings"
 	"testing"
 )
@@ -10,7 +10,7 @@ import (
 func linkDoc(t *testing.T, raw string) map[string]any {
 	t.Helper()
 	var v map[string]any
-	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+	if err := jsonv2.Unmarshal([]byte(raw), &v); err != nil {
 		t.Fatalf("unmarshal %s: %v", raw, err)
 	}
 	return v

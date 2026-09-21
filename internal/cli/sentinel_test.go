@@ -2,7 +2,7 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -192,7 +192,7 @@ func sentinelRoots(t *testing.T, expiresAt int64) string {
 		t.Fatalf("auth.Open: %v", err)
 	}
 	var fields map[string]any
-	if err := json.Unmarshal([]byte(token), &fields); err != nil {
+	if err := jsonv2.Unmarshal([]byte(token), &fields); err != nil {
 		t.Fatal(err)
 	}
 	seed.StoreLoginResponse(fields)

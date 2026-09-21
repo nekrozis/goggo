@@ -2,25 +2,9 @@ package util
 
 import (
 	"bytes"
-	"encoding/json"
 	"strings"
 	"testing"
 )
-
-// v1StyledReference renders v with the standard library's original JSON encoder.
-// It is an independent oracle for the styled shape: a separate implementation, so
-// agreement with the seam is evidence rather than a tautology.
-func v1StyledReference(t *testing.T, v any) string {
-	t.Helper()
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetIndent("", "\t")
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		t.Fatalf("v1 reference: %v", err)
-	}
-	return b.String()
-}
 
 // TestWriteStyledJSONStyleContract locks the styled shape.
 //
@@ -46,22 +30,6 @@ func TestWriteStyledJSONStyleContract(t *testing.T) {
 		"}\n"
 	if buf.String() != want {
 		t.Errorf("got %q\nwant %q", buf.String(), want)
-	}
-}
-
-// TestStyledJSONTrimsTrailingNewline locks the stored form.
-//
-// Contract (format): the same text as WriteStyledJSON, without its trailing newline.
-func TestStyledJSONTrimsTrailingNewline(t *testing.T) {
-	got, err := StyledJSON(map[string]any{"k": "v"})
-	if err != nil {
-		t.Fatalf("StyledJSON: %v", err)
-	}
-	if strings.HasSuffix(got, "\n") {
-		t.Errorf("StyledJSON keeps the writer's trailing newline: %q", got)
-	}
-	if got != "{\n\t\"k\": \"v\"\n}" {
-		t.Errorf("got %q, want the tab-indented object", got)
 	}
 }
 
@@ -93,13 +61,13 @@ func TestStyledJSONDeterministicMapOrdering(t *testing.T) {
 		"\t\"w\": 1,\n" +
 		"\t\"y\": 1,\n" +
 		"\t\"z\": 1\n" +
-		"}"
+		"}\n"
 	for i := 1; i <= 5; i++ {
-		got, err := StyledJSON(doc)
-		if err != nil {
+		var buf bytes.Buffer
+		if err := WriteStyledJSON(&buf, doc); err != nil {
 			t.Fatalf("run %d: %v", i, err)
 		}
-		if got != want {
+		if got := buf.String(); got != want {
 			t.Fatalf("run %d: got %s, want the members in sorted key order", i, got)
 		}
 	}
@@ -114,19 +82,19 @@ func TestStyledJSONNilCollectionSemantics(t *testing.T) {
 		Items []int
 		Table map[string]int
 	}{}
-	got, err := StyledJSON(doc)
-	if err != nil {
-		t.Fatalf("StyledJSON: %v", err)
+	var buf bytes.Buffer
+	if err := WriteStyledJSON(&buf, doc); err != nil {
+		t.Fatalf("WriteStyledJSON: %v", err)
 	}
-	if want := "{\n\t\"Items\": [],\n\t\"Table\": {}\n}"; got != want {
-		t.Errorf("got %q, want %q", got, want)
+	if want := "{\n\t\"Items\": [],\n\t\"Table\": {}\n}\n"; buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
 	}
 }
 
-// TestStyledJSONFloatFormattingMatchesV1 pins how a number is spelled.
+// TestWriteStyledJSONFloatFormattingGolden pins how a number is spelled.
 //
-// Contract (format): a float is spelled exactly as the original encoder spelled it.
-func TestStyledJSONFloatFormattingMatchesV1(t *testing.T) {
+// Contract (format): a float is spelled exactly as the styled encoder spells it.
+func TestWriteStyledJSONFloatFormattingGolden(t *testing.T) {
 	doc := map[string]any{
 		"whole":    float64(1700000000),
 		"big":      float64(1207659156),
@@ -135,22 +103,29 @@ func TestStyledJSONFloatFormattingMatchesV1(t *testing.T) {
 		"wide":     float64(58812465975493914),
 		"negative": float64(-3),
 	}
-	want := v1StyledReference(t, doc)
-	got, err := StyledJSON(doc)
-	if err != nil {
-		t.Fatalf("StyledJSON: %v", err)
+	var buf bytes.Buffer
+	if err := WriteStyledJSON(&buf, doc); err != nil {
+		t.Fatalf("WriteStyledJSON: %v", err)
 	}
-	if got+"\n" != want {
-		t.Errorf("float rendering changed:\n got %s\nwant %s", got, strings.TrimRight(want, "\n"))
+	want := "{\n" +
+		"\t\"big\": 1207659156,\n" +
+		"\t\"frac\": 1.5,\n" +
+		"\t\"negative\": -3,\n" +
+		"\t\"tiny\": 1e-7,\n" +
+		"\t\"whole\": 1700000000,\n" +
+		"\t\"wide\": 58812465975493910\n" +
+		"}\n"
+	if got := buf.String(); got != want {
+		t.Errorf("float rendering changed:\n got %s\nwant %s", got, want)
 	}
 }
 
-// TestStyledJSONGameDetailsGolden locks the rendering of the game details document
+// TestWriteStyledJSONGameDetailsGolden locks the rendering of the game details document
 // — the shape webapi.GameDetailsJSON hands to core/gameinfo.go, written to disk as
 // the game-details.json artifact.
 //
-// Contract (format): the artifact's bytes, against an independent encoder.
-func TestStyledJSONGameDetailsGolden(t *testing.T) {
+// Contract (format): the artifact's bytes, against frozen golden output.
+func TestWriteStyledJSONGameDetailsGolden(t *testing.T) {
 	details := map[string]any{
 		"gamename": "the_witcher_3_wild_hunt",
 		"id":       float64(1207659156),
@@ -169,13 +144,38 @@ func TestStyledJSONGameDetailsGolden(t *testing.T) {
 			}},
 		},
 	}
-	want := v1StyledReference(t, details)
-	got, err := StyledJSON(details)
-	if err != nil {
-		t.Fatalf("StyledJSON: %v", err)
+	var buf bytes.Buffer
+	if err := WriteStyledJSON(&buf, details); err != nil {
+		t.Fatalf("WriteStyledJSON: %v", err)
 	}
-	if got+"\n" != want {
-		t.Errorf("game-details rendering changed:\n got %s\nwant %s", got, strings.TrimRight(want, "\n"))
+	want := "{\n" +
+		"\t\"cdKey\": \"ABCD-EFGH-IJKL-MNOP\",\n" +
+		"\t\"downloads\": {\n" +
+		"\t\t\"installers\": [\n" +
+		"\t\t\t{\n" +
+		"\t\t\t\t\"files\": [\n" +
+		"\t\t\t\t\t{\n" +
+		"\t\t\t\t\t\t\"downlink\": \"https://cdn.gog.com/dl/installer\",\n" +
+		"\t\t\t\t\t\t\"id\": \"en1installer0\",\n" +
+		"\t\t\t\t\t\t\"size\": \"1495134320\"\n" +
+		"\t\t\t\t\t}\n" +
+		"\t\t\t\t],\n" +
+		"\t\t\t\t\"language\": \"en\",\n" +
+		"\t\t\t\t\"name\": \"setup_the_witcher_3\",\n" +
+		"\t\t\t\t\"version\": \"4.0\"\n" +
+		"\t\t\t}\n" +
+		"\t\t]\n" +
+		"\t},\n" +
+		"\t\"gamename\": \"the_witcher_3_wild_hunt\",\n" +
+		"\t\"id\": 1207659156,\n" +
+		"\t\"images\": {\n" +
+		"\t\t\"icon\": \"//images.gog.com/icon.jpg\",\n" +
+		"\t\t\"logo\": \"//images.gog.com/logo_glx_logo.jpg\"\n" +
+		"\t},\n" +
+		"\t\"title\": \"The Witcher 3: Wild Hunt\"\n" +
+		"}\n"
+	if got := buf.String(); got != want {
+		t.Errorf("game-details rendering changed:\n got %s\nwant %s", got, want)
 	}
 }
 

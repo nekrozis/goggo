@@ -2,8 +2,8 @@ package galaxy
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -30,7 +30,7 @@ func depotServer(t *testing.T, body string) (*httptest.Server, *int) {
 func depotObject(t *testing.T, raw string) map[string]any {
 	t.Helper()
 	var v map[string]any
-	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+	if err := jsonv2.Unmarshal([]byte(raw), &v); err != nil {
 		t.Fatalf("unmarshal %s: %v", raw, err)
 	}
 	return v

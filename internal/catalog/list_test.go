@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -111,7 +112,7 @@ func TestListMapsProductsAndReturnsOwnedIDs(t *testing.T) {
 // TestListProductIDShapes locks the integer-shaped stringification rule.
 //
 // The boolean entries pin the shape gate: a boolean must stringify
-// ("true"/"false") instead of falling into jsonval.Int, which would coerce true
+// ("true"/"false") instead of falling into intValue, which would coerce true
 // to "1". Do not widen that gate.
 func TestListProductIDShapes(t *testing.T) {
 	ff := &fakeFetcher{pages: onePage(
@@ -382,5 +383,104 @@ func TestListFilterListFile(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing.txt")
 	if _, err := List(context.Background(), &fakeFetcher{}, ListOptions{FilterListPath: missing}); err == nil {
 		t.Error("missing filter list: want error")
+	}
+}
+
+// TestIntValueContract locks intValue conversion and range behavior.
+func TestIntValueContract(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      any
+		want    int64
+		wantErr bool
+	}{
+		{name: "int", in: int(42), want: 42},
+		{name: "int64", in: int64(9876543210), want: 9876543210},
+		{name: "uint64 within range", in: uint64(math.MaxInt64), want: math.MaxInt64},
+		{name: "uint64 out of range", in: uint64(math.MaxInt64 + 1), wantErr: true},
+		{name: "integral float64", in: float64(12345), want: 12345},
+		{name: "fractional float64", in: float64(123.45), wantErr: true},
+		{name: "float64 NaN", in: math.NaN(), wantErr: true},
+		{name: "float64 Inf", in: math.Inf(1), wantErr: true},
+		{name: "float64 overflow positive", in: float64(1 << 63), wantErr: true},
+		{name: "float64 overflow negative", in: -1e20, wantErr: true},
+		{name: "string rejected", in: "123", wantErr: true},
+		{name: "bool true", in: true, want: 1},
+		{name: "bool false", in: false, want: 0},
+		{name: "null is zero", in: nil, want: 0},
+		{name: "array rejected", in: []any{1}, wantErr: true},
+		{name: "object rejected", in: map[string]any{"a": 1}, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := intValue(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("intValue(%#v) expected error, got %d", tc.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("intValue(%#v) unexpected error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("intValue(%#v) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIntShapedStringUint64Fallback locks that uint64 exceeding int64 range falls
+// back to scalar decimal text via scalarString rather than erroring or truncating.
+func TestIntShapedStringUint64Fallback(t *testing.T) {
+	val := uint64(math.MaxInt64 + 1)
+	got, err := intShapedString(val)
+	if err != nil {
+		t.Fatalf("intShapedString(%d) unexpected error: %v", val, err)
+	}
+	const want = "9223372036854775808"
+	if got != want {
+		t.Errorf("intShapedString(%d) = %q, want %q", val, got, want)
+	}
+}
+
+// TestBoolValueContract locks boolValue conversion and boundary behavior.
+func TestBoolValueContract(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      any
+		want    bool
+		wantErr bool
+	}{
+		{name: "bool true", in: true, want: true},
+		{name: "bool false", in: false, want: false},
+		{name: "null is false", in: nil, want: false},
+		{name: "int non-zero", in: int(1), want: true},
+		{name: "int zero", in: int(0), want: false},
+		{name: "int64 non-zero", in: int64(-5), want: true},
+		{name: "uint64 non-zero", in: uint64(10), want: true},
+		{name: "float64 zero", in: float64(0.0), want: false},
+		{name: "float64 non-zero", in: float64(2.5), want: true},
+		{name: "string true rejected", in: "true", wantErr: true},
+		{name: "string false rejected", in: "false", wantErr: true},
+		{name: "array rejected", in: []any{true}, wantErr: true},
+		{name: "object rejected", in: map[string]any{"on": true}, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := boolValue(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("boolValue(%#v) expected error, got %v", tc.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("boolValue(%#v) unexpected error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("boolValue(%#v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
 	}
 }

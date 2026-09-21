@@ -341,3 +341,44 @@ func TestWishlistMissingPriceObject(t *testing.T) {
 		t.Errorf("price fields = %+v", got)
 	}
 }
+
+// TestAmountStringContract locks amountString numeric fixed-point formatting,
+// non-numeric scalar fallback, and container rejection.
+func TestAmountStringContract(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      any
+		want    string
+		wantErr bool
+	}{
+		{name: "float64 decimal", in: float64(1.25), want: "1.250000"},
+		{name: "float64 zero", in: float64(0), want: "0.000000"},
+		{name: "int", in: int(5), want: "5.000000"},
+		{name: "int64", in: int64(123), want: "123.000000"},
+		{name: "uint64", in: uint64(999), want: "999.000000"},
+		{name: "string number verbatim", in: "1.25", want: "1.25"},
+		{name: "string arbitrary", in: "free", want: "free"},
+		{name: "bool true", in: true, want: "true"},
+		{name: "bool false", in: false, want: "false"},
+		{name: "null empty", in: nil, want: ""},
+		{name: "array rejected", in: []any{1.25}, wantErr: true},
+		{name: "object rejected", in: map[string]any{"amt": 1.25}, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := amountString(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("amountString(%#v) expected error, got %q", tc.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("amountString(%#v) unexpected error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("amountString(%#v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

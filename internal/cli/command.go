@@ -149,6 +149,8 @@ type invocation struct {
 	// productRefRegex carries --regex: the positional product argument is read
 	// as an expression instead of as a product's own name.
 	productRefRegex bool
+	// json carries --json: format command output as JSON.
+	json bool
 }
 
 // commandNode is one node of the tree.
@@ -310,7 +312,7 @@ var commandTree = []commandNode{
 		summary: "Show game information",
 		id:      cmdGame,
 		session: sessionNone,
-		options: productRefOptions,
+		options: joinOptions([]optionID{optJSON}, productRefOptions),
 	},
 	{
 		name:    "galaxy",

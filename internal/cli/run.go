@@ -224,8 +224,12 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 
 	// Downloader::init: a usable access token is checked
 	// before any command runs, and a failure stops the run.
-	if err := d.Init(ctx); err != nil {
-		return reportError(stderr, err)
+	// Commands declaring sessionNone (such as cmdGame) do not require an active
+	// access token to inspect public products.
+	if inv.session != sessionNone {
+		if err := d.Init(ctx); err != nil {
+			return reportError(stderr, err)
+		}
 	}
 
 	switch inv.cmd {
@@ -236,7 +240,18 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		return outcomeOK
 
 	case cmdGame:
-		return reportError(stderr, errors.New("goggo game is not yet implemented (scheduled for P2)"))
+		info, err := d.GetProductInfo(ctx, inv.target.Product, productRefMode(inv))
+		if err != nil {
+			return reportError(stderr, err)
+		}
+		if inv.json {
+			if err := util.WriteStyledJSON(stdout, info); err != nil {
+				return reportError(stderr, err)
+			}
+			return outcomeOK
+		}
+		renderProductInfo(stdout, info)
+		return outcomeOK
 
 	case cmdInstallOptions:
 		return reportError(stderr, errors.New("goggo install options is not yet implemented (scheduled for P3)"))

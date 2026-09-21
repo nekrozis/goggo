@@ -99,6 +99,9 @@ const (
 	// auth login.
 	optBrowser
 	optEmail
+
+	// game --json.
+	optJSON
 )
 
 // sharedOptions are accepted by every command that renders output or talks to
@@ -533,6 +536,11 @@ var optionTable = append([]optionSpec{
 			inv.cfg.InfoThreads = uint32(n)
 			return nil
 		},
+	},
+	{
+		id: optJSON, long: "json",
+		summary: "Format output as JSON",
+		parse:   func(inv *invocation, _ string) error { inv.json = true; return nil },
 	},
 }, subdirOptionSpecs()...)
 

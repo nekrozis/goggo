@@ -100,14 +100,8 @@ func collectManualURLs(v jsontext.Value, urls *[]string) error {
 	return nil
 }
 
-// manualURLString reads a manualUrl member. It is one of the loosely typed
-// members: a number or a boolean is a value rather than a broken document, and
-// only a container has no text form.
-//
-// A number keeps the text a decode into a Go value produced for it — a float64
-// rendered as fixed point, so 1e3 reads "1000" — rather than the spelling it
-// arrived in, and a magnitude a float64 cannot hold is out of range, which is
-// the boundary the typed decode drew as well.
+// manualURLString reads a loosely typed manualUrl member, formatting numbers as
+// fixed-point float64. Containers return an error.
 func manualURLString(v jsontext.Value) (string, error) {
 	switch v.Kind() {
 	case jsontext.KindInvalid, jsontext.KindNull:

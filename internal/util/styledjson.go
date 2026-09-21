@@ -63,11 +63,7 @@ func WriteStyledJSON(w io.Writer, v any) error {
 // Keep this separate from WriteStyledJSON: routing a document through a Go value
 // is exactly what would lose those literals.
 func WriteStyledJSONBytes(w io.Writer, raw []byte) error {
-	// Only the emptiness of the surrounding JSON whitespace is decided here; the
-	// formatter is handed the ORIGINAL bytes. That matters: whitespace which is
-	// not one of JSON's four characters (a U+00A0 prefix, say) must reach the
-	// formatter and be rejected, and trimming it away first would accept a
-	// document the input boundary is supposed to refuse.
+	// Pass original bytes to ensure non-JSON whitespace is rejected by the formatter.
 	if len(trimJSONSpace(raw)) == 0 {
 		return errors.New("styled JSON: empty input")
 	}

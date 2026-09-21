@@ -300,16 +300,9 @@ func serialsFromDetails(details []byte) (text, diag string) {
 	return text, ""
 }
 
-// cdKeyString reads the cdKey member. It is one of the loosely typed members: a
-// number or a boolean is a value rather than a broken document, and a missing
-// member and a null one are the empty string. Only a container has no text form.
-//
-// A number keeps the text a decode into a Go value produced for it — a float64
-// rendered as fixed point, so 1e3 reads "1000" — rather than the spelling it
-// arrived in, and a magnitude a float64 cannot hold is out of range, which is
-// the boundary the typed decode drew as well. The document's own literal
-// survives only where the raw bytes are handed on; this projection is not that
-// place.
+// cdKeyString reads the loosely typed cdKey member. Numbers and booleans are
+// converted to text (numbers formatted as fixed-point float64), while missing or
+// null members return empty string. Containers return an error.
 func cdKeyString(v jsontext.Value) (string, error) {
 	switch v.Kind() {
 	case jsontext.KindInvalid, jsontext.KindNull:

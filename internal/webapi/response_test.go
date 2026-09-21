@@ -7,20 +7,6 @@ import (
 
 // TestRequireJSONObjectClassification locks the gate's matrix: exactly one
 // complete JSON object passes, and every other body is ErrNotJSON.
-//
-// Each rejected case carries one of the rules the gate exists for —
-//
-//	shape       an array and a scalar are not objects
-//	one value   a second value and trailing garbage are not part of it
-//	well-formed truncation, a repeated member name and invalid UTF-8 are not
-//	            JSON this build reads
-//	no trim     a whitespace byte JSON does not recognise (U+00A0) is refused
-//	            rather than trimmed away, which is what the four JSON
-//	            whitespace bytes around the object show by contrast
-//
-// — so a case that starts passing names the rule that broke. The whitespace-only
-// body is the one rejection that is not a parse failure of a value: there is no
-// value in it at all.
 func TestRequireJSONObjectClassification(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -57,11 +43,8 @@ func TestRequireJSONObjectClassification(t *testing.T) {
 	}
 }
 
-// TestDecodeObjectKeepsTheOriginalBytes locks the same-class defect this round
-// closed. decodeObject used to trim the body and hand the TRIMMED bytes to the
-// decoder, so a U+00A0 prefix was swallowed and a document the input boundary
-// must refuse was accepted. Both ends of that are asserted here: the byte JSON
-// does not recognise is refused, the bytes it does accept still arrive.
+// TestDecodeObjectKeepsTheOriginalBytes verifies that non-JSON whitespace is
+// refused while valid JSON whitespace around the object is accepted.
 func TestDecodeObjectKeepsTheOriginalBytes(t *testing.T) {
 	t.Run("non-JSON whitespace is refused", func(t *testing.T) {
 		for _, in := range []string{"\u00a0{\"a\":1}", "{\"a\":1}\u00a0"} {

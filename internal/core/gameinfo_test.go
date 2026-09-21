@@ -948,13 +948,8 @@ func TestGameDetailsToleratesASkippedFile(t *testing.T) {
 	}
 }
 
-// TestCDKeyStringRendering locks the text a loosely typed cdKey reads as. The
-// member keeps the text a decode into a Go value produced for it — a float64
-// rendered as fixed point — rather than the spelling it arrived in: 1e3 reads
-// "1000", and a magnitude float64 cannot hold is out of range exactly as the
-// typed decode made it. Reading the member's own lexical form instead would be
-// the silent change these cases exist to catch, and 5.25 cannot catch it because
-// its spelling and its rendering agree.
+// TestCDKeyStringRendering locks the text representation of loosely typed cdKey
+// values, ensuring numbers use fixed-point float64 rendering.
 func TestCDKeyStringRendering(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -1046,15 +1041,8 @@ func gameDetailsArtifact(t *testing.T, doc string) string {
 	return res[0].GameDetailsJson
 }
 
-// TestGameDetailsArtifactKeepsTheWideNumberLiteral is the precision guard on the
-// artifact path: the artifact carries the document's own number text, so a
-// member past float64's exact range keeps every digit. Routing the document
-// through a Go value would put 58812465975493910 there instead.
-//
-// The serials projection reads the very same member as the lossy form, on
-// purpose: it reproduces its own domain contract rather than preserving the
-// document (TestCDKeyStringRendering). Two paths with separate contracts, not
-// two answers to one question.
+// TestGameDetailsArtifactKeepsTheWideNumberLiteral verifies that the artifact
+// path preserves the raw document's number literal beyond float64 precision.
 //
 // Contract (format): the artifact's text for this document.
 func TestGameDetailsArtifactKeepsTheWideNumberLiteral(t *testing.T) {
@@ -1065,10 +1053,7 @@ func TestGameDetailsArtifactKeepsTheWideNumberLiteral(t *testing.T) {
 }
 
 // TestGameDetailsArtifactKeepsDocumentOrderAndLiterals locks the artifact's
-// format: member order and number spelling are the document's, and only the
-// whitespace is regenerated. The members are spelled out of sorted order on
-// purpose — a round trip through a Go map would sort them — and 1e2 would come
-// back as 100.
+// format: member order and number spelling are preserved from the source document.
 //
 // Contract (format): the artifact's text for this document.
 func TestGameDetailsArtifactKeepsDocumentOrderAndLiterals(t *testing.T) {

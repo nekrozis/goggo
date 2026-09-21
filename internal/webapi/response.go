@@ -46,12 +46,8 @@ func decodeJSONObject(body string) (map[string]any, error) {
 
 // requireJSONObject reports whether body is exactly one complete JSON object.
 //
-// It is a pure shape gate: it does not trim, does not build a Go value and does
-// not reorder members, and it neither clones nor modifies the caller's body.
-// That last part is the point — the bytes that pass here are handed on as the
-// document, so a gate that rewrote or normalised them would hand on something
-// the server did not send. The decoder does read the body into its own buffer;
-// the guarantee is about the caller's slice, not about the decoder.
+// It is a pure shape gate: it does not trim, parse into Go values, reorder
+// members, or modify the caller's slice.
 func requireJSONObject(body []byte) error {
 	if len(body) == 0 {
 		return fmt.Errorf("%w: empty body", ErrNotJSON)

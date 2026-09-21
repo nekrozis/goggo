@@ -20,13 +20,7 @@ func TestManualURLsFromJSON(t *testing.T) {
 	})
 
 	t.Run("object keys are sorted", func(t *testing.T) {
-		// The walk gathers a set-like result, so it must not depend on how the
-		// document happened to order its members: the answer is the key-sorted
-		// one, asserted exactly. The document is a raw literal that deliberately
-		// spells its members out of order — a fixture built through a Go map
-		// would arrive already sorted and could not show that the walk sorts —
-		// and comparing repeated runs instead of one exact result would only be
-		// a probabilistic check.
+		// The walk visits object members in sorted key order for deterministic output.
 		in := jsontext.Value(`{"2":{"manualUrl":"second"},"1":{"manualUrl":"first"},"3":{"manualUrl":"third"}}`)
 		got, err := ManualURLsFromJSON(in)
 		if err != nil {
@@ -62,11 +56,7 @@ func TestManualURLsFromJSON(t *testing.T) {
 	})
 
 	t.Run("manualUrl scalar coercion and container rejection", func(t *testing.T) {
-		// The numeric cases pin the RENDERING, not the spelling the member
-		// arrived in: a number is rendered the way a decode into a Go value
-		// rendered it — a float64 as fixed point — so an exponent form reads as
-		// its value and a magnitude float64 cannot hold is an error. 5.25 alone
-		// cannot show that, because its spelling and its rendering agree.
+		// Numeric cases verify fixed-point float64 rendering rather than lexical spelling.
 		cases := []struct {
 			name    string
 			val     string

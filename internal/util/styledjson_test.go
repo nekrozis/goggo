@@ -38,13 +38,6 @@ func TestWriteStyledJSONStyleContract(t *testing.T) {
 // map's members come out in sorted key order.
 //
 // Contract (format): map members in sorted key order.
-//
-// The members are inserted in an order that is deliberately NOT sorted, so a
-// missing deterministic option cannot pass by walking the map into the sorted
-// order by accident: without it the encoder emits a rotation of the insertion
-// order, which is never the sorted order for this input. Asserting the exact
-// bytes therefore kills that mutation outright, where merely comparing repeated
-// runs against each other would only catch it by luck.
 func TestStyledJSONDeterministicMapOrdering(t *testing.T) {
 	doc := map[string]any{}
 	for _, key := range []string{"m", "c", "z", "a", "q", "b", "y", "d", "k", "w"} {
@@ -241,11 +234,7 @@ func TestStyledJSONBytesRejectsInput(t *testing.T) {
 		{"duplicate member", `{"a":1,"a":2}`},
 		{"invalid utf-8", "{\"a\":\"\xff\xfe\"}"},
 
-		// Whitespace that is not one of JSON's four characters must not be
-		// trimmed away as if it were: each of these is a document the boundary
-		// has to refuse. The multi-byte characters are built from their bytes
-		// rather than written literally, so a tool that resolves escapes on the
-		// way in cannot silently change what is being tested.
+		// Non-JSON whitespace characters must be refused by the boundary.
 		{"no-break space prefix", string([]byte{0xc2, 0xa0}) + `{"a":1}`},
 		{"no-break space suffix", `{"a":1}` + string([]byte{0xc2, 0xa0})},
 		{"no-break space only", string([]byte{0xc2, 0xa0})},
@@ -267,9 +256,6 @@ func TestStyledJSONBytesRejectsInput(t *testing.T) {
 //
 // Contract (format): a string keeps the escape spelling it was written with, so the
 // document is reformatted rather than re-encoded.
-//
-// The backslash is built from its byte value rather than written literally, so a tool
-// that resolves escapes on the way in cannot silently flatten the fixture.
 func TestStyledJSONBytesPreservesEscapeSpelling(t *testing.T) {
 	backslash := string([]byte{92})
 	raw := `{"lit":"` + backslash + `u0041","nl":"a` + backslash + `nb"}`

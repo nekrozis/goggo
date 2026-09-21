@@ -28,8 +28,25 @@ func accountServer(t *testing.T, body string, status int) (*httptest.Server, *st
 	return srv, &lastURI
 }
 
+// TestGameDetailsJSONRequestAndDecode locks the request target and the byte
+// contract of the answer.
+//
+// Contract (format): the returned bytes are the body exactly as the server sent
+// it. The shape gate validates the body without rewriting it, so nothing is
+// trimmed, reordered or re-encoded on the way through.
+//
+// The document is deliberately NOT normalised — surrounding JSON whitespace,
+// members out of sorted order, an integer past float64's exact range, an
+// exponent form and an escape spelling. Each feature is lost by an ordinary
+// decode followed by a semantic re-encode, so the assertion distinguishes raw
+// pass-through from a conventional round trip. A canonical fixture could not:
+// the two would agree by luck.
+//
+// The backslash is built from its byte value rather than written literally, so a
+// tool that resolves escapes on the way in cannot silently flatten the fixture.
 func TestGameDetailsJSONRequestAndDecode(t *testing.T) {
-	const body = `{"title":"Alpha","dlcs":[{"manualUrl":"x"}]}`
+	backslash := string([]byte{92})
+	body := " \t{\"z\":58812465975493914,\"a\":\"" + backslash + "u0041\",\"n\":1e2}\n "
 	srv, lastURI := accountServer(t, body, http.StatusOK)
 	cl, _ := newTestClient(t, srv, 0)
 

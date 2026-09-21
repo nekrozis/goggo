@@ -20,16 +20,26 @@ func TestManualURLsFromJSON(t *testing.T) {
 	})
 
 	t.Run("object keys are sorted", func(t *testing.T) {
-		// The document spells its members out of order on purpose. A fixture
-		// built through a Go map would arrive already sorted and could not show
-		// that the walk does the sorting.
+		// The walk gathers a set-like result, so it must not depend on how the
+		// document happened to order its members: the answer is the key-sorted
+		// one, asserted exactly. The document is a raw literal that deliberately
+		// spells its members out of order — a fixture built through a Go map
+		// would arrive already sorted and could not show that the walk sorts —
+		// and comparing repeated runs instead of one exact result would only be
+		// a probabilistic check.
 		in := jsontext.Value(`{"2":{"manualUrl":"second"},"1":{"manualUrl":"first"},"3":{"manualUrl":"third"}}`)
 		got, err := ManualURLsFromJSON(in)
 		if err != nil {
 			t.Fatalf("ManualURLsFromJSON: %v", err)
 		}
-		if len(got) != 3 || got[0] != "first" || got[1] != "second" || got[2] != "third" {
-			t.Errorf("urls = %v, want key order 1,2,3", got)
+		want := []string{"first", "second", "third"}
+		if len(got) != len(want) {
+			t.Fatalf("urls = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("urls[%d] = %q, want %q (key order, not document order)", i, got[i], want[i])
+			}
 		}
 	})
 

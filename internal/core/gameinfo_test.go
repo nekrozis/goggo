@@ -1022,3 +1022,58 @@ func TestSerialsFromDetailsAbsentAndNullCDKey(t *testing.T) {
 		}
 	}
 }
+
+// gameDetailsArtifact runs one product acquisition with the game-details
+// artifact switched on and answers the text that landed in the field, which is
+// what the artifact writer stores verbatim.
+func gameDetailsArtifact(t *testing.T, doc string) string {
+	t.Helper()
+	f := newGameInfoFixture(t)
+	f.setProduct("100", gameInfoDoc("100", "alpha_game", "Alpha", windowsInstaller("setup.exe"), nil, nil, ""))
+	f.setGameDetails("100", doc)
+
+	cfg := gameInfoConfig(t)
+	cfg.DownloadConfig.SaveGameDetailsJSON = true
+	d := newGameInfoDownloader(t, f, cfg)
+
+	res, err := d.GameDetails(context.Background(), GameDetailsRequest{Products: []string{"100"}})
+	if err != nil {
+		t.Fatalf("GameDetails: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("results = %d, want the one product", len(res))
+	}
+	return res[0].GameDetailsJson
+}
+
+// TestGameDetailsArtifactKeepsTheWideNumberLiteral is the precision guard on the
+// artifact path: the artifact carries the document's own number text, so a
+// member past float64's exact range keeps every digit. Routing the document
+// through a Go value would put 58812465975493910 there instead.
+//
+// The serials projection reads the very same member as the lossy form, on
+// purpose: it reproduces its own domain contract rather than preserving the
+// document (TestCDKeyStringRendering). Two paths with separate contracts, not
+// two answers to one question.
+//
+// Contract (format): the artifact's text for this document.
+func TestGameDetailsArtifactKeepsTheWideNumberLiteral(t *testing.T) {
+	const want = "{\n\t\"buildId\": 58812465975493914\n}"
+	if got := gameDetailsArtifact(t, `{"buildId":58812465975493914}`); got != want {
+		t.Errorf("artifact = %q\nwant %q", got, want)
+	}
+}
+
+// TestGameDetailsArtifactKeepsDocumentOrderAndLiterals locks the artifact's
+// format: member order and number spelling are the document's, and only the
+// whitespace is regenerated. The members are spelled out of sorted order on
+// purpose — a round trip through a Go map would sort them — and 1e2 would come
+// back as 100.
+//
+// Contract (format): the artifact's text for this document.
+func TestGameDetailsArtifactKeepsDocumentOrderAndLiterals(t *testing.T) {
+	const want = "{\n\t\"zeta\": \"z\",\n\t\"alpha\": 1.5,\n\t\"mid\": 1e2\n}"
+	if got := gameDetailsArtifact(t, `{"zeta":"z","alpha":1.5,"mid":1e2}`); got != want {
+		t.Errorf("artifact = %q\nwant %q", got, want)
+	}
+}

@@ -344,7 +344,7 @@ var commandTree = []commandNode{
 				summary: "List available installation options",
 				id:      cmdInstallOptions,
 				session: sessionRequired,
-				options: productRefOptions,
+				options: joinOptions([]optionID{optPlatform, optJSON}, productRefOptions),
 			},
 		},
 	},

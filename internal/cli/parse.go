@@ -264,6 +264,7 @@ var optionTable = append([]optionSpec{
 			// An unmatched value leaves 0, which the Galaxy layer reads as
 			// English.
 			inv.cfg.DownloadConfig.GalaxyLanguage = util.OptionValue(v, config.Languages, true)
+			inv.cfg.DownloadConfig.GalaxyLanguageRaw = v
 			return nil
 		},
 	},

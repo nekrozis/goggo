@@ -983,3 +983,174 @@ func TestBuildPlan_EmptyMD5ItemSkipped(t *testing.T) {
 		}
 	}
 }
+
+func TestZeroMatchGuard(t *testing.T) {
+	t.Run("nonexistent language rejected and produces zero tasks", func(t *testing.T) {
+		// Case B and H: Requesting zh-Hans when game only has en-US
+		f := newPlanFixture(t)
+		f.setDefaultBodies()
+
+		cfg := planTestConfig(t)
+		cfg.DownloadConfig.GalaxyLanguage = config.LangCN
+		cfg.DownloadConfig.GalaxyLanguageRaw = "zh-Hans"
+		d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+
+		req := NewInstallRequest(cfg, planProductID, "", ProductRefExact)
+		res, err := d.BuildPlan(context.Background(), req)
+		if err == nil {
+			t.Fatal("BuildPlan must fail for nonexistent language")
+		}
+		if !errors.Is(err, ErrNoMatchingContent) {
+			t.Errorf("err = %v, want ErrNoMatchingContent", err)
+		}
+		if !strings.Contains(err.Error(), "language=zh-Hans") {
+			t.Errorf("err = %v, want it to report language=zh-Hans", err)
+		}
+		if !strings.Contains(err.Error(), "Use 'goggo install options") {
+			t.Errorf("err = %v, want actionable guidance to install options", err)
+		}
+		// Case H: planning failure produces zero executable tasks
+		if len(res.Plan.Tasks) != 0 {
+			t.Errorf("zero-match must produce 0 tasks, got %d", len(res.Plan.Tasks))
+		}
+	})
+
+	t.Run("support wildcard pseudo depot only rejected", func(t *testing.T) {
+		// Case C: Game only has isGogDepot=true depot matching *
+		f := newPlanFixture(t)
+		f.setDefaultBodies()
+
+		v2New := galaxy.HashToGalaxyPath(planBuildHashNew)
+		supportHash := "c444444444444444444444444444444444444444"
+		f.set("/content-system/v2/meta/"+v2New,
+			`{"baseProductId":"`+planProductID+`","installDirectory":"SupportOnly","version":2,`+
+				`"products":[{"name":"Support Only"}],`+
+				`"depots":[`+
+				`{"productId":"`+planProductID+`","isGogDepot":true,"languages":["*"],"size":50,"manifest":"`+supportHash+`"}]}`)
+		f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(supportHash),
+			`{"depot":{"items":[{"path":"goggame.info","chunks":[{"compressedMd5":"c","md5":"u","compressedSize":50,"size":50}]}]}}`)
+
+		cfg := planTestConfig(t)
+		d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+
+		req := NewInstallRequest(cfg, planProductID, "", ProductRefExact)
+		res, err := d.BuildPlan(context.Background(), req)
+		if err == nil {
+			t.Fatal("BuildPlan must reject support-only pseudo depot")
+		}
+		if !errors.Is(err, ErrNoMatchingContent) {
+			t.Errorf("err = %v, want ErrNoMatchingContent", err)
+		}
+		if len(res.Plan.Tasks) != 0 {
+			t.Errorf("zero-match must produce 0 tasks, got %d", len(res.Plan.Tasks))
+		}
+	})
+
+	t.Run("dlc only rejected", func(t *testing.T) {
+		// Case D: Base game has no matching depot, but DLC does
+		f := newPlanFixture(t)
+		f.setDefaultBodies()
+
+		v2New := galaxy.HashToGalaxyPath(planBuildHashNew)
+		dlcHash := "d555555555555555555555555555555555555555"
+		f.set("/content-system/v2/meta/"+v2New,
+			`{"baseProductId":"`+planProductID+`","installDirectory":"DLCOnly","version":2,`+
+				`"products":[{"name":"DLC Only"}],`+
+				`"depots":[`+
+				`{"productId":"dlc_product","languages":["en-US"],"osBitness":["64"],"size":500,"manifest":"`+dlcHash+`"}]}`)
+		f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(dlcHash),
+			`{"depot":{"items":[{"path":"dlc/data.bin","chunks":[{"compressedMd5":"c","md5":"u","compressedSize":500,"size":500}]}]}}`)
+
+		cfg := planTestConfig(t)
+		cfg.DownloadConfig.Include = config.GFDLC
+		d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+
+		req := NewInstallRequest(cfg, planProductID, "", ProductRefExact)
+		res, err := d.BuildPlan(context.Background(), req)
+		if err == nil {
+			t.Fatal("BuildPlan must reject DLC-only match without base content")
+		}
+		if !errors.Is(err, ErrNoMatchingContent) {
+			t.Errorf("err = %v, want ErrNoMatchingContent", err)
+		}
+		if len(res.Plan.Tasks) != 0 {
+			t.Errorf("zero-match must produce 0 tasks, got %d", len(res.Plan.Tasks))
+		}
+	})
+
+	t.Run("architecture mismatch rejected", func(t *testing.T) {
+		// Case E: Game only has 32-bit depot, user requests x64
+		f := newPlanFixture(t)
+		f.setDefaultBodies()
+
+		v2New := galaxy.HashToGalaxyPath(planBuildHashNew)
+		depotHash32 := "e333333333333333333333333333333333333333"
+		f.set("/content-system/v2/meta/"+v2New,
+			`{"baseProductId":"`+planProductID+`","installDirectory":"Arch32","version":2,`+
+				`"products":[{"name":"Arch 32"}],`+
+				`"depots":[`+
+				`{"productId":"`+planProductID+`","languages":["en-US"],"osBitness":["32"],"size":500,"manifest":"`+depotHash32+`"}]}`)
+		f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(depotHash32),
+			`{"depot":{"items":[{"path":"game/bin32.exe","chunks":[{"compressedMd5":"c","md5":"u","compressedSize":500,"size":500}]}]}}`)
+
+		cfg := planTestConfig(t)
+		cfg.DownloadConfig.GalaxyArch = config.ArchX64
+		d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+
+		req := NewInstallRequest(cfg, planProductID, "", ProductRefExact)
+		res, err := d.BuildPlan(context.Background(), req)
+		if err == nil {
+			t.Fatal("BuildPlan must reject architecture mismatch")
+		}
+		if !errors.Is(err, ErrNoMatchingContent) {
+			t.Errorf("err = %v, want ErrNoMatchingContent", err)
+		}
+		if !strings.Contains(err.Error(), "arch=x64") {
+			t.Errorf("err = %v, want it to report arch=x64", err)
+		}
+		if len(res.Plan.Tasks) != 0 {
+			t.Errorf("zero-match must produce 0 tasks, got %d", len(res.Plan.Tasks))
+		}
+	})
+
+	t.Run("missing productId rejected", func(t *testing.T) {
+		// Depots without explicit matching productId must not qualify as primary base content
+		f := newPlanFixture(t)
+		f.setDefaultBodies()
+
+		v2New := galaxy.HashToGalaxyPath(planBuildHashNew)
+		depotHashNoPID := "e999999999999999999999999999999999999999"
+		f.set("/content-system/v2/meta/"+v2New,
+			`{"baseProductId":"`+planProductID+`","installDirectory":"NoPID","version":2,`+
+				`"products":[{"name":"No PID"}],`+
+				`"depots":[`+
+				`{"languages":["en-US"],"osBitness":["64"],"size":500,"manifest":"`+depotHashNoPID+`"}]}`)
+		f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(depotHashNoPID),
+			`{"depot":{"items":[{"path":"game/bin.exe","chunks":[{"compressedMd5":"c","md5":"u","compressedSize":500,"size":500}]}]}}`)
+
+		cfg := planTestConfig(t)
+		d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+
+		// 1. BuildPlan must return ErrNoMatchingContent
+		req := NewInstallRequest(cfg, planProductID, "", ProductRefExact)
+		res, err := d.BuildPlan(context.Background(), req)
+		if err == nil {
+			t.Fatal("BuildPlan must reject depot with missing productId")
+		}
+		if !errors.Is(err, ErrNoMatchingContent) {
+			t.Errorf("err = %v, want ErrNoMatchingContent", err)
+		}
+		if len(res.Plan.Tasks) != 0 {
+			t.Errorf("zero-match must produce 0 tasks, got %d", len(res.Plan.Tasks))
+		}
+
+		// 2. InstallOptions must produce 0 options
+		optionsRes, err := d.InstallOptions(context.Background(), planProductID, ProductRefExact, "windows", "")
+		if err != nil {
+			t.Fatalf("InstallOptions: %v", err)
+		}
+		if len(optionsRes.Entries) != 0 {
+			t.Errorf("options for missing productId must be empty, got %d", len(optionsRes.Entries))
+		}
+	})
+}

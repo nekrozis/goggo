@@ -543,8 +543,8 @@ func hashFromLink(link string) string {
 	return link
 }
 
-// platformName maps the Galaxy platform mask onto the API path segment.
-func platformName(platform uint32) string {
+// PlatformName maps the Galaxy platform mask onto the API path segment.
+func PlatformName(platform uint32) string {
 	switch platform {
 	case config.PlatformLinux:
 		return platformLinux
@@ -553,6 +553,10 @@ func platformName(platform uint32) string {
 	default:
 		return platformWindows
 	}
+}
+
+func platformName(platform uint32) string {
+	return PlatformName(platform)
 }
 
 const (

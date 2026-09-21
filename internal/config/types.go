@@ -28,6 +28,7 @@ type DownloadConfig struct {
 	Include           uint32
 	GalaxyPlatform    uint32
 	GalaxyLanguage    uint32
+	GalaxyLanguageRaw string
 	GalaxyArch        uint32
 
 	RemoteXML           bool

@@ -20,6 +20,7 @@ type InstallRequest struct {
 	ProductID      string
 	BuildID        string
 	Platform       string
+	Language       string
 	LanguageRegex  string
 	SubdirTemplate string
 
@@ -44,6 +45,7 @@ func NewInstallRequest(cfg config.Config, productID, buildID string, refMode Pro
 		ProductID:      productID,
 		BuildID:        buildID,
 		Platform:       platformName(download.GalaxyPlatform),
+		Language:       effectiveLanguage(download),
 		LanguageRegex:  languageRegex(download.GalaxyLanguage),
 		SubdirTemplate: cfg.Directories.GalaxyInstallSubdir,
 
@@ -52,6 +54,23 @@ func NewInstallRequest(cfg config.Config, productID, buildID string, refMode Pro
 
 		RefMode: refMode,
 	}
+}
+
+// effectiveLanguage returns the raw language string from CLI if available,
+// falling back to the option code.
+func effectiveLanguage(download config.DownloadConfig) string {
+	if download.GalaxyLanguageRaw != "" {
+		return download.GalaxyLanguageRaw
+	}
+	return languageCode(download.GalaxyLanguage)
+}
+
+// languageCode returns the short language code for the selected flag.
+func languageCode(flag uint32) string {
+	if o, ok := util.OptionByID(flag, config.Languages); ok {
+		return o.Code
+	}
+	return "en"
 }
 
 // languageRegex maps a Galaxy language flag onto the expression the depot

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -18,6 +19,10 @@ import (
 	"github.com/nekrozis/goggo/internal/reconcile"
 	"github.com/nekrozis/goggo/internal/util"
 )
+
+// ErrNoMatchingContent is returned when an install, verify, or orphan plan
+// matches no valid primary content depots for the requested platform, language, or arch.
+var ErrNoMatchingContent = errors.New("no compatible content found")
 
 // msgLevelVerbose is the message level that turns on the verbose gates of the
 // plan builder.
@@ -136,71 +141,27 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 	}
 	res.addMessage(notice.Text)
 
-	// Builds and their order. The generation query parameter stays unset,
-	// which the client fills with its default "2".
-	builds, err := d.galaxy.ProductBuilds(ctx, id, req.Platform, "")
+	// Build and manifest resolution via the single authoritative effective-build resolver.
+	eb, err := d.resolveEffectiveBuild(ctx, id, req.BuildID, req.Platform)
 	if err != nil {
-		return res, err
-	}
-	builds, err = d.sortProductBuilds(builds)
-	if err != nil {
-		return res, err
-	}
-
-	// An empty document on a Linux target is the installer fallback's cue.
-	// That path is not implemented in this build, so report it and stop loudly
-	// instead of pretending the installers path ran.
-	items, err := buildsItems(builds)
-	if err != nil {
-		return res, err
-	}
-	if len(builds) == 0 && req.Platform == platformLinux {
-		res.addMessage(msgNoLinuxSupport)
-		res.addMessage(msgCheckInstallers)
-		return res, fmt.Errorf("linux installer fallback: %w", ErrNotImplemented)
-	}
-
-	// Build index and generation gate. The index clamps at zero, and an absent
-	// items entry reads as generation 0, which fails the gate with the message
-	// rather than an error.
-	index, err := buildIndexFor(items, req.BuildID)
-	if err != nil {
-		return res, err
-	}
-	if index < 0 {
-		index = 0
-	}
-	generation := 0
-	if index < len(items) {
-		entry, err := mapObject(items[index])
-		if err != nil {
-			return res, fmt.Errorf("galaxy: builds items[%d]: %w", index, err)
+		if eb != nil {
+			for _, notice := range eb.Notices {
+				res.addMessage(notice)
+			}
 		}
-		gen, err := intValue(entry["generation"])
-		if err != nil {
-			return res, fmt.Errorf("galaxy: builds items[%d].generation: %w", index, err)
-		}
-		generation = int(gen)
+		return res, err
 	}
-	if generation != 2 {
-		res.addMessage(msgGenerationsOneTwo)
+	for _, notice := range eb.Notices {
+		res.addMessage(notice)
+	}
+	if eb.Generation != 2 {
 		return res, nil
 	}
 
-	// The build id is the tail of the link; a link without a slash is used
-	// whole.
-	link, err := buildLink(items, index)
-	if err != nil {
-		return res, err
-	}
-	buildHash := link[strings.LastIndexByte(link, '/')+1:]
-
-	// The new manifest and the game title.
-	manifest, err := d.galaxy.ManifestV2(ctx, buildHash, false)
-	if err != nil {
-		return res, err
-	}
-	gameTitle := manifestProductName(manifest)
+	manifest := eb.Manifest
+	gameTitle := eb.GameTitle
+	items := eb.Items
+	index := eb.Index
 
 	// Install directory and path. Templates whose value comes from the product
 	// document trigger the fetch here, so the resolver itself stays a pure
@@ -588,6 +549,9 @@ func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]
 	if err != nil {
 		return nil, err
 	}
+	if baseProductID == "" {
+		baseProductID = req.ProductID
+	}
 
 	depots, err := manifestArray(manifest, "depots")
 	if err != nil {
@@ -597,7 +561,43 @@ func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]
 		LowercasePaths: d.cfg.DownloadConfig.GalaxyLowercasePath,
 		Platform:       d.cfg.DownloadConfig.GalaxyPlatform,
 	}
+
+	// Valid Primary Content Predicate:
+	// A primary depot must belong to the base product and not be a GOG support metadata depot (isGogDepot).
+	// If the manifest carries any base content depots with specific languages,
+	// at least one language-specific base depot matching req.LanguageRegex must be selected.
+	// If all base depots are language-agnostic ("*"), a non-support wildcard depot is accepted.
+	hasLanguageSpecificBaseDepot := false
+	for _, raw := range depots {
+		depot, err := mapObject(raw)
+		if err != nil {
+			continue
+		}
+		if !isBaseDepot(depot, baseProductID) || isGogDepot(depot) {
+			continue
+		}
+		langs, _ := manifestArray(depot, "languages")
+		for _, l := range langs {
+			name, _ := scalarString(l)
+			if name != "" && name != "*" {
+				hasLanguageSpecificBaseDepot = true
+				break
+			}
+		}
+		if hasLanguageSpecificBaseDepot {
+			break
+		}
+	}
+
+	langRE, err := regexp.Compile("(?i)^(" + req.LanguageRegex + ")$")
+	if err != nil {
+		return nil, fmt.Errorf("galaxy: depot language regexp %q: %w", req.LanguageRegex, err)
+	}
+
 	var items []model.GalaxyDepotItem
+	matchedPrimaryDepots := 0
+	matchedPrimaryFiles := 0
+
 	for i, raw := range depots {
 		depot, err := mapObject(raw)
 		if err != nil {
@@ -607,6 +607,32 @@ func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]
 		if err != nil {
 			return nil, err
 		}
+		if len(vec) == 0 {
+			continue
+		}
+
+		if isBaseDepot(depot, baseProductID) && !isGogDepot(depot) {
+			qualifies := true
+			if hasLanguageSpecificBaseDepot {
+				langs, _ := manifestArray(depot, "languages")
+				hasSpecificLangMatch := false
+				for _, l := range langs {
+					name, _ := scalarString(l)
+					if name != "" && name != "*" && langRE.MatchString(name) {
+						hasSpecificLangMatch = true
+						break
+					}
+				}
+				if !hasSpecificLangMatch {
+					qualifies = false
+				}
+			}
+			if qualifies {
+				matchedPrimaryDepots++
+				matchedPrimaryFiles += len(vec)
+			}
+		}
+
 		items = append(items, vec...)
 	}
 
@@ -673,6 +699,11 @@ func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]
 				}
 			}
 		}
+	}
+
+	if matchedPrimaryDepots == 0 || matchedPrimaryFiles == 0 {
+		return nil, fmt.Errorf("%w matching platform=%s, language=%s, arch=%s\nUse 'goggo install options %s' to view available combinations",
+			ErrNoMatchingContent, req.Platform, req.Language, archName(req.Arch), req.ProductID)
 	}
 
 	// Stamp product ids and rename small-files containers.
@@ -749,4 +780,38 @@ func readInfoBuildID(path string) (string, error) {
 		return "", nil
 	}
 	return identifierString(doc["buildId"])
+}
+
+// isGogDepot reports whether the depot is marked as a GOG support metadata depot.
+func isGogDepot(depot map[string]any) bool {
+	v, ok := depot["isGogDepot"]
+	if !ok || v == nil {
+		return false
+	}
+	b, _ := v.(bool)
+	return b
+}
+
+// isBaseDepot reports whether the depot belongs to the base product.
+// A depot without an explicit, valid productId matching baseProductID is never
+// considered primary base content.
+func isBaseDepot(depot map[string]any, baseProductID string) bool {
+	pid, ok := depot["productId"]
+	if !ok || pid == nil || baseProductID == "" {
+		return false
+	}
+	s, err := scalarString(pid)
+	return err == nil && s == baseProductID
+}
+
+// archName maps a Galaxy architecture flag to its canonical name.
+func archName(flag uint32) string {
+	switch flag {
+	case config.ArchX86:
+		return "x86"
+	case config.ArchX64:
+		return "x64"
+	default:
+		return "x64"
+	}
 }

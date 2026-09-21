@@ -254,7 +254,21 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		return outcomeOK
 
 	case cmdInstallOptions:
-		return reportError(stderr, errors.New("goggo install options is not yet implemented (scheduled for P3)"))
+		platform := core.PlatformName(inv.cfg.DownloadConfig.GalaxyPlatform)
+		res, err := d.InstallOptions(ctx, inv.target.Product, productRefMode(inv), platform, inv.target.Build)
+		if err != nil {
+			return reportError(stderr, err)
+		}
+		if inv.json {
+			if err := util.WriteStyledJSON(stdout, res); err != nil {
+				return reportError(stderr, err)
+			}
+			return outcomeOK
+		}
+		if err := renderInstallOptions(stdout, res); err != nil {
+			return reportError(stderr, err)
+		}
+		return outcomeOK
 
 	case cmdListGames, cmdListTags, cmdListWishlist:
 		if err := renderList(ctx, d, listFormat(inv.cmd), stdout); err != nil {

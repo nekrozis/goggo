@@ -811,3 +811,218 @@ func TestProductInfoToGameDetailsUnknownFieldsPass(t *testing.T) {
 		t.Fatalf("unexpected gd values: %+v", gd)
 	}
 }
+
+// TestProductJSONBaseGameGolden locks the base game product.json artifact format.
+//
+// Contract (format): base game product.json preserves document member order,
+// numeric literals beyond float64 precision, exponential and negative zero notation,
+// escape spellings, and unmodelled fields with tab indentation and without a trailing newline.
+func TestProductJSONBaseGameGolden(t *testing.T) {
+	backslash := string([]byte{92})
+	doc := "{\n" +
+		"  \"z_custom\": \"extra\",\n" +
+		"  \"slug\": \"game\",\n" +
+		"  \"id\": 58812465975493914,\n" +
+		"  \"title\": \"Game Title\",\n" +
+		"  \"score\": 1e2,\n" +
+		"  \"ratio\": -0,\n" +
+		"  \"tag\": \"" + backslash + "u0041\",\n" +
+		"  \"description\": \"unmodelled text\",\n" +
+		"  \"downloads\": {}\n" +
+		"}"
+
+	cfg := testConfig()
+	cfg.SaveProductJSON = true
+
+	gd, err := ProductInfoToGameDetails(context.Background(), []byte(doc), cfg, nil, stubResolver(nil))
+	if err != nil {
+		t.Fatalf("ProductInfoToGameDetails: %v", err)
+	}
+
+	want := "{\n" +
+		"\t\"z_custom\": \"extra\",\n" +
+		"\t\"slug\": \"game\",\n" +
+		"\t\"id\": 58812465975493914,\n" +
+		"\t\"title\": \"Game Title\",\n" +
+		"\t\"score\": 1e2,\n" +
+		"\t\"ratio\": -0,\n" +
+		"\t\"tag\": \"" + backslash + "u0041\",\n" +
+		"\t\"description\": \"unmodelled text\",\n" +
+		"\t\"downloads\": {}\n" +
+		"}"
+
+	if gd.ProductJson != want {
+		t.Errorf("ProductJson =\n%s\nwant =\n%s", gd.ProductJson, want)
+	}
+}
+
+// TestProductJSONDLCGolden locks the DLC product.json artifact format.
+//
+// Contract (format): DLC product.json formats the exact raw DLC document:
+// it preserves unmodelled fields and does not synthesize wire fields (such as
+// expanded_dlcs or empty download collections) that were absent in the source document.
+func TestProductJSONDLCGolden(t *testing.T) {
+	dlcBody := "{\n" +
+		"  \"z_custom\": \"dlc_extra\",\n" +
+		"  \"slug\": \"dlc_pack\",\n" +
+		"  \"id\": 9007199254740993,\n" +
+		"  \"title\": \"DLC Pack\",\n" +
+		"  \"type\": \"DLC\",\n" +
+		"  \"downloads\": {\n" +
+		"    \"installers\": [\n" +
+		"      {\n" +
+		"        \"name\": \"Installer\",\n" +
+		"        \"os\": \"windows\",\n" +
+		"        \"language\": \"en\",\n" +
+		"        \"total_size\": 100,\n" +
+		"        \"files\": [\n" +
+		"          {\"id\": \"f1\", \"downlink\": \"dl1\"}\n" +
+		"        ]\n" +
+		"      }\n" +
+		"    ]\n" +
+		"  }\n" +
+		"}"
+
+	doc := "{\n" +
+		"  \"slug\": \"base_game\",\n" +
+		"  \"id\": \"1\",\n" +
+		"  \"title\": \"Base Game\",\n" +
+		"  \"expanded_dlcs\": [\n" +
+		dlcBody + "\n" +
+		"  ]\n" +
+		"}"
+
+	cfg := testConfig()
+	cfg.SaveProductJSON = true
+
+	gd, err := ProductInfoToGameDetails(context.Background(), []byte(doc), cfg, nil, stubResolver(nil))
+	if err != nil {
+		t.Fatalf("ProductInfoToGameDetails: %v", err)
+	}
+	if len(gd.DLCs) != 1 {
+		t.Fatalf("len(gd.DLCs) = %d, want 1", len(gd.DLCs))
+	}
+
+	want := "{\n" +
+		"\t\"z_custom\": \"dlc_extra\",\n" +
+		"\t\"slug\": \"dlc_pack\",\n" +
+		"\t\"id\": 9007199254740993,\n" +
+		"\t\"title\": \"DLC Pack\",\n" +
+		"\t\"type\": \"DLC\",\n" +
+		"\t\"downloads\": {\n" +
+		"\t\t\"installers\": [\n" +
+		"\t\t\t{\n" +
+		"\t\t\t\t\"name\": \"Installer\",\n" +
+		"\t\t\t\t\"os\": \"windows\",\n" +
+		"\t\t\t\t\"language\": \"en\",\n" +
+		"\t\t\t\t\"total_size\": 100,\n" +
+		"\t\t\t\t\"files\": [\n" +
+		"\t\t\t\t\t{\n" +
+		"\t\t\t\t\t\t\"id\": \"f1\",\n" +
+		"\t\t\t\t\t\t\"downlink\": \"dl1\"\n" +
+		"\t\t\t\t\t}\n" +
+		"\t\t\t\t]\n" +
+		"\t\t\t}\n" +
+		"\t\t]\n" +
+		"\t}\n" +
+		"}"
+
+	if got := gd.DLCs[0].ProductJson; got != want {
+		t.Errorf("DLC ProductJson =\n%s\nwant =\n%s", got, want)
+	}
+	// Diagnostic checks: ensure absent wire members were not synthesized.
+	if strings.Contains(gd.DLCs[0].ProductJson, "expanded_dlcs") {
+		t.Errorf("DLC ProductJson contains synthesized expanded_dlcs")
+	}
+	if strings.Contains(gd.DLCs[0].ProductJson, "bonus_content") {
+		t.Errorf("DLC ProductJson contains synthesized bonus_content")
+	}
+}
+
+// TestProductJSONPrecisionGuard locks verbatim integer preservation beyond float64 precision.
+func TestProductJSONPrecisionGuard(t *testing.T) {
+	doc := "{\n" +
+		"  \"slug\": \"base_game\",\n" +
+		"  \"id\": 58812465975493914,\n" +
+		"  \"title\": \"Base Game\",\n" +
+		"  \"downloads\": {},\n" +
+		"  \"expanded_dlcs\": [\n" +
+		"    {\n" +
+		"      \"slug\": \"dlc_1\",\n" +
+		"      \"id\": 9007199254740993,\n" +
+		"      \"title\": \"DLC 1\",\n" +
+		"      \"downloads\": {\"installers\": [{\"name\": \"i\", \"os\": \"windows\", \"language\": \"en\", \"total_size\": 100, \"files\": [{\"id\": \"1\", \"downlink\": \"d\"}]}]}\n" +
+		"    }\n" +
+		"  ]\n" +
+		"}"
+
+	cfg := testConfig()
+	cfg.SaveProductJSON = true
+
+	gd, err := ProductInfoToGameDetails(context.Background(), []byte(doc), cfg, nil, stubResolver(nil))
+	if err != nil {
+		t.Fatalf("ProductInfoToGameDetails: %v", err)
+	}
+
+	// 58812465975493914 > 2^53: float64 rounds it to 58812465975493910.
+	if strings.Contains(gd.ProductJson, "58812465975493910") {
+		t.Errorf("base ProductJson corrupted >2^53 integer to float64 rounded value")
+	}
+	if !strings.Contains(gd.ProductJson, "58812465975493914") {
+		t.Errorf("base ProductJson missing verbatim integer 58812465975493914")
+	}
+
+	if len(gd.DLCs) != 1 {
+		t.Fatalf("len(gd.DLCs) = %d, want 1", len(gd.DLCs))
+	}
+	// 9007199254740993 = 2^53 + 1: float64 rounds it to 9007199254740992.
+	if strings.Contains(gd.DLCs[0].ProductJson, "9007199254740992") {
+		t.Errorf("DLC ProductJson corrupted >2^53 integer to float64 rounded value")
+	}
+	if !strings.Contains(gd.DLCs[0].ProductJson, "9007199254740993") {
+		t.Errorf("DLC ProductJson missing verbatim integer 9007199254740993")
+	}
+}
+
+// TestProductJSONPreservationGuard locks unmodelled field retention.
+func TestProductJSONPreservationGuard(t *testing.T) {
+	doc := "{\n" +
+		"  \"slug\": \"base_game\",\n" +
+		"  \"id\": \"1\",\n" +
+		"  \"title\": \"Base Game\",\n" +
+		"  \"description\": \"rich html text\",\n" +
+		"  \"extra_metadata\": {\"rating\": 5},\n" +
+		"  \"downloads\": {},\n" +
+		"  \"expanded_dlcs\": [\n" +
+		"    {\n" +
+		"      \"slug\": \"dlc_1\",\n" +
+		"      \"id\": \"2\",\n" +
+		"      \"title\": \"DLC 1\",\n" +
+		"      \"unmodelled_feature\": true,\n" +
+		"      \"downloads\": {\"installers\": [{\"name\": \"i\", \"os\": \"windows\", \"language\": \"en\", \"total_size\": 100, \"files\": [{\"id\": \"1\", \"downlink\": \"d\"}]}]}\n" +
+		"    }\n" +
+		"  ]\n" +
+		"}"
+
+	cfg := testConfig()
+	cfg.SaveProductJSON = true
+
+	gd, err := ProductInfoToGameDetails(context.Background(), []byte(doc), cfg, nil, stubResolver(nil))
+	if err != nil {
+		t.Fatalf("ProductInfoToGameDetails: %v", err)
+	}
+
+	if !strings.Contains(gd.ProductJson, "\"description\": \"rich html text\"") {
+		t.Errorf("base ProductJson dropped unmodelled description field")
+	}
+	if !strings.Contains(gd.ProductJson, "\"extra_metadata\"") {
+		t.Errorf("base ProductJson dropped unmodelled extra_metadata field")
+	}
+
+	if len(gd.DLCs) != 1 {
+		t.Fatalf("len(gd.DLCs) = %d, want 1", len(gd.DLCs))
+	}
+	if !strings.Contains(gd.DLCs[0].ProductJson, "\"unmodelled_feature\": true") {
+		t.Errorf("DLC ProductJson dropped unmodelled_feature field")
+	}
+}

@@ -12,7 +12,6 @@ import (
 	"github.com/nekrozis/goggo/internal/catalog"
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/gamedetails"
-	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -293,7 +292,7 @@ func serialsFromDetails(details map[string]any) (text, diag string) {
 	if !ok || raw == nil {
 		return "", ""
 	}
-	cdKey, err := jsonval.Str(raw)
+	cdKey, err := scalarString(raw)
 	if err != nil {
 		return "", "game details: cdKey: " + err.Error()
 	}

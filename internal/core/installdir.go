@@ -3,7 +3,6 @@ package core
 import (
 	"fmt"
 
-	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -94,7 +93,7 @@ func ResolveInstallSubdir(template string, manifest map[string]any, slug, title 
 // matches the other document readers in this package, and it serves both the
 // manifest and the product document the install directory is derived from.
 func documentString(doc map[string]any, key string) (string, error) {
-	v, err := jsonval.Str(doc[key])
+	v, err := scalarString(doc[key])
 	if err != nil {
 		return "", fmt.Errorf("galaxy: document %s: %w", key, err)
 	}

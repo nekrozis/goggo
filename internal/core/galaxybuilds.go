@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/nekrozis/goggo/internal/catalog"
 	"github.com/nekrozis/goggo/internal/config"
-	"github.com/nekrozis/goggo/internal/jsonval"
 	"github.com/nekrozis/goggo/internal/model"
 )
 
@@ -189,7 +189,7 @@ func (d *Downloader) showBuildsFor(ctx context.Context, productID, buildID strin
 	if index < 0 {
 		rows := make([]BuildRow, 0, len(items))
 		for i, raw := range items {
-			item, err := jsonval.Object(raw)
+			item, err := mapObject(raw)
 			if err != nil {
 				return BuildsResult{}, fmt.Errorf("galaxy: builds items[%d]: %w", i, err)
 			}
@@ -358,15 +358,15 @@ func (d *Downloader) sortProductBuilds(doc map[string]any) (map[string]any, erro
 	// passes consistent.
 	builds := make([]buildEntryDoc, len(items))
 	for i, raw := range items {
-		item, err := jsonval.Object(raw)
+		item, err := mapObject(raw)
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: builds items[%d]: %w", i, err)
 		}
-		date, err := jsonval.Str(item["date_published"])
+		date, err := scalarString(item["date_published"])
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: builds items[%d].date_published: %w", i, err)
 		}
-		branch, err := jsonval.Str(item["branch"])
+		branch, err := scalarString(item["branch"])
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: builds items[%d].branch: %w", i, err)
 		}
@@ -431,7 +431,7 @@ func buildItems(doc map[string]any) ([]any, error) {
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	items, err := jsonval.Array(raw)
+	items, err := mapArray(raw)
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: builds items: %w", err)
 	}
@@ -444,11 +444,11 @@ func buildItems(doc map[string]any) ([]any, error) {
 // the command print the listing.
 func buildIndexFor(items []any, buildID string) (int, error) {
 	for i, raw := range items {
-		item, err := jsonval.Object(raw)
+		item, err := mapObject(raw)
 		if err != nil {
 			return 0, fmt.Errorf("galaxy: builds items[%d]: %w", i, err)
 		}
-		id, err := jsonval.Str(item["build_id"])
+		id, err := identifierString(item["build_id"])
 		if err != nil {
 			return 0, fmt.Errorf("galaxy: builds items[%d].build_id: %w", i, err)
 		}
@@ -467,16 +467,16 @@ func buildIndexFor(items []any, buildID string) (int, error) {
 func buildRow(index int, item map[string]any) (BuildRow, error) {
 	var row BuildRow
 	var err error
-	if row.VersionName, err = jsonval.Str(item["version_name"]); err != nil {
+	if row.VersionName, err = scalarString(item["version_name"]); err != nil {
 		return BuildRow{}, fmt.Errorf("galaxy: builds items[%d].version_name: %w", index, err)
 	}
-	if row.DatePublished, err = jsonval.Str(item["date_published"]); err != nil {
+	if row.DatePublished, err = scalarString(item["date_published"]); err != nil {
 		return BuildRow{}, fmt.Errorf("galaxy: builds items[%d].date_published: %w", index, err)
 	}
-	if row.BuildID, err = jsonval.Str(item["build_id"]); err != nil {
+	if row.BuildID, err = identifierString(item["build_id"]); err != nil {
 		return BuildRow{}, fmt.Errorf("galaxy: builds items[%d].build_id: %w", index, err)
 	}
-	generation, err := jsonval.Int(item["generation"])
+	generation, err := intValue(item["generation"])
 	if err != nil {
 		return BuildRow{}, fmt.Errorf("galaxy: builds items[%d].generation: %w", index, err)
 	}
@@ -492,15 +492,15 @@ func buildEntry(items []any, index int) (generation int, link string, err error)
 	if index < 0 || index >= len(items) {
 		return 0, "", nil
 	}
-	item, err := jsonval.Object(items[index])
+	item, err := mapObject(items[index])
 	if err != nil {
 		return 0, "", fmt.Errorf("galaxy: builds items[%d]: %w", index, err)
 	}
-	gen, err := jsonval.Int(item["generation"])
+	gen, err := intValue(item["generation"])
 	if err != nil {
 		return 0, "", fmt.Errorf("galaxy: builds items[%d].generation: %w", index, err)
 	}
-	if link, err = jsonval.Str(item["link"]); err != nil {
+	if link, err = scalarString(item["link"]); err != nil {
 		return 0, "", fmt.Errorf("galaxy: builds items[%d].link: %w", index, err)
 	}
 	return int(gen), link, nil
@@ -513,17 +513,17 @@ func endpointNames(doc map[string]any) ([]string, error) {
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	urls, err := jsonval.Array(raw)
+	urls, err := mapArray(raw)
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: secure link urls: %w", err)
 	}
 	var names []string
 	for i, rawEntry := range urls {
-		entry, err := jsonval.Object(rawEntry)
+		entry, err := mapObject(rawEntry)
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: secure link urls[%d]: %w", i, err)
 		}
-		name, err := jsonval.Str(entry["endpoint_name"])
+		name, err := scalarString(entry["endpoint_name"])
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: secure link urls[%d].endpoint_name: %w", i, err)
 		}
@@ -560,3 +560,104 @@ const (
 	platformOsx     = "osx"
 	platformLinux   = "linux"
 )
+
+func mapKind(v any) string {
+	switch v.(type) {
+	case nil:
+		return "null"
+	case bool:
+		return "boolean"
+	case string:
+		return "string"
+	case float64, int, int64, uint64:
+		return "number"
+	case []any:
+		return "array"
+	case map[string]any:
+		return "object"
+	default:
+		return fmt.Sprintf("%T", v)
+	}
+}
+
+func mapObject(v any) (map[string]any, error) {
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("expected a JSON object, got %s", mapKind(v))
+	}
+	return obj, nil
+}
+
+func mapArray(v any) ([]any, error) {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("expected a JSON array, got %s", mapKind(v))
+	}
+	return arr, nil
+}
+
+func identifierString(v any) (string, error) {
+	switch t := v.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return t, nil
+	default:
+		return "", fmt.Errorf("expected a string identifier, got %s", mapKind(v))
+	}
+}
+
+func scalarString(v any) (string, error) {
+	switch t := v.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return t, nil
+	case bool:
+		if t {
+			return "true", nil
+		}
+		return "false", nil
+	case int:
+		return strconv.Itoa(t), nil
+	case int64:
+		return strconv.FormatInt(t, 10), nil
+	case uint64:
+		return strconv.FormatUint(t, 10), nil
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64), nil
+	default:
+		return "", fmt.Errorf("expected a string, got %s", mapKind(v))
+	}
+}
+
+func intValue(v any) (int64, error) {
+	switch t := v.(type) {
+	case nil:
+		return 0, nil
+	case bool:
+		if t {
+			return 1, nil
+		}
+		return 0, nil
+	case int:
+		return int64(t), nil
+	case int64:
+		return t, nil
+	case uint64:
+		if t > math.MaxInt64 {
+			return 0, fmt.Errorf("integer %d overflows int64", t)
+		}
+		return int64(t), nil
+	case float64:
+		if math.IsNaN(t) || math.IsInf(t, 0) || t != math.Trunc(t) {
+			return 0, fmt.Errorf("expected an integer, got %v", t)
+		}
+		if t >= float64(1<<63) || t < -float64(1<<63) {
+			return 0, fmt.Errorf("integer %v overflows int64", t)
+		}
+		return int64(t), nil
+	default:
+		return 0, fmt.Errorf("expected an integer, got %s", mapKind(v))
+	}
+}

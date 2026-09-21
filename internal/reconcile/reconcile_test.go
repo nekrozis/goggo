@@ -294,3 +294,164 @@ func TestReconcilePartialNonBoundaryAndCorruptBoundary(t *testing.T) {
 		t.Errorf("corrupt boundary: decision = %v, want replace", decision)
 	}
 }
+
+// TestClassifyExistingFile_EmptyMD5 verifies that an item without a declared md5
+// (empty string, e.g. HoMM3 savegames.txt or undeclared assets) is satisfied by
+// its size alone: zero-size items and non-zero-size items both classify as OK
+// without reading the file or producing a false MD5 mismatch.
+func TestClassifyExistingFile_EmptyMD5(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.bin")
+
+	// Zero-size item with empty MD5.
+	emptyItem := model.GalaxyDepotItem{Path: "game/savegames.txt", TotalSize: 0, MD5: ""}
+	if got, err := ClassifyExistingFile(emptyItem, path); err != nil || got != StatusND {
+		t.Errorf("absent empty item = (%v, %v), want (%v, nil)", got, err, StatusND)
+	}
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ClassifyExistingFile(emptyItem, path); err != nil || got != StatusOK {
+		t.Errorf("empty file with empty MD5 = (%v, %v), want (%v, nil)", got, err, StatusOK)
+	}
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ClassifyExistingFile(emptyItem, path); err != nil || got != StatusFS {
+		t.Errorf("non-empty file for empty item = (%v, %v), want (%v, nil)", got, err, StatusFS)
+	}
+
+	// Non-zero item with empty MD5.
+	body := []byte("hello world, size 24 bytes!")
+	item := model.GalaxyDepotItem{Path: "game/data.bin", TotalSize: uint64(len(body)), MD5: ""}
+	if got, err := ClassifyExistingFile(item, path); err != nil || got != StatusFS {
+		t.Errorf("truncated item = (%v, %v), want (%v, nil)", got, err, StatusFS)
+	}
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ClassifyExistingFile(item, path); err != nil || got != StatusOK {
+		t.Errorf("exact size with empty MD5 = (%v, %v), want (%v, nil)", got, err, StatusOK)
+	}
+	if err := os.WriteFile(path, append(body, '!'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ClassifyExistingFile(item, path); err != nil || got != StatusFS {
+		t.Errorf("oversize item = (%v, %v), want (%v, nil)", got, err, StatusFS)
+	}
+
+	// Directory occupant.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ClassifyExistingFile(item, path); err != nil || got != StatusND {
+		t.Errorf("directory for regular item = (%v, %v), want (%v, nil)", got, err, StatusND)
+	}
+}
+
+// TestIsComplete_EmptyMD5 verifies that IsComplete returns true when the size
+// matches for empty-MD5 items, and false when size or mode differs.
+func TestIsComplete_EmptyMD5(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.bin")
+
+	emptyItem := model.GalaxyDepotItem{Path: "game/empty.txt", TotalSize: 0, MD5: ""}
+	if ok, err := IsComplete(emptyItem, path); err != nil || ok {
+		t.Errorf("absent empty = (%v, %v), want (false, nil)", ok, err)
+	}
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := IsComplete(emptyItem, path); err != nil || !ok {
+		t.Errorf("empty file = (%v, %v), want (true, nil)", ok, err)
+	}
+	if err := os.WriteFile(path, []byte("non-empty"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := IsComplete(emptyItem, path); err != nil || ok {
+		t.Errorf("non-empty for 0-size = (%v, %v), want (false, nil)", ok, err)
+	}
+
+	nonEmptyItem := model.GalaxyDepotItem{Path: "game/asset.dat", TotalSize: 10, MD5: ""}
+	if ok, err := IsComplete(nonEmptyItem, path); err != nil || ok {
+		t.Errorf("size 9 != 10: (%v, %v), want (false, nil)", ok, err)
+	}
+	if err := os.WriteFile(path, []byte("0123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := IsComplete(nonEmptyItem, path); err != nil || !ok {
+		t.Errorf("exact size with empty MD5: (%v, %v), want (true, nil)", ok, err)
+	}
+
+	// Directory occupying path.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := IsComplete(nonEmptyItem, path); err != nil || ok {
+		t.Errorf("directory: (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+// TestReconcileExistingFile_EmptyMD5 verifies that ReconcileExistingFile returns
+// DecisionSkip for non-zero items matching size with empty MD5, and DecisionReplace
+// for directories or mismatched sizes.
+func TestReconcileExistingFile_EmptyMD5(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.bin")
+
+	content := []byte("0123456789")
+	item := model.GalaxyDepotItem{
+		Path:      "game/file.bin",
+		TotalSize: uint64(len(content)),
+		MD5:       "",
+	}
+
+	// Exact size: DecisionSkip.
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dec, start, err := ReconcileExistingFile(item, path)
+	if err != nil || dec != DecisionSkip {
+		t.Fatalf("exact size empty MD5: (%v, %d, %v), want (DecisionSkip, 0, nil)", dec, start, err)
+	}
+
+	// Truncated non-boundary: DecisionReplace.
+	if err := os.WriteFile(path, content[:5], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dec, _, err = ReconcileExistingFile(item, path)
+	if err != nil || dec != DecisionReplace {
+		t.Errorf("truncated: (%v, %v), want (DecisionReplace, nil)", dec, err)
+	}
+
+	// Directory occupant: strictly DecisionReplace.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dec, _, err = ReconcileExistingFile(item, path)
+	if err != nil || dec != DecisionReplace {
+		t.Errorf("directory occupant: (%v, %v), want (DecisionReplace, nil)", dec, err)
+	}
+}
+
+// TestIsCompleteAndReconcileObservationFailure locks the invariant that
+// observation failures on unreadable paths return an error and never a decision
+// or false completeness.
+func TestIsCompleteAndReconcileObservationFailure(t *testing.T) {
+	item := model.GalaxyDepotItem{Path: "game/file.bin", TotalSize: 12, MD5: ""}
+	if _, err := IsComplete(item, "x\x00y"); err == nil {
+		t.Fatal("IsComplete on unobservable path must return error")
+	}
+	if _, _, err := ReconcileExistingFile(item, "x\x00y"); err == nil {
+		t.Fatal("ReconcileExistingFile on unobservable path must return error")
+	}
+}

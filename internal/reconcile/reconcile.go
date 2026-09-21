@@ -37,7 +37,9 @@ const (
 	// observation cannot pass for OK.
 	StatusUnset FileStatus = iota
 
-	// StatusOK means the size and the whole-file hash both match the item.
+	// StatusOK means the destination satisfies the item: the size matches and,
+	// when the item declares an md5, the whole-file hash matches. An item
+	// without a declared md5 is satisfied by size alone.
 	StatusOK
 
 	// StatusND means the expected regular file is not there. A path that
@@ -89,23 +91,13 @@ const (
 )
 
 // IsComplete reports whether the destination already satisfies the item: the
-// uncompressed size matches and the whole-file md5 matches. A zero-size item is its
-// own special case — missing ⇒ false, size == 0 ⇒ true — so a plan never marks an
-// absent empty file as skipped.
+// uncompressed size matches and, when the item declares an md5, the whole-file
+// hash matches. An item without a declared md5 is satisfied by its uncompressed
+// size alone; an empty item is its own case of that rule (size == 0).
 //
 // A non-nil error signals an observation failure (unreadable file): it is an
 // installation error, never "the content does not match".
 func IsComplete(item model.GalaxyDepotItem, path string) (bool, error) {
-	if item.TotalSize == 0 {
-		fi, err := os.Stat(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		return fi.Size() == 0, nil
-	}
 	fi, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -113,8 +105,14 @@ func IsComplete(item model.GalaxyDepotItem, path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if !fi.Mode().IsRegular() {
+		return false, nil
+	}
 	if fi.Size() != int64(item.TotalSize) {
 		return false, nil
+	}
+	if item.MD5 == "" {
+		return true, nil
 	}
 	got, err := fileMD5(path)
 	if err != nil {
@@ -216,6 +214,9 @@ func ClassifyExistingFile(item model.GalaxyDepotItem, path string) (FileStatus, 
 	}
 	if fi.Size() != int64(item.TotalSize) {
 		return StatusFS, nil
+	}
+	if item.MD5 == "" {
+		return StatusOK, nil
 	}
 	got, err := fileMD5(path)
 	if err != nil {

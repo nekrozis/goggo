@@ -567,3 +567,49 @@ func TestVerifyReportsUnobservableFiles(t *testing.T) {
 		t.Errorf("facts lost their order: %v", paths)
 	}
 }
+
+// TestVerify_EmptyMD5Item verifies that Verify classifies an item without a declared
+// MD5 as StatusOK when its size matches on disk (both 0-byte and non-zero-byte files),
+// without falsely reporting StatusMD5.
+func TestVerify_EmptyMD5Item(t *testing.T) {
+	f := newVerifyFixture(t)
+	f.setBaseDepot(
+		`{"path":"game/savegames.txt","md5":"","chunks":[]}`,
+		`{"path":"game/notes.txt","md5":"","chunks":[{"compressedMd5":"unused","md5":"","compressedSize":10,"size":10}]}`,
+	)
+
+	if err := os.MkdirAll(f.root+"/game", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.root+"/game/savegames.txt", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.root+"/game/notes.txt", []byte("0123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := f.downloader(t).Verify(context.Background(), NewInstallRequest(f.cfg, planProductID, "", ProductRefExact))
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	foundSavegames := false
+	foundNotes := false
+	for _, fact := range res.Facts {
+		if strings.HasSuffix(fact.Destination, "savegames.txt") {
+			foundSavegames = true
+			if fact.Status != reconcile.StatusOK || fact.Err != nil {
+				t.Errorf("savegames.txt status = %v (err %v), want StatusOK", fact.Status, fact.Err)
+			}
+		}
+		if strings.HasSuffix(fact.Destination, "notes.txt") {
+			foundNotes = true
+			if fact.Status != reconcile.StatusOK || fact.Err != nil {
+				t.Errorf("notes.txt status = %v (err %v), want StatusOK", fact.Status, fact.Err)
+			}
+		}
+	}
+	if !foundSavegames || !foundNotes {
+		t.Errorf("expected files missing from Facts: savegames=%v notes=%v", foundSavegames, foundNotes)
+	}
+}

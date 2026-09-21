@@ -927,3 +927,59 @@ func TestPlanDependenciesNumericRejected(t *testing.T) {
 		}
 	})
 }
+
+// TestBuildPlan_EmptyMD5ItemSkipped verifies that when a depot item has an empty
+// MD5 (e.g. HoMM3 savegames.txt) and the destination exists on disk with matching
+// size (0 bytes or non-zero bytes), BuildPlan records it in res.Skipped and does
+// not generate a transfer task.
+func TestBuildPlan_EmptyMD5ItemSkipped(t *testing.T) {
+	f := newPlanFixture(t)
+	f.setDefaultBodies()
+
+	v2New := galaxy.HashToGalaxyPath(planBuildHashNew)
+	f.set("/content-system/v2/meta/"+v2New,
+		`{"baseProductId":"`+planProductID+`","installDirectory":"W3 GOTY","version":2,`+
+			`"products":[{"name":"The Witcher 3: Wild Hunt"}],`+
+			`"dependencies":[],`+
+			`"depots":[`+
+			`{"productId":"`+planProductID+`","languages":["en-US"],"osBitness":["64"],"manifest":"`+planDepotHashLang+`"}]}`)
+
+	depotPath := galaxy.HashToGalaxyPath(planDepotHashLang)
+	f.set("/content-system/v2/meta/"+depotPath, `{"depot":{"items":[`+
+		`{"path":"game/savegames.txt","md5":"","chunks":[]},`+
+		`{"path":"game/asset.dat","md5":"","chunks":[{"compressedMd5":"unused","md5":"","compressedSize":10,"size":10}]}`+
+		`]}}`)
+
+	cfg := planTestConfig(t)
+	cfg.DownloadConfig.GalaxyDependencies = false
+	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+
+	installPath := cfg.Directories.Directory + "W3 GOTY"
+	if err := os.MkdirAll(installPath+"/game", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installPath+"/game/savegames.txt", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installPath+"/game/asset.dat", []byte("0123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := NewInstallRequest(cfg, planProductID, "", ProductRefExact)
+	res, err := d.BuildPlan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	if len(res.Plan.Tasks) != 0 {
+		t.Fatalf("Tasks = %d, want 0 (all skipped)", len(res.Plan.Tasks))
+	}
+	if len(res.Skipped) != 2 {
+		t.Fatalf("Skipped = %d, want 2", len(res.Skipped))
+	}
+	for _, s := range res.Skipped {
+		if s.Item.MD5 != "" {
+			t.Errorf("skipped item MD5 = %q, want empty", s.Item.MD5)
+		}
+	}
+}

@@ -202,5 +202,5 @@ func orphanDisplayPath(root, path string) string {
 	if err != nil {
 		return path
 	}
-	return filepath.ToSlash(rel)
+	return filepath.Clean(rel)
 }

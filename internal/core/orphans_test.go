@@ -354,7 +354,7 @@ func TestCheckOrphanedFilesDeleteListsObjects(t *testing.T) {
 	if !strings.Contains(out, "Deleting 2 orphaned files") {
 		t.Errorf("output = %q, want the scale header", out)
 	}
-	if !strings.Contains(out, "  mods/hd/patch.dll") {
+	if !strings.Contains(out, "  "+filepath.FromSlash("mods/hd/patch.dll")) {
 		t.Errorf("output = %q, want the relative per-object line", out)
 	}
 	if strings.Contains(out, filepath.Join(f.root, "mods")) {

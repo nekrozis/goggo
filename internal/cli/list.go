@@ -27,9 +27,10 @@ const (
 // CLI never re-implements filtering or mapping here. The listing command was
 // deliberately left out of internal/core, so the orchestration it needs is
 // reached through the two accessors below.
-func renderList(ctx context.Context, d *core.Downloader, format uint32, w io.Writer) error {
+func renderList(ctx context.Context, d *core.Downloader, inv invocation, w io.Writer) error {
 	cfg := d.Config()
 	web := d.Web()
+	format := listFormat(inv.cmd)
 	switch format {
 	case config.ListFormatGames:
 		res, err := catalog.List(ctx, web, catalog.ListOptions{
@@ -48,11 +49,21 @@ func renderList(ctx context.Context, d *core.Downloader, format uint32, w io.Wri
 		if err != nil {
 			return err
 		}
+		if inv.json {
+			games := res.Games
+			if games == nil {
+				games = []model.GameItem{}
+			}
+			return util.WriteStyledJSON(w, games)
+		}
 		return renderGames(w, res.Games, cfg.Color)
 	case config.ListFormatTags:
 		tags, err := web.Tags(ctx)
 		if err != nil {
 			return err
+		}
+		if inv.json {
+			return util.WriteStyledJSON(w, tags)
 		}
 		return renderTags(w, tags)
 	case config.ListFormatWishlist:
@@ -62,6 +73,12 @@ func renderList(ctx context.Context, d *core.Downloader, format uint32, w io.Wri
 		})
 		if err != nil {
 			return err
+		}
+		if inv.json {
+			if items == nil {
+				items = []model.WishlistItem{}
+			}
+			return util.WriteStyledJSON(w, items)
 		}
 		return renderWishlist(w, items)
 	default:

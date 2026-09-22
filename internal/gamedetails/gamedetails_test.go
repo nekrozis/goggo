@@ -1,6 +1,7 @@
 package gamedetails
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -46,12 +47,12 @@ func TestMakeFilepathPlaceholders(t *testing.T) {
 		{
 			"gamename and platform",
 			baseFile("some_game", "bin/game.exe", config.PlatformWindows),
-			"/install/some_game/windows/game.exe",
+			filepath.FromSlash("/install/some_game/windows/game.exe"),
 		},
 		{
 			"firstletter keeps a letter",
 			baseFile("some_game", "bin/game.exe", config.PlatformWindows),
-			"/install/some_game/windows/game.exe",
+			filepath.FromSlash("/install/some_game/windows/game.exe"),
 		},
 		{
 			"version placeholder",
@@ -60,12 +61,12 @@ func TestMakeFilepathPlaceholders(t *testing.T) {
 				gf.Version = "3.14"
 				return gf
 			}(),
-			"/install/g/windows/3.14.txt",
+			filepath.FromSlash("/install/g/windows/3.14.txt"),
 		},
 		{
 			"double slash folds to single",
 			baseFile("g", "bin//game.exe", config.PlatformWindows),
-			"/install/g/windows/game.exe",
+			filepath.FromSlash("/install/g/windows/game.exe"),
 		},
 	}
 	for _, tc := range cases {
@@ -83,7 +84,7 @@ func TestMakeFilepathPlaceholders(t *testing.T) {
 		conf := testDirConf()
 		conf.GameSubdir = "%gamename_firstletter%/%gamename%"
 		got := makeFilepath(baseFile("7_zip_game", "bin/game.exe", config.PlatformWindows), conf)
-		if got != "/install/0/7_zip_game/windows/game.exe" {
+		if got != filepath.FromSlash("/install/0/7_zip_game/windows/game.exe") {
 			t.Errorf("makeFilepath = %q, want the 0-prefixed path", got)
 		}
 	})
@@ -100,7 +101,7 @@ func TestMakeFilepathNoPlatform(t *testing.T) {
 	// here does not use the gamename placeholder.
 	conf.GameSubdir = "games"
 	got := makeFilepath(baseFile("g", "bin/game.exe", 0), conf)
-	if !strings.Contains(got, "/no_platform/") {
+	if !strings.Contains(got, filepath.FromSlash("/no_platform/")) {
 		t.Errorf("path = %q, want the no_platform folder", got)
 	}
 
@@ -132,7 +133,7 @@ func TestMakeFilepathDLC(t *testing.T) {
 	}
 	got := makeFilepath(gf, conf)
 	for _, want := range []string{
-		"/install/base_game/dlc/linux/game.exe",
+		filepath.FromSlash("/install/base_game/dlc/linux/game.exe"),
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("path = %q, want it to contain %q", got, want)
@@ -301,7 +302,7 @@ func TestFilterWithTypeInPlace(t *testing.T) {
 func TestMakeCustomFilepath(t *testing.T) {
 	gd := GameDetails{Gamename: "some_game", Title: "Some Title"}
 	got := gd.makeCustomFilepath("serials.txt", testDirConf())
-	if !strings.Contains(got, "/install/some_game/serials.txt") {
+	if !strings.Contains(got, filepath.FromSlash("/install/some_game/serials.txt")) {
 		t.Errorf("path = %q, want the custom base path", got)
 	}
 }
@@ -438,17 +439,17 @@ func TestMakeFilepathsRecursiveDestinations(t *testing.T) {
 
 	gd.MakeFilepaths(conf)
 
-	if got, want := gd.Installers[0].GetFilepath(), "/install/base/windows/i1.exe"; got != want {
+	if got, want := gd.Installers[0].GetFilepath(), filepath.FromSlash("/install/base/windows/i1.exe"); got != want {
 		t.Errorf("base installer = %q, want %q (unchanged)", got, want)
 	}
 	// A first-level DLC extra: dlc subdir + extras subdir under the base
 	// game's directory (the %gamename% placeholder renders the basegame).
-	if got, want := d.Extras[0].GetFilepath(), "/install/base/dlc/extras/d.zip"; got != want {
+	if got, want := d.Extras[0].GetFilepath(), filepath.FromSlash("/install/base/dlc/extras/d.zip"); got != want {
 		t.Errorf("dlc extra = %q, want %q", got, want)
 	}
 	// The nested DLC file gets a destination too: its %gamename% renders the
 	// nesting parent, which is what the conversion fills in GamenameBasegame.
-	if got, want := nested.Extras[0].GetFilepath(), "/install/dlc_one/dlc/extras/n.zip"; got != want {
+	if got, want := nested.Extras[0].GetFilepath(), filepath.FromSlash("/install/dlc_one/dlc/extras/n.zip"); got != want {
 		t.Errorf("nested dlc extra = %q, want %q", got, want)
 	}
 }

@@ -34,7 +34,7 @@ func TestRenderOrphansListsTheObjects(t *testing.T) {
 		t.Errorf("output = %q, want the root %q stated exactly once, got %d", got, res.InstallPath, n)
 	}
 	for _, file := range res.Files {
-		rel := strings.TrimPrefix(file, res.InstallPath+"/")
+		rel := res.Relative(file)
 		if !strings.Contains(got, rel) {
 			t.Errorf("output = %q, want %q listed relative to the root", got, rel)
 		}
@@ -214,7 +214,7 @@ func TestRemoveOrphansWithYesDoesNotAsk(t *testing.T) {
 		if err != nil {
 			t.Fatalf("relative(%q, %q) = %v", res.InstallPath, path, err)
 		}
-		if rel = filepath.ToSlash(rel); !strings.Contains(deleted, rel) {
+		if !strings.Contains(deleted, rel) {
 			t.Errorf("stdout = %q, want %q listed relative to the root", deleted, rel)
 		}
 		if strings.Contains(deleted, path) {

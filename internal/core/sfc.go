@@ -31,7 +31,7 @@ func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanRe
 		if ctx.Err() != nil {
 			return pending, ctx.Err()
 		}
-		container := res.InstallPath + "/" + group.Container.Path
+		container := filepath.Join(res.InstallPath, filepath.FromSlash(group.Container.Path))
 		f, err := os.Open(container)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
@@ -158,7 +158,7 @@ func sfcRegions(group model.SFCGroup, installPath string) []sfcRegion {
 		key := [2]uint64{item.SFCOffset, item.SFCSize}
 		byRange[key] = append(byRange[key], sfcMember{
 			item:        item,
-			destination: installPath + "/" + item.Path,
+			destination: filepath.Join(installPath, filepath.FromSlash(item.Path)),
 		})
 	}
 

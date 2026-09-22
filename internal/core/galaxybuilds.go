@@ -59,12 +59,12 @@ type Notice struct {
 
 // BuildRow is one line of the build listing printed when no build is selected.
 type BuildRow struct {
-	VersionName   string
-	DatePublished string
-	BuildID       string
+	VersionName   string `json:"versionName"`
+	DatePublished string `json:"datePublished"`
+	BuildID       string `json:"buildId"`
 
-	Generation int
-	Index      int
+	Generation int `json:"generation"`
+	Index      int `json:"index"`
 }
 
 // BuildsResult is what ShowBuilds produces. At most one of the three fields is

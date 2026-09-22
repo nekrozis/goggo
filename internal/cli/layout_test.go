@@ -131,6 +131,36 @@ func TestCompactPath(t *testing.T) {
 	}
 }
 
+func TestCompactPathMixedSeparators(t *testing.T) {
+	// Mixed forward and backward slashes are normalized cleanly with zero mixed slashes.
+	mixed := `C:\Games/Heroes/Data/Maps/map.h3m`
+	gotFitting := compactPath(mixed, 60)
+	if strings.Contains(gotFitting, "/") {
+		t.Errorf("fitting path has forward slash: %q", gotFitting)
+	}
+	if gotFitting != `C:\Games\Heroes\Data\Maps\map.h3m` {
+		t.Errorf("fitting path = %q, want all backslashes", gotFitting)
+	}
+
+	gotCompacted := compactPath(mixed, 25)
+	if strings.Contains(gotCompacted, "/") {
+		t.Errorf("compacted path has forward slash: %q", gotCompacted)
+	}
+	if gotCompacted != `…\Data\Maps\map.h3m` {
+		t.Errorf("compacted path = %q, want …\\Data\\Maps\\map.h3m", gotCompacted)
+	}
+
+	// UNC path with mixed separators
+	uncMixed := `\\server\share/dir/file.bin`
+	gotUNC := compactPath(uncMixed, 50)
+	if strings.Contains(gotUNC, "/") {
+		t.Errorf("UNC path has forward slash: %q", gotUNC)
+	}
+	if gotUNC != `\\server\share\dir\file.bin` {
+		t.Errorf("UNC path = %q, want \\\\server\\share\\dir\\file.bin", gotUNC)
+	}
+}
+
 // TestTaskLineDegradation locks the priority order: the bar goes first, then
 // the path compacts hierarchically, then the byte counts, then the rate — the
 // percentage and the row number survive everything short of a truncation, and

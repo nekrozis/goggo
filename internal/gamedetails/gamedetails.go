@@ -7,6 +7,7 @@
 package gamedetails
 
 import (
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -254,11 +255,11 @@ func makeFilepath(gf GameFile, dirConf config.DirectoryConfig) string {
 			subdir = dirConf.LanguagePackSubdir
 		}
 		if gf.Type&config.GFDLC != 0 {
-			subdir = dirConf.DLCSubdir + "/" + subdir
+			subdir = filepath.Join(dirConf.DLCSubdir, subdir)
 		}
 	}
 	if dirConf.GameSubdir != "" {
-		subdir = dirConf.GameSubdir + "/" + subdir
+		subdir = filepath.Join(dirConf.GameSubdir, subdir)
 	}
 
 	gamename := gf.Gamename
@@ -272,7 +273,7 @@ func makeFilepath(gf GameFile, dirConf config.DirectoryConfig) string {
 		dlcTitle = gf.Title
 	}
 
-	filepath := dirConf.Directory + "/" + subdir + "/" + filename
+	filepathResult := filepath.Join(dirConf.Directory, subdir, filename)
 
 	// The platform name comes from the first table entry whose flags are all
 	// present in the file's platform mask.
@@ -284,7 +285,7 @@ func makeFilepath(gf GameFile, dirConf config.DirectoryConfig) string {
 		}
 	}
 	if platform == "" {
-		if strings.Contains(filepath, "%gamename%/%platform%") {
+		if strings.Contains(filepathResult, "%gamename%/%platform%") || strings.Contains(filepathResult, "%gamename%\\%platform%") {
 			platform = ""
 		} else {
 			platform = "no_platform"
@@ -292,12 +293,12 @@ func makeFilepath(gf GameFile, dirConf config.DirectoryConfig) string {
 	}
 
 	// Metadata files never land in the no_platform folder.
-	logoFilename := "/logo_" + gf.Gamename + ".jpg"
-	iconFilename := "/icon_" + gf.Gamename + ".png"
-	productJSONFilename := "/product_" + gf.Gamename + ".json"
-	if strings.Contains(filepath, logoFilename) ||
-		strings.Contains(filepath, iconFilename) ||
-		strings.Contains(filepath, productJSONFilename) {
+	logoFilename := "logo_" + gf.Gamename + ".jpg"
+	iconFilename := "icon_" + gf.Gamename + ".png"
+	productJSONFilename := "product_" + gf.Gamename + ".json"
+	if strings.Contains(filepathResult, logoFilename) ||
+		strings.Contains(filepathResult, iconFilename) ||
+		strings.Contains(filepathResult, productJSONFilename) {
 		platform = ""
 	}
 
@@ -332,11 +333,10 @@ func makeFilepath(gf GameFile, dirConf config.DirectoryConfig) string {
 	// on map iteration.
 	sort.Slice(templates, func(a, b int) bool { return templates[a][0] < templates[b][0] })
 	for _, t := range templates {
-		filepath, _ = util.ReplaceAll(filepath, t[0], t[1])
+		filepathResult, _ = util.ReplaceAll(filepathResult, t[0], t[1])
 	}
 
-	filepath, _ = util.ReplaceAll(filepath, "//", "/")
-	return filepath
+	return filepath.Clean(filepath.FromSlash(filepathResult))
 }
 
 // makeCustomFilepath renders a metadata file's path by reusing the regular

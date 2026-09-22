@@ -26,6 +26,17 @@ func runListDetails(ctx context.Context, d *core.Downloader, inv invocation, std
 		return reportError(stderr, err)
 	}
 
+	if inv.json {
+		list := make([]any, 0, len(games))
+		for i := range games {
+			list = append(list, games[i].GetDetailsAsJson())
+		}
+		if err := util.WriteStyledJSON(stdout, list); err != nil {
+			return reportError(stderr, err)
+		}
+		return outcomeOK
+	}
+
 	bl, err := blacklist.LoadBlacklist(inv.cfg.BlacklistFilePath)
 	if err != nil {
 		return reportError(stderr, err)

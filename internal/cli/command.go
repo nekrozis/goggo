@@ -272,6 +272,28 @@ var orphansOptions = []optionID{
 	optBlacklist,
 }
 
+// commonOptions are the only options accepted unconditionally by every command.
+var commonOptions = optionSet{
+	optHelp,
+	optVersion,
+	optVerbose,
+}
+
+// networkOptions are accepted by commands that perform network requests.
+var networkOptions = []optionID{
+	optRetries,
+	optWait,
+	optTimeout,
+}
+
+// transferUIOptions are accepted by commands that transfer data or render progress/color UI.
+var transferUIOptions = []optionID{
+	optNoColor,
+	optNoUnicode,
+	optUnitFormat,
+	optThreads,
+}
+
 // subdirOptions are the six website subdirectory layout options. They belong to
 // the download commands only: the install face resolves its own root through
 // --install-dir, and these fill DirectoryConfig for MakeFilepaths.
@@ -293,11 +315,11 @@ var commandTree = []commandNode{
 		summary: "Authentication",
 		children: []commandNode{
 			{name: "login", summary: "Log in", id: cmdAuthLogin,
-				session: sessionExplicitLogin, options: []optionID{optBrowser, optEmail}},
+				session: sessionExplicitLogin, options: joinOptions([]optionID{optBrowser, optEmail}, networkOptions)},
 			{name: "clear", summary: "Clear local login state", id: cmdAuthClear,
 				session: sessionNone},
 			{name: "status", summary: "Report the authentication state", id: cmdAuthStatus,
-				session: sessionNone},
+				session: sessionNone, options: networkOptions},
 		},
 	},
 	{
@@ -305,9 +327,11 @@ var commandTree = []commandNode{
 		summary: "List account content",
 		children: []commandNode{
 			{name: "games", summary: "List owned games", id: cmdListGames,
-				session: sessionRequired, options: listGamesOptions},
-			{name: "tags", summary: "List tags", id: cmdListTags, session: sessionRequired},
-			{name: "wishlist", summary: "List the wishlist", id: cmdListWishlist, session: sessionRequired},
+				session: sessionRequired, options: joinOptions([]optionID{optJSON}, listGamesOptions, networkOptions)},
+			{name: "tags", summary: "List tags", id: cmdListTags, session: sessionRequired,
+				options: joinOptions([]optionID{optJSON}, networkOptions)},
+			{name: "wishlist", summary: "List the wishlist", id: cmdListWishlist, session: sessionRequired,
+				options: joinOptions([]optionID{optJSON}, networkOptions)},
 		},
 	},
 	{
@@ -315,18 +339,18 @@ var commandTree = []commandNode{
 		summary: "Show game information",
 		id:      cmdGame,
 		session: sessionNone,
-		options: joinOptions([]optionID{optJSON}, productRefOptions),
+		options: joinOptions([]optionID{optJSON}, productRefOptions, networkOptions),
 	},
 	{
 		name:    "galaxy",
 		summary: "Inspect GOG Galaxy resources",
 		children: []commandNode{
 			{name: "builds", summary: "List a product's builds", id: cmdGalaxyBuilds,
-				session: sessionRequired, options: []optionID{optSort, optRegex}},
+				session: sessionRequired, options: joinOptions([]optionID{optSort, optJSON}, productRefOptions, networkOptions)},
 			{name: "manifest", summary: "Show a build's manifest", id: cmdGalaxyManifest,
-				session: sessionRequired, options: productRefOptions},
+				session: sessionRequired, options: joinOptions([]optionID{optJSON}, productRefOptions, networkOptions)},
 			{name: "cdns", summary: "List a build's CDN endpoints", id: cmdGalaxyCDNs,
-				session: sessionRequired, options: productRefOptions},
+				session: sessionRequired, options: joinOptions([]optionID{optJSON}, productRefOptions, networkOptions)},
 		},
 	},
 	{
@@ -334,8 +358,7 @@ var commandTree = []commandNode{
 		summary: "Make the local installation match the manifest",
 		id:      cmdInstall,
 		session: sessionImplicitLogin,
-		options: joinOptions(installTargetOptions, productRefOptions, []optionID{
-			optThreads,
+		options: joinOptions(installTargetOptions, productRefOptions, networkOptions, transferUIOptions, []optionID{
 			optProgressInterval,
 			optCDNPriority,
 			optNoDependencies,
@@ -347,7 +370,7 @@ var commandTree = []commandNode{
 				summary: "List available installation options",
 				id:      cmdInstallOptions,
 				session: sessionRequired,
-				options: joinOptions([]optionID{optPlatform, optJSON}, productRefOptions),
+				options: joinOptions([]optionID{optPlatform, optLanguage, optArch, optJSON}, productRefOptions, networkOptions),
 			},
 		},
 	},
@@ -356,7 +379,7 @@ var commandTree = []commandNode{
 		summary: "Report whether the local files match the manifest",
 		id:      cmdVerify,
 		session: sessionRequired,
-		options: joinOptions(installTargetOptions, productRefOptions, verifyOptions),
+		options: joinOptions(installTargetOptions, productRefOptions, verifyOptions, networkOptions, transferUIOptions),
 		// The report's vocabulary is the status codes, so the topic has to
 		// define them; and a verification never repairs, which a reader has
 		// to know before relying on it.
@@ -371,10 +394,10 @@ var commandTree = []commandNode{
 		children: []commandNode{
 			{name: "check", summary: "List them (read-only)", id: cmdOrphansCheck,
 				session: sessionRequired,
-				options: joinOptions(installTargetOptions, productRefOptions, orphansOptions), notes: orphanNotes},
+				options: joinOptions(installTargetOptions, productRefOptions, orphansOptions, networkOptions, transferUIOptions), notes: orphanNotes},
 			{name: "remove", summary: "Delete them", id: cmdOrphansRemove,
 				session: sessionImplicitLogin,
-				options: joinOptions(installTargetOptions, productRefOptions, orphansOptions, []optionID{optYes}), notes: orphanNotes},
+				options: joinOptions(installTargetOptions, productRefOptions, orphansOptions, []optionID{optYes}, networkOptions, transferUIOptions), notes: orphanNotes},
 		},
 	},
 	{
@@ -386,7 +409,7 @@ var commandTree = []commandNode{
 				summary: "Show each game's offline backup files",
 				id:      cmdBackupList,
 				session: sessionRequired,
-				options: detailsOptions,
+				options: joinOptions(detailsOptions, []optionID{optJSON}, networkOptions),
 				notes:   listDetailsNotes,
 			},
 			{
@@ -399,8 +422,8 @@ var commandTree = []commandNode{
 					[]optionID{
 						optInclude, optExclude, optBlacklist,
 						optInstallerPlatform, optInstallerLanguage,
-						optThreads, optProgressInterval, optCheckFreeSpace,
-					}, saveOptions, productRefOptions),
+						optProgressInterval, optCheckFreeSpace,
+					}, saveOptions, productRefOptions, networkOptions, transferUIOptions),
 				notes: []string{
 					"Downloads offline backup files for the specified game, specific files, or by category.",
 					"<file> specifies an exact backup file selector (file-id or dlc/file-id).",
@@ -422,9 +445,13 @@ func findChild(nodes []commandNode, name string) (commandNode, bool) {
 	return commandNode{}, false
 }
 
-// accepts reports whether the node (with the shared set) accepts the option.
+// accepts reports whether the node accepts the option.
+//
+// Accepts satisfies: common(id) ∨ node.capabilities(id) ∨ node.localOptions(id).
+// Network and transfer capabilities are explicitly declared on nodes, never
+// implicitly treated as global.
 func (n commandNode) accepts(id optionID) bool {
-	if sharedOptions.contains(id) {
+	if commonOptions.contains(id) {
 		return true
 	}
 	return containsOption(n.options, id)

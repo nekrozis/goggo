@@ -178,7 +178,7 @@ func planTestConfig(t *testing.T) config.Config {
 	cfg := config.NewConfig(dir, dir)
 	// Parse owns the trailing-separator normalisation and the subdirectory
 	// default; the test applies both so the plan sees production shapes.
-	cfg.Directories.Directory = dir + "/"
+	cfg.Directories.Directory = dir
 	cfg.Directories.SubDirectories = true
 	// The subdirectory template is a Parse-time default: config.NewConfig does
 	// not carry it, so the test supplies the value Parse would.
@@ -203,7 +203,7 @@ func TestBuildPlanFullChain(t *testing.T) {
 
 	// The previously installed build recorded itself in the info file, which
 	// the old-build diff reads.
-	installPath := cfg.Directories.Directory + "W3 GOTY"
+	installPath := filepath.Join(cfg.Directories.Directory, "W3 GOTY")
 	if err := os.MkdirAll(installPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestBuildPlanFullChain(t *testing.T) {
 
 	// The old build's gone file is plan data, and its message precedes nothing:
 	// it is emitted whether or not the file is on disk.
-	wantDelete := cfg.Directories.Directory + "W3 GOTY/game/oldfile.bin"
+	wantDelete := filepath.Join(cfg.Directories.Directory, "W3 GOTY", "game", "oldfile.bin")
 	if len(res.Plan.Deletes) != 1 || res.Plan.Deletes[0] != wantDelete {
 		t.Errorf("deletes = %v, want [%s]", res.Plan.Deletes, wantDelete)
 	}
@@ -322,7 +322,7 @@ func TestBuildPlanContainerDroppedWhenInstalled(t *testing.T) {
 	cfg := planTestConfig(t)
 	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
 
-	installPath := cfg.Directories.Directory + "W3 GOTY"
+	installPath := filepath.Join(cfg.Directories.Directory, "W3 GOTY")
 	if err := os.MkdirAll(installPath+"/game", 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -565,7 +565,7 @@ func TestBuildPlanSkipAggregation(t *testing.T) {
 
 	cfg := planTestConfig(t)
 	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
-	installPath := cfg.Directories.Directory + "W3 GOTY"
+	installPath := filepath.Join(cfg.Directories.Directory, "W3 GOTY")
 	if err := os.MkdirAll(installPath+"/game", 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -610,7 +610,7 @@ func TestBuildPlanSkipAggregation(t *testing.T) {
 		t.Fatalf("BuildPlan verbose: %v", err)
 	}
 	msgs = planMessageTexts(res)
-	if !strings.Contains(msgs, "game/a.bin: OK") {
+	if !strings.Contains(msgs, filepath.FromSlash("game/a.bin")+": OK") {
 		t.Errorf("verbose messages = %q, want the per-file OK line", msgs)
 	}
 }
@@ -637,7 +637,7 @@ func TestBuildPlanNothingToDownload(t *testing.T) {
 
 	cfg := planTestConfig(t)
 	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
-	installPath := cfg.Directories.Directory + "W3 GOTY"
+	installPath := filepath.Join(cfg.Directories.Directory, "W3 GOTY")
 	if err := os.MkdirAll(installPath+"/game", 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -732,7 +732,7 @@ func TestBuildPlanInstallDirTemplateNeedsProductInfo(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BuildPlan: %v", err)
 			}
-			if want := cfg.Directories.Directory + c.wantDirectory; res.InstallPath != want {
+			if want := filepath.Join(cfg.Directories.Directory, filepath.FromSlash(c.wantDirectory)); res.InstallPath != want {
 				t.Errorf("install path = %q, want %q", res.InstallPath, want)
 			}
 			if got := f.exact("/products/" + planProductID); got != c.wantProduct {
@@ -954,7 +954,7 @@ func TestBuildPlan_EmptyMD5ItemSkipped(t *testing.T) {
 	cfg.DownloadConfig.GalaxyDependencies = false
 	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
 
-	installPath := cfg.Directories.Directory + "W3 GOTY"
+	installPath := filepath.Join(cfg.Directories.Directory, "W3 GOTY")
 	if err := os.MkdirAll(installPath+"/game", 0o755); err != nil {
 		t.Fatal(err)
 	}

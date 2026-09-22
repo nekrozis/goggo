@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -76,7 +77,7 @@ func newSFCInstallFixture(t *testing.T, containerBody string, serveOwnChunk bool
 	return &sfcInstallFixture{
 		f:           f,
 		cfg:         cfg,
-		installPath: cfg.Directories.Directory + "W3 GOTY",
+		installPath: filepath.Join(cfg.Directories.Directory, "W3 GOTY"),
 		memberRel:   "game/small1.txt",
 		own:         own,
 	}
@@ -133,14 +134,14 @@ func TestInstallFailsWhenTheContainerMemberCannotBeDownloaded(t *testing.T) {
 	if err == nil {
 		t.Fatal("Install reported success over a member that was never written")
 	}
-	if !strings.Contains(err.Error(), fi.memberRel) {
+	if !strings.Contains(err.Error(), filepath.FromSlash(fi.memberRel)) {
 		t.Errorf("error = %v, want it to name the member", err)
 	}
 	if !strings.Contains(err.Error(), "does not match the manifest") {
 		t.Errorf("error = %v, want the convergence failure", err)
 	}
 	// Nothing was written: the wrong bytes never reached the installation.
-	assertFileAbsent(t, fi.installPath+"/"+fi.memberRel)
+	assertFileAbsent(t, filepath.Join(fi.installPath, filepath.FromSlash(fi.memberRel)))
 }
 
 // sfcChunkJSON builds one chunk of the manifest: the compressed digest the CDN

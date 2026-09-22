@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"strings"
+	"path/filepath"
 
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/util"
@@ -25,7 +25,7 @@ const (
 	defaultGalaxyArch          = "x64"
 	defaultGalaxyCDNPriority   = "edgecast,akamai_edgecast_proxy,fastly"
 	defaultGalaxyInstallSubdir = "%install_dir%"
-	defaultDirectory           = "./"
+	defaultDirectory           = "."
 
 	// defaultThreads is how many workers an install uses when --threads is
 	// absent; measurement put the knee of the rate curve at 8.
@@ -37,19 +37,13 @@ const (
 	progressIntervalMax = 10000
 )
 
-// ensureTrailingSlash normalises a directory path: an empty path becomes the
-// fallback, and any other path gains a separator unless it already ends in one.
-//
-// Only a forward slash is tested, so a Windows path written with backslashes
-// gains one.
-func ensureTrailingSlash(path, fallback string) string {
+// normalizeDirectory normalises a directory path using filepath.Clean.
+// An empty path falls back to the provided fallback default.
+func normalizeDirectory(path, fallback string) string {
 	if path == "" {
-		return fallback
+		path = fallback
 	}
-	if !strings.HasSuffix(path, "/") {
-		return path + "/"
-	}
-	return path
+	return filepath.Clean(path)
 }
 
 // optionMask resolves a comma-separated option list to its bit mask.

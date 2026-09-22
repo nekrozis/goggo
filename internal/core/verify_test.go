@@ -78,7 +78,7 @@ func newVerifyFixture(t *testing.T) *verifyFixture {
 	f := &verifyFixture{planFixture: newPlanFixture(t)}
 	f.cfg = planTestConfig(t)
 	f.cfg.DownloadConfig.GalaxyDependencies = false
-	f.root = f.cfg.Directories.Directory + "W3 GOTY"
+	f.root = filepath.Join(f.cfg.Directories.Directory, "W3 GOTY")
 
 	v2New := galaxy.HashToGalaxyPath(planBuildHashNew)
 	f.set("/products/"+planProductID+"/os/windows/builds",
@@ -114,10 +114,19 @@ func (f *verifyFixture) downloader(t *testing.T) *Downloader {
 	return newOfflineDownloader(t, f.Server, f.cfg, newFakeConsole())
 }
 
+// relPath returns the install-root-relative path in standard slash form for assertions.
+func (f *verifyFixture) relPath(dest string) string {
+	rel, err := filepath.Rel(f.root, dest)
+	if err != nil {
+		return dest
+	}
+	return filepath.ToSlash(rel)
+}
+
 // place writes one expected file into the installation.
 func (f *verifyFixture) place(t *testing.T, relative string, content []byte) {
 	t.Helper()
-	path := f.root + "/" + relative
+	path := filepath.Join(f.root, filepath.FromSlash(relative))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +141,7 @@ func (f *verifyFixture) facts(t *testing.T, res VerifyResult) map[string]reconci
 	t.Helper()
 	got := map[string]reconcile.FileStatus{}
 	for _, fact := range res.Facts {
-		relative := strings.TrimPrefix(fact.Destination, f.root+"/")
+		relative := f.relPath(fact.Destination)
 		if fact.Err != nil {
 			t.Errorf("%s: unexpected observation failure: %v", relative, fact.Err)
 			continue
@@ -225,7 +234,7 @@ func TestVerifyClassifiesTheInstallation(t *testing.T) {
 			// healthy installation has no container file left.
 			var paths []string
 			for _, fact := range res.Facts {
-				relative := strings.TrimPrefix(fact.Destination, f.root+"/")
+				relative := f.relPath(fact.Destination)
 				paths = append(paths, relative)
 				if strings.Contains(relative, "smallfilescontainer") {
 					t.Errorf("%s is a transport artifact and must not be reported", relative)
@@ -298,7 +307,7 @@ func TestVerifyFileSetIgnoresTheContainerRoute(t *testing.T) {
 		}
 		var paths []string
 		for _, file := range res.Expected {
-			paths = append(paths, strings.TrimPrefix(file.Destination, f.root+"/"))
+			paths = append(paths, f.relPath(file.Destination))
 		}
 		return paths
 	}
@@ -337,11 +346,11 @@ func TestVerifyDoesNotFetchTheOldBuild(t *testing.T) {
 	cfg := planTestConfig(t)
 	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
 
-	installPath := cfg.Directories.Directory + "W3 GOTY"
+	installPath := filepath.Join(cfg.Directories.Directory, "W3 GOTY")
 	if err := os.MkdirAll(installPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(installPath+"/goggame-"+planProductID+".info",
+	if err := os.WriteFile(filepath.Join(installPath, "goggame-"+planProductID+".info"),
 		[]byte(`{"buildId":"b-old"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}

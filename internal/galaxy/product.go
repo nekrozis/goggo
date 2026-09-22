@@ -69,7 +69,7 @@ func (c *Client) Product(ctx context.Context, productID string) (ProductDocument
 
 	rawDLCs, present := doc["dlcs"]
 	if !present || len(rawDLCs) == 0 || rawDLCs.Kind() != jsontext.KindBeginObject {
-		// D52: absent, null or not an object is skipped — no request,
+		// Absent, null or not an object is skipped — no request,
 		// no expanded_dlcs, document returned as the API answered it.
 		return prodDoc, nil
 	}

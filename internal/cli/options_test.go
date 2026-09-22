@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -38,8 +40,8 @@ func TestParseDefaultsComeFromConfig(t *testing.T) {
 	if inv.cfg.Threads != 8 || inv.cfg.Color {
 		t.Errorf("caller values were lost: threads=%d color=%v", inv.cfg.Threads, inv.cfg.Color)
 	}
-	if inv.cfg.Directories.Directory != "./" {
-		t.Errorf("directory = %q, want the default normalised to ./", inv.cfg.Directories.Directory)
+	if inv.cfg.Directories.Directory != "." {
+		t.Errorf("directory = %q, want the default normalised to .", inv.cfg.Directories.Directory)
 	}
 	if inv.cfg.UnitFormat != config.UnitFormatIEC || inv.cfg.Retries != 3 {
 		t.Errorf("config defaults missing: unit=%d retries=%d", inv.cfg.UnitFormat, inv.cfg.Retries)
@@ -56,7 +58,7 @@ func TestParseFlagsOverrideDefaults(t *testing.T) {
 	if inv.cfg.UnitFormat != config.UnitFormatSI || inv.cfg.Curl.Timeout != 30 {
 		t.Errorf("unit/timeout: %+v", inv.cfg)
 	}
-	if inv.cfg.Directories.Directory != "/games/" || inv.cfg.Color || inv.cfg.Unicode {
+	if inv.cfg.Directories.Directory != filepath.Clean("/games") || inv.cfg.Color || inv.cfg.Unicode {
 		t.Errorf("directory/rendering: %+v", inv.cfg.Directories)
 	}
 }
@@ -280,7 +282,7 @@ func TestParseClearAuth(t *testing.T) {
 // option that takes a value.
 func TestParseEqualsForm(t *testing.T) {
 	inv := parseOpts(t, "install", "123", "--threads=8", "--platform=windows", "--directory=/games")
-	if inv.cfg.Threads != 8 || inv.cfg.Directories.Directory != "/games/" {
+	if inv.cfg.Threads != 8 || inv.cfg.Directories.Directory != filepath.Clean("/games") {
 		t.Errorf("equals form: threads=%d directory=%q", inv.cfg.Threads, inv.cfg.Directories.Directory)
 	}
 	if inv.cfg.DownloadConfig.GalaxyPlatform != config.PlatformWindows {
@@ -369,20 +371,62 @@ func TestParseInstallFlags(t *testing.T) {
 	}
 }
 
-// TestEnsureTrailingSlash keeps the directory normalisation the install path is
-// concatenated from.
-func TestEnsureTrailingSlash(t *testing.T) {
-	for _, c := range []struct{ in, want string }{
-		{"/games", "/games/"},
-		{"/games/", "/games/"},
-		{"games", "games/"},
-	} {
-		if got := ensureTrailingSlash(c.in, "./"); got != c.want {
-			t.Errorf("ensureTrailingSlash(%q) = %q, want %q", c.in, got, c.want)
+// TestNormalizeDirectory locks the directory normalisation invariants.
+func TestNormalizeDirectory(t *testing.T) {
+	// Platform-independent invariants
+	if got, want := normalizeDirectory("", "."), filepath.Clean("."); got != want {
+		t.Errorf(`normalizeDirectory("", ".") = %q, want %q`, got, want)
+	}
+	if got, want := normalizeDirectory("", "/fallback"), filepath.Clean("/fallback"); got != want {
+		t.Errorf(`normalizeDirectory("", "/fallback") = %q, want %q`, got, want)
+	}
+	if got, want := normalizeDirectory("./foo/", "."), filepath.Clean("foo"); got != want {
+		t.Errorf(`normalizeDirectory("./foo/", ".") = %q, want %q`, got, want)
+	}
+
+	// Windows-specific invariants (verified on Windows runtime)
+	if runtime.GOOS == "windows" {
+		if got, want := normalizeDirectory(`D:\Games\`, "."), `D:\Games`; got != want {
+			t.Errorf(`normalizeDirectory("D:\\Games\\", ".") = %q, want %q`, got, want)
+		}
+		if got, want := normalizeDirectory(`D:/Games/`, "."), `D:\Games`; got != want {
+			t.Errorf(`normalizeDirectory("D:/Games/", ".") = %q, want %q`, got, want)
+		}
+		// UNC paths with backslashes and mixed slashes
+		if got, want := normalizeDirectory(`\\server\share\games\`, "."), `\\server\share\games`; got != want {
+			t.Errorf(`normalizeDirectory("\\\\server\\share\\games\\", ".") = %q, want %q`, got, want)
+		}
+		if got, want := normalizeDirectory(`//server/share/games/`, "."), `\\server\share\games`; got != want {
+			t.Errorf(`normalizeDirectory("//server/share/games/", ".") = %q, want %q`, got, want)
+		}
+		// Drive root
+		if got, want := normalizeDirectory(`C:\`, "."), `C:\`; got != want {
+			t.Errorf(`normalizeDirectory("C:\\", ".") = %q, want %q`, got, want)
 		}
 	}
-	if got := ensureTrailingSlash("", "/fallback/"); got != "/fallback/" {
-		t.Errorf("empty path = %q, want the fallback", got)
+}
+
+// TestCapabilityWhitelistEnforcement locks that unaccepted capabilities are rejected per node.
+func TestCapabilityWhitelistEnforcement(t *testing.T) {
+	// auth clear accepts only Common Capability; network and transfer flags are rejected.
+	if _, err := parseArgs([]string{"auth", "clear", "--retries", "5"}, testDefaults()); err == nil {
+		t.Error("auth clear must not accept --retries")
+	}
+	if _, err := parseArgs([]string{"auth", "clear", "--threads", "4"}, testDefaults()); err == nil {
+		t.Error("auth clear must not accept --threads")
+	}
+
+	// list tags accepts Common + Network + --json, but not Transfer/UI flags.
+	if _, err := parseArgs([]string{"list", "tags", "--threads", "4"}, testDefaults()); err == nil {
+		t.Error("list tags must not accept --threads")
+	}
+	if _, err := parseArgs([]string{"list", "tags", "--no-color"}, testDefaults()); err == nil {
+		t.Error("list tags must not accept --no-color")
+	}
+	inv := parseOpts(t, "list", "tags", "--retries", "5", "--timeout", "10", "--json")
+	if inv.cfg.Retries != 5 || inv.cfg.Curl.Timeout != 10 || !inv.json {
+		t.Errorf("list tags accepted options mismatch: retries=%d timeout=%d json=%v",
+			inv.cfg.Retries, inv.cfg.Curl.Timeout, inv.json)
 	}
 }
 

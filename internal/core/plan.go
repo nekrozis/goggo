@@ -196,7 +196,7 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 			return res, err
 		}
 	}
-	installPath := d.cfg.Directories.Directory + installDirectory
+	installPath := filepath.Join(d.cfg.Directories.Directory, installDirectory)
 	res.InstallPath = installPath
 
 	// The depot items.
@@ -216,7 +216,7 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 	}
 	var filtered []model.GalaxyDepotItem
 	for _, it := range planItems {
-		p := installPath + "/" + it.Path
+		p := filepath.Join(installPath, filepath.FromSlash(it.Path))
 		if bl.IsBlacklisted(p) {
 			if d.cfg.MsgLevel >= msgLevelVerbose {
 				res.addMessage("Skipping blacklisted file: " + p)
@@ -234,7 +234,7 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 	useSFC := true
 	for _, it := range planItems {
 		if it.IsInSFC {
-			if _, err := os.Stat(installPath + "/" + it.Path); err == nil {
+			if _, err := os.Stat(filepath.Join(installPath, filepath.FromSlash(it.Path))); err == nil {
 				useSFC = false
 				break
 			}
@@ -309,9 +309,9 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 						}
 						// The message is emitted before existence is tested,
 						// so a path that is not on disk still gets its line.
-						filepath := installPath + "/" + old.Path
-						deletes = append(deletes, filepath)
-						res.addMessage("Deleting " + filepath)
+						delPath := filepath.Join(installPath, filepath.FromSlash(old.Path))
+						deletes = append(deletes, delPath)
+						res.addMessage("Deleting " + delPath)
 					}
 				}
 			}
@@ -340,7 +340,7 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 			continue
 		}
 		res.Expected = append(res.Expected, InstalledFile{
-			Destination: installPath + "/" + it.Path,
+			Destination: filepath.Join(installPath, filepath.FromSlash(it.Path)),
 			Item:        it,
 		})
 	}
@@ -362,7 +362,7 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 			res.addMessage(fmt.Sprintf("\tChunks: %d", len(it.Chunks)))
 			res.addMessage(fmt.Sprintf("\tmd5: %s", it.MD5))
 		}
-		destination := installPath + "/" + it.Path
+		destination := filepath.Join(installPath, filepath.FromSlash(it.Path))
 
 		// The plan-level reconciliation: a destination that already satisfies
 		// the item — same uncompressed size and whole-file md5 — leaves the

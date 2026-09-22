@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/nekrozis/goggo/internal/util"
@@ -168,10 +169,15 @@ func compactPath(path string, maxCells int) string {
 	if maxCells <= 0 {
 		return ""
 	}
+	sep := "/"
+	if strings.Contains(path, "\\") || (runtime.GOOS == "windows" && (len(path) >= 2 && path[1] == ':')) {
+		sep = "\\"
+		path = strings.ReplaceAll(path, "/", "\\")
+	}
 	if visibleWidth(path) <= maxCells {
 		return path
 	}
-	parts := strings.Split(path, "/")
+	parts := strings.Split(path, sep)
 	base := parts[len(parts)-1]
 	dirs := parts[:len(parts)-1]
 
@@ -179,7 +185,7 @@ func compactPath(path string, maxCells int) string {
 	// is strictly wider and could not have been the next rung anyway), then
 	// down to the single deepest dir.
 	for tail := min(3, len(dirs)); tail >= 1; tail-- {
-		cand := "…/" + strings.Join(dirs[len(dirs)-tail:], "/") + "/" + base
+		cand := "…" + sep + strings.Join(dirs[len(dirs)-tail:], sep) + sep + base
 		if visibleWidth(cand) <= maxCells {
 			return cand
 		}

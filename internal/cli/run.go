@@ -233,6 +233,10 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		}
 	}
 
+	if inv.cfg.MsgLevel >= msgLevelVerbose {
+		fmt.Fprintf(stderr, "verbose: executing command\n")
+	}
+
 	switch inv.cmd {
 	case cmdAuthLogin:
 		// The login already happened: the tree declares sessionExplicitLogin,
@@ -272,7 +276,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		return outcomeOK
 
 	case cmdListGames, cmdListTags, cmdListWishlist:
-		if err := renderList(ctx, d, listFormat(inv.cmd), stdout); err != nil {
+		if err := renderList(ctx, d, inv, stdout); err != nil {
 			return reportError(stderr, err)
 		}
 		return outcomeOK
@@ -290,15 +294,46 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 			build = "0"
 		}
 		res, err := d.ShowBuilds(ctx, inv.target.Product, build, productRefMode(inv))
-		// The Linux support messages are rendered even when the run then fails:
-		// they go to stdout and the missing fallback is reported on stderr
-		// afterwards.
-		renderNotice(stdout, stderr, res.Notice)
+		if inv.json {
+			// Under JSON mode, human notices go to stderr to guarantee pure stdout JSON.
+			if res.Notice.Text != "" {
+				if res.Notice.Err {
+					fmt.Fprintln(stderr, res.Notice.Text)
+				} else {
+					fmt.Fprintln(stderr, res.Notice.Text)
+				}
+			}
+		} else {
+			// The Linux support messages are rendered even when the run then fails:
+			// they go to stdout and the missing fallback is reported on stderr
+			// afterwards.
+			renderNotice(stdout, stderr, res.Notice)
+		}
 		if err != nil {
 			return reportError(stderr, err)
 		}
 		if res.Manifest != nil {
 			if err := renderManifest(stdout, res.Manifest); err != nil {
+				return reportError(stderr, err)
+			}
+			return outcomeOK
+		}
+		if inv.cmd == cmdGalaxyManifest {
+			// Manifest Notice-only success produces a null JSON payload.
+			if inv.json {
+				if err := util.WriteStyledJSON(stdout, nil); err != nil {
+					return reportError(stderr, err)
+				}
+				return outcomeOK
+			}
+			return outcomeOK
+		}
+		if inv.json {
+			builds := res.Builds
+			if builds == nil {
+				builds = []core.BuildRow{}
+			}
+			if err := util.WriteStyledJSON(stdout, builds); err != nil {
 				return reportError(stderr, err)
 			}
 			return outcomeOK
@@ -310,9 +345,25 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 
 	case cmdGalaxyCDNs:
 		res, err := d.ListCDNs(ctx, inv.target.Product, inv.target.Build, productRefMode(inv))
-		renderNotice(stdout, stderr, res.Notice)
+		if inv.json {
+			if res.Notice.Text != "" {
+				fmt.Fprintln(stderr, res.Notice.Text)
+			}
+		} else {
+			renderNotice(stdout, stderr, res.Notice)
+		}
 		if err != nil {
 			return reportError(stderr, err)
+		}
+		if inv.json {
+			names := res.Names
+			if names == nil {
+				names = []string{}
+			}
+			if err := util.WriteStyledJSON(stdout, names); err != nil {
+				return reportError(stderr, err)
+			}
+			return outcomeOK
 		}
 		if err := renderCDNNames(stdout, res.Names); err != nil {
 			return reportError(stderr, err)

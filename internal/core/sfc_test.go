@@ -28,8 +28,8 @@ type sfcFixture struct {
 func newSFCFixture(t *testing.T) *sfcFixture {
 	t.Helper()
 	f := &sfcFixture{root: t.TempDir()}
-	f.container = f.root + "/galaxy_smallfilescontainer_42" // the plan stores forward-slash paths
-	f.body = []byte("AAAABBBBCCCCDDDDYYYYZZZZ")             // members cut from here
+	f.container = filepath.Join(f.root, "galaxy_smallfilescontainer_42")
+	f.body = []byte("AAAABBBBCCCCDDDDYYYYZZZZ") // members cut from here
 	if err := os.WriteFile(f.container, f.body, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestExtractHoldsBackAMemberItsRegionDoesNotHold(t *testing.T) {
 		t.Fatalf("pending = %+v, want the one member the container cannot supply", pending)
 	}
 	task := pending[0]
-	if task.Destination != f.root+"/game/broken.txt" || task.Item.Path != "game/broken.txt" {
+	if task.Destination != filepath.Join(f.root, "game", "broken.txt") || task.Item.Path != "game/broken.txt" {
 		t.Errorf("pending task = %+v, want it addressed to the member", task)
 	}
 	// The item travels whole: the fallback must not derive anything again.
@@ -215,7 +215,7 @@ func TestExtractValidatesPartiallyOverlappingRegionsIndependently(t *testing.T) 
 				return
 			}
 			assertFileAbsent(t, filepath.Join(f.root, "game", "b.txt"))
-			if len(pending) != 1 || pending[0].Destination != f.root+"/game/b.txt" {
+			if len(pending) != 1 || pending[0].Destination != filepath.Join(f.root, "game", "b.txt") {
 				t.Errorf("pending = %+v, want the overlapping member", pending)
 			}
 		})

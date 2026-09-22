@@ -5,19 +5,19 @@ package model
 type GameItem struct {
 	// DLCNames holds the distinct DLC names found in the game details
 	// ("dlcs" subtree) when DLC information was requested.
-	DLCNames []string
+	DLCNames []string `json:"dlcNames,omitempty"`
 
 	// Name is the product slug; ID is the GOG product id.
-	Name string
-	ID   string
+	Name string `json:"name"`
+	ID   string `json:"id"`
 
 	// GameDetailsJSON is the raw per-game details document, nil when it was
 	// not requested or the request failed.
-	GameDetailsJSON []byte
+	GameDetailsJSON []byte `json:"-"`
 
 	// Updates is the product's update count.
-	Updates int
+	Updates int `json:"updates"`
 
 	// IsNew is the product's "isNew" flag.
-	IsNew bool
+	IsNew bool `json:"isNew"`
 }

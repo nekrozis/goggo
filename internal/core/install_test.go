@@ -142,7 +142,7 @@ func TestInstallEndToEnd(t *testing.T) {
 	// be deleted during ApplyPlanChanges. The file inside the container is
 	// pre-created on purpose — it is NOT installed by this run, so the SFC
 	// decision must keep it out of the tasks while leaving it un-deleted.
-	installPath := cfg.Directories.Directory + "W3 GOTY"
+	installPath := filepath.Join(cfg.Directories.Directory, "W3 GOTY")
 	if err := os.MkdirAll(installPath+"/game", 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -182,8 +182,8 @@ func TestInstallEndToEnd(t *testing.T) {
 	out := console.out.String()
 	for _, want := range []string{
 		"The Witcher 3: Wild Hunt", "Files: 3",
-		"Extracting small files container " + installPath + "/galaxy_smallfilescontainer_" + planProductID,
-		"Deleting small files container " + installPath + "/galaxy_smallfilescontainer_" + planProductID,
+		"Extracting small files container " + filepath.Join(installPath, "galaxy_smallfilescontainer_"+planProductID),
+		"Deleting small files container " + filepath.Join(installPath, "galaxy_smallfilescontainer_"+planProductID),
 		"Checking for orphaned files",
 		// The install metadata file is an orphan as written; there is no
 		// special case for it. Deletion is off, so it survives.
@@ -278,7 +278,7 @@ func TestInstallPublishesProgressThroughTheRun(t *testing.T) {
 	if err := os.MkdirAll(cfg.ConfigDirectory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	destination := cfg.Directories.Directory + "W3 GOTY/game/data.bin"
+	destination := filepath.Join(cfg.Directories.Directory, "W3 GOTY", "game", "data.bin")
 	progress := transfer.NewProgress()
 
 	target, err := url.Parse(f.Server.URL)

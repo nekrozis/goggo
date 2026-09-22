@@ -107,21 +107,8 @@ const (
 	optType
 )
 
-// sharedOptions are accepted by every command that renders output or talks to
-// the network, plus the two meta shortcuts. They are shared *semantics*; a
-// command still has to be one that can meaningfully use them, and the parser
-// checks the node's own list on top of this one.
-var sharedOptions = optionSet{
-	optHelp,
-	optVersion,
-	optVerbose,
-	optNoColor,
-	optNoUnicode,
-	optUnitFormat,
-	optRetries,
-	optWait,
-	optTimeout,
-}
+// sharedOptions is the common capability set accepted by all commands.
+var sharedOptions = commonOptions
 
 // valueMode says how an option takes its value.
 type valueMode uint8
@@ -937,8 +924,8 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 	// declaration instead of deciding it.
 	inv.session = node.session
 	// Directory arguments are normalised once parsing is over: an empty value
-	// means the current directory, and any other value ends in a separator.
-	inv.cfg.Directories.Directory = ensureTrailingSlash(inv.cfg.Directories.Directory, defaultDirectory)
+	// falls back to defaultDirectory, and the path is cleaned via filepath.Clean.
+	inv.cfg.Directories.Directory = normalizeDirectory(inv.cfg.Directories.Directory, defaultDirectory)
 	return inv, nil
 }
 

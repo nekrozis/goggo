@@ -181,6 +181,12 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 			return reportError(stderr, err)
 		}
 		return outcomeOK
+	case cmdManifestInspect:
+		return runManifestInspect(inv, stdout, stderr)
+	case cmdManifestVerify:
+		return runManifestVerify(inv, stdout, stderr)
+	case cmdManifestCreate:
+		return runManifestCreate(inv, stdout, stderr)
 	case cmdAuthLogin:
 		// An explicit login always runs the flow, even with a usable session
 		// stored: that is what asking to log in means.

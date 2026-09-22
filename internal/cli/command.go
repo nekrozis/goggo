@@ -99,6 +99,10 @@ const (
 
 	cmdOrphansCheck
 	cmdOrphansRemove
+
+	cmdManifestInspect
+	cmdManifestVerify
+	cmdManifestCreate
 )
 
 // metaAction is what a meta invocation asks for. Meta commands are built in:
@@ -154,6 +158,8 @@ type invocation struct {
 	// typeMask and typeSet carry --type: backup download category filtering.
 	typeMask uint32
 	typeSet  bool
+	// xmlPath carries --xml: external XML manifest path.
+	xmlPath string
 }
 
 // commandNode is one node of the tree.
@@ -306,6 +312,10 @@ var subdirOptions = []optionID{
 	optSubdirGame,
 }
 
+var manifestInspectOptions = []optionID{optJSON}
+var manifestVerifyOptions = []optionID{optXML, optXMLDirectory, optGame, optJSON}
+var manifestCreateOptions = []optionID{optChunkSize, optOutputFile, optXMLDirectory, optGame}
+
 // commandTree is the product surface: read it top to bottom and you have the
 // CLI's complete vocabulary — and, on each leaf, whether the command needs a
 // session and may log in.
@@ -423,6 +433,7 @@ var commandTree = []commandNode{
 						optInclude, optExclude, optBlacklist,
 						optInstallerPlatform, optInstallerLanguage,
 						optProgressInterval, optCheckFreeSpace,
+						optCreateXML, optChunkSize, optNoRemoteXML, optXMLDirectory,
 					}, saveOptions, productRefOptions, networkOptions, transferUIOptions),
 				notes: []string{
 					"Downloads offline backup files for the specified game, specific files, or by category.",
@@ -431,6 +442,33 @@ var commandTree = []commandNode{
 					"<file> and --type are mutually exclusive.",
 					"-o names the output file when downloading a single file.",
 				},
+			},
+		},
+	},
+	{
+		name:    "manifest",
+		summary: "Inspect, verify and create GOG XML checksum manifests",
+		children: []commandNode{
+			{
+				name:    "inspect",
+				summary: "Inspect a GOG XML checksum manifest (read-only)",
+				id:      cmdManifestInspect,
+				session: sessionNone,
+				options: manifestInspectOptions,
+			},
+			{
+				name:    "verify",
+				summary: "Verify file integrity against its GOG XML checksum manifest",
+				id:      cmdManifestVerify,
+				session: sessionNone,
+				options: manifestVerifyOptions,
+			},
+			{
+				name:    "create",
+				summary: "Generate a GOG XML checksum manifest for a file",
+				id:      cmdManifestCreate,
+				session: sessionNone,
+				options: manifestCreateOptions,
 			},
 		},
 	},

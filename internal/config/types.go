@@ -44,6 +44,8 @@ type DownloadConfig struct {
 	GalaxyDependencies  bool
 	DeleteOrphans       bool
 	GalaxyLowercasePath bool
+	CreateXML           bool
+	ChunkSize           int64 // in bytes
 }
 
 // CurlConfig holds the transport options. Timeouts are in seconds.

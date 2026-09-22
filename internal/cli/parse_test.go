@@ -1,6 +1,14 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -499,6 +507,116 @@ func TestHelpTopicResolution(t *testing.T) {
 		err := mustUsageError(t, args...)
 		if !strings.Contains(err.Error(), "unknown") && !strings.Contains(err.Error(), "takes") {
 			t.Errorf("parseArgs(%v) error = %v, want an unknown command or an arity failure", args, err)
+		}
+	}
+}
+
+// TestChunkSizeOptionValidation locks the --chunk-size contract: the unit is
+// MiB and the value must be a positive integer — zero, negative and non-numeric
+// are usage errors, not silent defaults.
+func TestChunkSizeOptionValidation(t *testing.T) {
+	inv := mustParse(t, "manifest", "create", "f.bin", "--chunk-size", "10")
+	if got := inv.cfg.DownloadConfig.ChunkSize; got != 10*1024*1024 {
+		t.Errorf("--chunk-size 10 = %d bytes, want %d", got, 10*1024*1024)
+	}
+	for _, bad := range []string{"0", "-1", "abc", "1.5", "1025", "8796093022208"} {
+		mustUsageError(t, "manifest", "create", "f.bin", "--chunk-size", bad)
+	}
+	if inv := mustParse(t, "manifest", "create", "f.bin", "--chunk-size", "1024"); inv.cfg.DownloadConfig.ChunkSize != 1024*1024*1024 {
+		t.Errorf("--chunk-size 1024 = %d bytes, want 2^30", inv.cfg.DownloadConfig.ChunkSize)
+	}
+}
+
+// failingWriter answers every write with an error, standing in for a closed or
+// broken stdout.
+type failingWriter struct{}
+
+func (failingWriter) Write(p []byte) (int, error) { return 0, errors.New("broken pipe") }
+
+// shortWriter reports success for all but the final byte — the shape a partial
+// write takes, which a bare err check would miss.
+type shortWriter struct{}
+
+func (shortWriter) Write(p []byte) (int, error) { return len(p) - 1, nil }
+
+// TestManifestCreateStdoutFailure locks the create contract on the `-o -`
+// path: a stdout write failure — error or short write — is exit 1, not a
+// silent success with a half-emitted manifest.
+func TestManifestCreateStdoutFailure(t *testing.T) {
+	isolateRoots(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "small.bin")
+	patternFile(t, target, 4096)
+	cfg, err := newConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, w := range map[string]io.Writer{"error": failingWriter{}, "short write": shortWriter{}} {
+		inv := invocation{cfg: cfg, outputFile: "-"}
+		inv.target.Product = target
+		var errOut bytes.Buffer
+		if got := runManifestCreate(inv, w, &errOut); got != outcomeOperationFailure {
+			t.Errorf("%s: outcome = %v, want an operation failure", name, got)
+		}
+	}
+}
+
+// TestOpenKindClassification unit-tests the classifier itself: the sentinel and
+// its wraps go to MISSING_*, everything else (EACCES, EIO, ELOOP, …) is
+// IO_ERROR. The integration cases below keep only the exit-code assertion
+// because the platform error surfaces differ: on Windows an ENOTDIR path is
+// reported as path-not-exist, which makes MISSING_* the correct answer there.
+func TestOpenKindClassification(t *testing.T) {
+	cases := []struct {
+		err     error
+		missing string
+		want    string
+	}{
+		{os.ErrNotExist, "MISSING_FILE", "MISSING_FILE"},
+		{fmt.Errorf("stat: %w", fs.ErrNotExist), "MISSING_MANIFEST", "MISSING_MANIFEST"},
+		{errors.New("permission denied"), "MISSING_FILE", "IO_ERROR"},
+		{&os.PathError{Op: "open", Path: "p", Err: errors.New("EIO")}, "MISSING_MANIFEST", "IO_ERROR"},
+	}
+	for _, c := range cases {
+		if got := openKind(c.err, c.missing); got != c.want {
+			t.Errorf("openKind(%v, %s) = %s, want %s", c.err, c.missing, got, c.want)
+		}
+	}
+}
+
+// TestManifestIOErrorClassification locks the wiring end to end: an unopenable
+// input is an ERROR response with exit 2 on every path that reads a file,
+// whatever the platform's exact kind label for this shape.
+func TestManifestIOErrorClassification(t *testing.T) {
+	dir := t.TempDir()
+	reg := filepath.Join(dir, "reg.bin")
+	if err := os.WriteFile(reg, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "ok.bin")
+	patternFile(t, target, 2048)
+
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"target under a regular file", []string{"manifest", "verify", filepath.Join(reg, "child.bin"), "--json"}},
+		{"explicit --xml under a regular file", []string{"manifest", "verify", target, "--xml", filepath.Join(reg, "m.xml"), "--json"}},
+		{"inspect under a regular file", []string{"manifest", "inspect", filepath.Join(reg, "m.xml"), "--json"}},
+	}
+	for _, c := range cases {
+		code, out, _ := runManifestCLI(t, c.args...)
+		if code != 2 {
+			t.Errorf("%s: exit = %d, want 2 (out=%s)", c.name, code, out)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal([]byte(out), &doc); err != nil {
+			t.Errorf("%s: not JSON: %s", c.name, out)
+			continue
+		}
+		if doc["status"] != "ERROR" {
+			t.Errorf("%s: status = %v, want ERROR", c.name, doc["status"])
 		}
 	}
 }

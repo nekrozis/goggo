@@ -32,23 +32,26 @@ func TestEndToEndCommandTopology(t *testing.T) {
 	}
 
 	expectedCommands := map[string]commandID{
-		"auth login":      cmdAuthLogin,
-		"auth clear":      cmdAuthClear,
-		"auth status":     cmdAuthStatus,
-		"list games":      cmdListGames,
-		"list tags":       cmdListTags,
-		"list wishlist":   cmdListWishlist,
-		"game":            cmdGame,
-		"galaxy builds":   cmdGalaxyBuilds,
-		"galaxy manifest": cmdGalaxyManifest,
-		"galaxy cdns":     cmdGalaxyCDNs,
-		"install":         cmdInstall,
-		"install options": cmdInstallOptions,
-		"verify":          cmdVerify,
-		"backup list":     cmdBackupList,
-		"backup download": cmdBackupDownload,
-		"orphans check":   cmdOrphansCheck,
-		"orphans remove":  cmdOrphansRemove,
+		"auth login":       cmdAuthLogin,
+		"auth clear":       cmdAuthClear,
+		"auth status":      cmdAuthStatus,
+		"list games":       cmdListGames,
+		"list tags":        cmdListTags,
+		"list wishlist":    cmdListWishlist,
+		"game":             cmdGame,
+		"galaxy builds":    cmdGalaxyBuilds,
+		"galaxy manifest":  cmdGalaxyManifest,
+		"galaxy cdns":      cmdGalaxyCDNs,
+		"install":          cmdInstall,
+		"install options":  cmdInstallOptions,
+		"verify":           cmdVerify,
+		"backup list":      cmdBackupList,
+		"backup download":  cmdBackupDownload,
+		"orphans check":    cmdOrphansCheck,
+		"orphans remove":   cmdOrphansRemove,
+		"manifest inspect": cmdManifestInspect,
+		"manifest verify":  cmdManifestVerify,
+		"manifest create":  cmdManifestCreate,
 	}
 
 	var leafCount int
@@ -64,28 +67,25 @@ func TestEndToEndCommandTopology(t *testing.T) {
 			}
 
 			if len(n.children) == 0 {
-				// Terminal leaf: must have a valid non-zero command ID and declared session class
+				// Terminal leaf: must have non-zero command ID and a declared session
+				leafCount++
 				if n.id == cmdNone {
-					t.Errorf("leaf %q has cmdNone", fullPath)
+					t.Errorf("terminal leaf %q has cmdNone id", fullPath)
 				}
 				if n.session == sessionUnset {
-					t.Errorf("leaf %q has sessionUnset", fullPath)
+					t.Errorf("terminal leaf %q has sessionUnset", fullPath)
 				}
-				leafCount++
 				foundCommands[fullPath] = n.id
-			} else if fullPath == "install" {
-				// Dual node: "install" is both an executable command and a namespace for "install options"
-				if n.id != cmdInstall {
-					t.Errorf("dual node %q has unexpected id %d", fullPath, n.id)
+			} else if n.id != cmdNone {
+				// Dual node (both runnable command and namespace with children)
+				if fullPath != "install" {
+					t.Errorf("unexpected dual node (command with children): %q", fullPath)
 				}
 				if n.session == sessionUnset {
 					t.Errorf("dual node %q has sessionUnset", fullPath)
 				}
 				dualCount++
 				foundCommands[fullPath] = n.id
-			} else if n.id != cmdNone {
-				// Pure namespace: must NOT have a command ID
-				t.Errorf("internal namespace node %q has non-zero id %d", fullPath, n.id)
 			}
 
 			if len(n.children) != 0 {
@@ -95,15 +95,15 @@ func TestEndToEndCommandTopology(t *testing.T) {
 	}
 	walk(nil, commandTree)
 
-	if leafCount != 16 {
-		t.Errorf("expected 16 terminal leaf commands, got %d", leafCount)
+	if leafCount != 19 {
+		t.Errorf("expected 19 terminal leaf commands, got %d", leafCount)
 	}
 	if dualCount != 1 {
 		t.Errorf("expected 1 dual command ('install'), got %d", dualCount)
 	}
 	totalRunnable := leafCount + dualCount
-	if totalRunnable != 17 {
-		t.Fatalf("expected 17 total runnable commands, got %d", totalRunnable)
+	if totalRunnable != 20 {
+		t.Fatalf("expected 20 total runnable commands, got %d", totalRunnable)
 	}
 
 	// Verify exact bidirectional match with expected command topology

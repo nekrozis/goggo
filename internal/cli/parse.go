@@ -105,6 +105,13 @@ const (
 
 	// backup download --type.
 	optType
+
+	// XML manifest & backup download flags.
+	optChunkSize
+	optXMLDirectory
+	optNoRemoteXML
+	optCreateXML
+	optXML
 )
 
 // sharedOptions is the common capability set accepted by all commands.
@@ -140,6 +147,11 @@ type optionSpec struct {
 // optionTable is the CLI's complete option vocabulary. The six
 // website subdirectory options are generated from config.SubdirOptions so the
 // whitelist, the defaults and the help text cannot drift from that table.
+// maxChunkSizeMiB bounds --chunk-size. The bound exists before the byte
+// conversion: 1024 MiB is already 2^30 bytes, and any larger value would be a
+// multiplication away from overflow rather than a usable chunk size.
+const maxChunkSizeMiB = 1024
+
 var optionTable = append([]optionSpec{
 	{id: optHelp, long: "help", aliases: []string{"h"}, summary: "Show help"},
 	{id: optVersion, long: "version", summary: "Show version"},
@@ -546,6 +558,59 @@ var optionTable = append([]optionSpec{
 			return nil
 		},
 	},
+	{
+		id: optChunkSize, long: "chunk-size", value: valueRequired, arg: "<MB>",
+		summary: "Chunk size in MiB when creating XML (default: 10)",
+		parse: func(inv *invocation, v string) error {
+			n, err := strconv.ParseInt(v, 10, 64)
+			// The bound is checked before the MiB-to-bytes multiplication, so
+			// no accepted value can overflow int64 and then silently fall back
+			// to a default the user never typed.
+			if err != nil || n <= 0 || n > maxChunkSizeMiB {
+				return usagef("--chunk-size must be between 1 and %d MiB", maxChunkSizeMiB)
+			}
+			inv.cfg.DownloadConfig.ChunkSize = n * 1024 * 1024
+			return nil
+		},
+	},
+	{
+		id: optXMLDirectory, long: "xml-directory", value: valueRequired, arg: "<dir>",
+		summary: "Directory for GOG XML files",
+		parse: func(inv *invocation, v string) error {
+			if v == "" {
+				return usagef("--xml-directory requires a non-empty directory path")
+			}
+			inv.cfg.XMLDirectory = v
+			return nil
+		},
+	},
+	{
+		id: optNoRemoteXML, long: "no-remote-xml",
+		summary: "Disable remote checksum XML manifest retrieval",
+		parse: func(inv *invocation, _ string) error {
+			inv.cfg.DownloadConfig.RemoteXML = false
+			return nil
+		},
+	},
+	{
+		id: optCreateXML, long: "create-xml",
+		summary: "Automatically create XML manifest for downloaded files when remote XML is absent",
+		parse: func(inv *invocation, _ string) error {
+			inv.cfg.DownloadConfig.CreateXML = true
+			return nil
+		},
+	},
+	{
+		id: optXML, long: "xml", value: valueRequired, arg: "<path>",
+		summary: "Path to external XML checksum manifest",
+		parse: func(inv *invocation, v string) error {
+			if v == "" {
+				return usagef("--xml requires a non-empty path")
+			}
+			inv.xmlPath = v
+			return nil
+		},
+	},
 }, subdirOptionSpecs()...)
 
 // subdirOptionIDs maps each config.SubdirOptions name onto its option id.
@@ -666,6 +731,11 @@ var removedOptions = map[string]string{
 	"tags":                   "goggo list games --tag <a,b>",
 	"tag":                    "goggo list games --tag <a,b>",
 	"verbosity":              "goggo -v (or --verbose)",
+	"create-xml":             "goggo manifest create <file> (or goggo backup download <game> --create-xml)",
+	"chunk-size":             "goggo manifest create <file> --chunk-size <MB>",
+	"xml-directory":          "goggo manifest verify --xml-directory <dir>",
+	"automatic-xml-creation": "goggo backup download <game> --create-xml",
+	"no-remote-xml":          "goggo backup download <game> --no-remote-xml",
 }
 
 // usageError marks an argument or usage failure.
@@ -867,11 +937,15 @@ func parseArgs(args []string, cfg config.Config) (invocation, error) {
 	case count == 2 && len(rest) > 2:
 		return invocation{}, usagef("%s takes at most two arguments, got %d", strings.Join(path, " "), len(rest))
 	case count == 1:
-		tgt, err := parseTarget(rest[0])
-		if err != nil {
-			return invocation{}, err
+		if argName == "file" {
+			inv.target = target{Product: rest[0]}
+		} else {
+			tgt, err := parseTarget(rest[0])
+			if err != nil {
+				return invocation{}, err
+			}
+			inv.target = tgt
 		}
-		inv.target = tgt
 	case count == 2:
 		if len(rest) == 1 {
 			tgt, err := parseTarget(rest[0])
@@ -1040,6 +1114,8 @@ func commandArity(id commandID) (string, int) {
 	case cmdInstall, cmdVerify, cmdGalaxyBuilds, cmdInstallOptions, cmdGame,
 		cmdOrphansCheck, cmdOrphansRemove:
 		return "game", 1
+	case cmdManifestInspect, cmdManifestVerify, cmdManifestCreate:
+		return "file", 1
 	case cmdGalaxyManifest, cmdGalaxyCDNs:
 		return "game", 2
 	case cmdBackupDownload:

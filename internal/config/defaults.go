@@ -41,6 +41,8 @@ func NewConfig(configHome, cacheHome string) Config {
 	cfg.Curl.LowSpeedTimeoutRate = 200
 	cfg.Color = true   // --no-color clears it
 	cfg.Unicode = true // --no-unicode clears it
+	cfg.DownloadConfig.RemoteXML = true
+	cfg.DownloadConfig.ChunkSize = 10 * 1024 * 1024
 	return cfg
 }
 

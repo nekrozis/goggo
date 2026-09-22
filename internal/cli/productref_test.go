@@ -19,9 +19,10 @@ import (
 
 // TestRegexIsAcceptedWhereAReferenceIsRead locks the option's surface against
 // the tree: every command that takes a positional reference accepts --regex, and
-// no other command does. The arity table decides which is which, so a command
-// that reads a reference but forgets the option fails here instead of at a
-// user's terminal.
+// no other command does. The arity table decides which is which: a positional
+// "game" is a product reference, a positional "file" is a path and no argument
+// is neither. A command that reads a reference but forgets the option fails here
+// instead of at a user's terminal.
 func TestRegexIsAcceptedWhereAReferenceIsRead(t *testing.T) {
 	var walk func(path []string, nodes []commandNode)
 	references, others := 0, 0
@@ -33,14 +34,15 @@ func TestRegexIsAcceptedWhereAReferenceIsRead(t *testing.T) {
 				continue
 			}
 			if n.id != cmdNone {
-				_, count := commandArity(n.id)
+				argName, count := commandArity(n.id)
+				readsReference := count != 0 && argName == "game"
 				args := append([]string{}, here...)
 				if count != 0 {
 					args = append(args, "some_game")
 				}
 				args = append(args, "--regex")
 				_, err := parseArgs(args, baseConfig())
-				if count != 0 {
+				if readsReference {
 					references++
 					if err != nil {
 						t.Errorf("%s --regex: %v, want a command that reads a reference to accept it",

@@ -935,6 +935,33 @@ var metaCommands = []commandNode{
 	{name: "version", summary: "Show version"},
 }
 
+func deprecatedShowHint(words []string) error {
+	if len(words) > 1 {
+		switch words[1] {
+		case "builds":
+			return usagef("command %q has been replaced; use %q",
+				"show builds", "goggo galaxy builds <game>")
+		case "manifest":
+			return usagef("command %q has been replaced; use %q",
+				"show manifest", "goggo galaxy manifest <game> [build]")
+		case "cdns":
+			return usagef("command %q has been replaced; use %q",
+				"show cdns", "goggo galaxy cdns <game> [build]")
+		}
+	}
+	return usagef("command %q has been replaced; use %q, %q or %q",
+		"show", "goggo galaxy builds <game>", "goggo galaxy manifest <game> [build]", "goggo galaxy cdns <game> [build]")
+}
+
+func deprecatedDownloadHint(words []string) error {
+	if len(words) > 1 && words[1] == "file" {
+		return usagef("command %q has been moved; use %q",
+			"download file", "goggo backup download <game> [<file>...]")
+	}
+	return usagef("command %q has been moved; use %q",
+		"download", "goggo backup download <game> [<file>...]")
+}
+
 // resolveCommand walks the words against the tree and returns the node, the
 // matched path, the leftover arguments and a usage error when the line cannot be
 // resolved (unknown command, namespace without a subcommand, unknown
@@ -964,12 +991,10 @@ func resolveCommand(words []string) (commandNode, []string, []string, error) {
 	}
 	if len(path) == 0 {
 		if words[0] == "show" {
-			return commandNode{}, nil, nil, usagef("command %q has been replaced; use %q, %q or %q",
-				"show", "goggo galaxy builds <game>", "goggo galaxy manifest <game> [build]", "goggo galaxy cdns <game> [build]")
+			return commandNode{}, nil, nil, deprecatedShowHint(words)
 		}
 		if words[0] == "download" {
-			return commandNode{}, nil, nil, usagef("command %q has been moved; use %q",
-				"download", "goggo backup download <game> [<file>...]")
+			return commandNode{}, nil, nil, deprecatedDownloadHint(words)
 		}
 		return commandNode{}, nil, nil, unknownCommand(words[0])
 	}
@@ -1086,12 +1111,10 @@ func resolveHelpTopic(words []string) ([]string, error) {
 	}
 	if len(path) == 0 {
 		if words[0] == "show" {
-			return nil, usagef("command %q has been replaced; use %q, %q or %q",
-				"show", "goggo galaxy builds <game>", "goggo galaxy manifest <game> [build]", "goggo galaxy cdns <game> [build]")
+			return nil, deprecatedShowHint(words)
 		}
 		if words[0] == "download" {
-			return nil, usagef("command %q has been moved; use %q",
-				"download", "goggo backup download <game> [<file>...]")
+			return nil, deprecatedDownloadHint(words)
 		}
 		return nil, unknownCommand(words[0])
 	}

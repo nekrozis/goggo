@@ -99,8 +99,10 @@ func (d *Downloader) DownloadWebsite(ctx context.Context, req WebsiteDownloadReq
 		return WebsiteDownloadResult{}, errors.New("download: no games selected")
 	}
 
-	// One mask resolution, two consumers: the acquisition filters with it and
-	// the queue filters with it, so a category run can never half-filter.
+	// One resolution rule, one request input, two consumers: the queue
+	// resolves here, the acquisition resolves inside GameDetails from the
+	// same (req.Include, cfg) pair. The two must never draw from different
+	// include sources — that req/cfg split is the DEFECT-TYPE1 failure mode.
 	mask := effectiveInclude(req.Include, d.cfg.DownloadConfig.Include)
 	details, err := d.GameDetails(ctx, GameDetailsRequest{Products: req.Products, RefMode: req.RefMode, Include: req.Include})
 	if err != nil {

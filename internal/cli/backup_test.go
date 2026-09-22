@@ -68,6 +68,30 @@ func TestBackupDownloadMultiFileSpecs(t *testing.T) {
 }
 
 // TestBackupDownloadTypeOptionParsing asserts that --type parses the category
+// TestWebsiteDownloadRequestBuilder is the DEFECT-TYPE1 wiring guard: the
+// builder is the one carrier from --type intent to the core request.
+// Parse-level assertions alone let the dead-write defect slip through - they
+// checked that typeMask was set and never that anything consumed it.
+func TestWebsiteDownloadRequestBuilder(t *testing.T) {
+	inv := mustParse(t, "backup", "download", "game1", "--type", "extras")
+	req := websiteDownloadRequest(inv)
+	if req.Include == nil {
+		t.Fatal("--type extras: Include = nil, want the request to carry the mask")
+	}
+	if *req.Include != config.GFExtra {
+		t.Errorf("--type extras: Include = 0x%x, want GFExtra 0x%x", *req.Include, config.GFExtra)
+	}
+	if len(req.Products) != 1 || req.Products[0] != "game1" {
+		t.Errorf("Products = %v, want [game1]", req.Products)
+	}
+
+	// nil means the configured mask: a default run must carry no intent.
+	inv = mustParse(t, "backup", "download", "game1")
+	if got := websiteDownloadRequest(inv); got.Include != nil {
+		t.Error("no --type: Include != nil, want nil (configured mask)")
+	}
+}
+
 // into the corresponding bitmask, and supports multiple values and aliases.
 func TestBackupDownloadTypeOptionParsing(t *testing.T) {
 	// 1. Single category: installers

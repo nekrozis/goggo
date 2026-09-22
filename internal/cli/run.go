@@ -408,9 +408,6 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 			filesInv.args = specs
 			return ui.runWebsiteFiles(ctx, d, filesInv, stdout, stderr, progress)
 		}
-		if inv.typeSet {
-			inv.cfg.DownloadConfig.Include = inv.typeMask
-		}
 		return ui.runWebsiteDownload(ctx, d, inv, stdout, stderr, progress)
 
 	case cmdOrphansRemove:

@@ -22,6 +22,19 @@ import (
 // every task ran or was authorised-skipped ⇒ 0; any operational failure —
 // visible as events during the run and enumerated after the frame — ⇒ 1;
 // cancellation ⇒ 130; a core error before or instead of the queue ⇒ 1.
+// websiteDownloadRequest is the one place a batch invocation's intent reaches
+// core: --type is a per-request mask, never a mutation of the run's
+// configuration (the dead-write defect DEFECT-TYPE1). The builder is pure so
+// its wiring is testable without a session; dispatch must route through it.
+func websiteDownloadRequest(inv invocation) core.WebsiteDownloadRequest {
+	req := core.WebsiteDownloadRequest{Products: inv.args, RefMode: productRefMode(inv)}
+	if inv.typeSet {
+		m := inv.typeMask
+		req.Include = &m
+	}
+	return req
+}
+
 func (c *console) runWebsiteDownload(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer, progress *transfer.Progress) outcome {
 	ctx, stopSignal := signal.NotifyContext(ctx, os.Interrupt)
 	c.attachInstallUI(inv.cfg, progress, "Download")
@@ -34,7 +47,7 @@ func (c *console) runWebsiteDownload(ctx context.Context, d *core.Downloader, in
 	c.renderer.Start()
 	func() {
 		defer func() { c.renderer.Stop(result) }()
-		res, runErr = d.DownloadWebsite(ctx, core.WebsiteDownloadRequest{Products: inv.args, RefMode: productRefMode(inv)})
+		res, runErr = d.DownloadWebsite(ctx, websiteDownloadRequest(inv))
 		result = classifyInstallResult(runErr, ctx)
 	}()
 	stopSignal()

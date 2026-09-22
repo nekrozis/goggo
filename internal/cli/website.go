@@ -60,6 +60,14 @@ func (c *console) runWebsiteDownload(ctx context.Context, d *core.Downloader, in
 	for _, f := range res.Failures {
 		fmt.Fprintf(stderr, "Failed: %s: %v\n", f.Destination, f.Err)
 	}
+	for _, s := range res.Skipped {
+		switch s.Evidence {
+		case transfer.SkipVerifiedManifest:
+			fmt.Fprintf(stdout, "Skipped (verified via local xml manifest): %s\n", s.Destination)
+		default:
+			fmt.Fprintf(stdout, "Skipped (size match, no xml manifest, chunk integrity unverified): %s\n", s.Destination)
+		}
+	}
 	if res.Failed() {
 		return outcomeOperationFailure
 	}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/nekrozis/goggo/internal/blacklist"
 	"github.com/nekrozis/goggo/internal/config"
@@ -42,6 +43,11 @@ type WebsiteDownloadResult struct {
 	// Empty means the run may exit zero: successes and the skips the
 	// worker semantics authorise.
 	Failures []WebsiteTaskFailure
+	// Skipped lists the files the run did not download because they already
+	// looked current, each with the evidence that authorised the skip. The
+	// batch chain fills it only with remote XML disabled, where "what
+	// justified this skip" is a question the front end must answer honestly.
+	Skipped []WebsiteSkippedTask
 	// Saved is the save-* write side's ledger: every artifact the run
 	// evaluated, base artifacts first, then each DLC. ArtifactFailed entries
 	// join the aggregate verdict; the rest render.
@@ -134,6 +140,7 @@ func (d *Downloader) DownloadWebsite(ctx context.Context, products []string, mod
 	agg := &websiteAggregate{}
 	runErr := d.runWebsiteTasks(ctx, tasks, checksumGated, bl.IsBlacklisted, agg)
 	res.Failures = agg.failures
+	res.Skipped = agg.skipped
 	if runErr != nil {
 		return res, runErr
 	}
@@ -272,28 +279,54 @@ func parseWebsiteSize(size string) int64 {
 	return n
 }
 
-// websiteAggregate records the per-task verdicts the TaskResult seam reports.
-// It is the run's only result ledger: the CLI renders from it, never from a
-// second tally of its own.
+// WebsiteSkippedTask is one file the run skipped as already current, with the
+// evidence behind that verdict. The distinction matters to the caller: a
+// manifest match means a cached checksum document agreed with the file, while
+// a size-only match means nothing looked inside the file at all.
+type WebsiteSkippedTask struct {
+	Destination string
+	Gamename    string
+	Evidence    transfer.SkipEvidence
+}
+
+// websiteAggregate collects the run's verdicts. The batch chain drives it from
+// every download worker, so both ledgers sit behind one mutex — the callbacks
+// arrive on the worker goroutines, and an unsynchronised append here would race
+// the moment a queue runs wider than one thread.
 type websiteAggregate struct {
+	mu       sync.Mutex
 	failures []WebsiteTaskFailure
+	skipped  []WebsiteSkippedTask
 }
 
 func (a *websiteAggregate) record(task model.WebsiteTask, err error) {
-	if err != nil {
-		a.failures = append(a.failures, WebsiteTaskFailure{
-			Destination: task.Destination,
-			Gamename:    task.Gamename,
-			Err:         err,
-		})
+	if err == nil {
+		return
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.failures = append(a.failures, WebsiteTaskFailure{
+		Destination: task.Destination,
+		Gamename:    task.Gamename,
+		Err:         err,
+	})
+}
+
+func (a *websiteAggregate) recordSkip(task model.WebsiteTask, evidence transfer.SkipEvidence) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.skipped = append(a.skipped, WebsiteSkippedTask{
+		Destination: task.Destination,
+		Gamename:    task.Gamename,
+		Evidence:    evidence,
+	})
 }
 
 // runWebsiteTasks is the one place a website task list reaches the transfer
 // layer, so both chains publish the same events through the same observer
 // seam as the install run (the runTransfer precedent).
 func (d *Downloader) runWebsiteTasks(ctx context.Context, tasks []model.WebsiteTask, policy checksumPolicy, blacklistFn func(string) bool, agg *websiteAggregate) error {
-	return transfer.RunWebsite(ctx, tasks, d.transferOptions(), transfer.WebsiteDeps{
+	deps := transfer.WebsiteDeps{
 		HTTP:              d.http,
 		URL:               d.websiteProvider(policy),
 		Observer:          d.transferObserver(),
@@ -303,7 +336,17 @@ func (d *Downloader) runWebsiteTasks(ctx context.Context, tasks []model.WebsiteT
 		TrustAPIForExtras: d.cfg.TrustAPIForExtras,
 		SizeOnly:          d.cfg.SizeOnly,
 		TaskResult:        agg.record,
-	})
+	}
+	// The automatic manifest and the skip ledger belong to the batch chain:
+	// --create-xml is a backup download option, and the skip evidence is what
+	// the batch result renders after the frame. The single-file chain reports
+	// one spec's verdict and has neither.
+	if policy == checksumGated {
+		deps.CreateXML = d.cfg.DownloadConfig.CreateXML
+		deps.ChunkSize = d.cfg.DownloadConfig.ChunkSize
+		deps.SkipReport = agg.recordSkip
+	}
+	return transfer.RunWebsite(ctx, tasks, d.transferOptions(), deps)
 }
 
 // websiteProvider builds the URL seam for one run: the batch chain gets the

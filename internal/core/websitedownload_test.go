@@ -1,7 +1,10 @@
 package core
 
 import (
+	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -12,7 +15,9 @@ import (
 
 	"github.com/nekrozis/goggo/internal/config"
 	"github.com/nekrozis/goggo/internal/gamedetails"
+	"github.com/nekrozis/goggo/internal/manifest/gogxml"
 	"github.com/nekrozis/goggo/internal/model"
+	"github.com/nekrozis/goggo/internal/transfer"
 )
 
 // Assembly tests: the batch chain, the single-file chain, the aggregate exit
@@ -427,5 +432,140 @@ func TestProviderRefreshFailureIsAnError(t *testing.T) {
 	_, _, err := p.Resolve(context.Background(), model.WebsiteTask{DownlinkURL: f.url("/downlink")})
 	if err == nil || !strings.Contains(err.Error(), "refresh login") {
 		t.Fatalf("Resolve = %v, want the refresh reason", err)
+	}
+}
+
+// --- XML1: the automatic manifest and the offline skip ledger -------------
+
+func coreMD5(s string) string {
+	sum := md5.Sum([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// TestBackupDownloadCreateXMLAtomicFallback locks both halves of DEC-XML-2:
+// a successful run leaves a valid manifest beside the cache layout, and a run
+// whose manifest cannot be written keeps the downloaded file and fails the
+// task — the bytes the user asked for are never traded for the derived record.
+func TestBackupDownloadCreateXMLAtomicFallback(t *testing.T) {
+	// Success: the installer has no checksum document in this fixture, so the
+	// generated one is the file's manifest.
+	f := oneProductFixture(t, "base.exe", "sound.mp3", "dlc.exe")
+	cfg, dir := websiteConfigIn(t)
+	cfg.DownloadConfig.CreateXML = true
+	d := newGameInfoDownloader(t, f, cfg)
+	if _, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact); err != nil {
+		t.Fatalf("DownloadWebsite: %v", err)
+	}
+	docPath := filepath.Join(cfg.XMLDirectory, "base_game", "base.exe.xml")
+	data, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("generated manifest: %v", err)
+	}
+	doc, perr := gogxml.Parse(bytes.NewReader(data))
+	if perr != nil {
+		t.Fatalf("generated manifest is not valid: %v", perr)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "base_game", "base.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Name != "base.exe" || doc.TotalSize != int64(len(body)) || doc.MD5 != coreMD5(string(body)) {
+		t.Errorf("manifest = %s/%d/%s, want the downloaded file's facts", doc.Name, doc.TotalSize, doc.MD5)
+	}
+
+	// Failure: an XML directory that cannot exist fails the task, keeps the
+	// downloaded file, and leaves no partial manifest behind.
+	f2 := oneProductFixture(t, "base.exe", "sound.mp3", "dlc.exe")
+	cfg2, dir2 := websiteConfigIn(t)
+	cfg2.DownloadConfig.CreateXML = true
+	blocked := filepath.Join(dir2, "blocked")
+	if err := os.WriteFile(blocked, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg2.XMLDirectory = blocked
+	d2 := newGameInfoDownloader(t, f2, cfg2)
+	res, err := d2.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
+	if err != nil {
+		t.Fatalf("DownloadWebsite: %v", err)
+	}
+	if !res.Failed() {
+		t.Fatal("run succeeded, want the manifest failure to reach the verdict")
+	}
+	if _, err := os.Stat(filepath.Join(dir2, "base_game", "base.exe")); err != nil {
+		t.Errorf("downloaded file was not kept: %v", err)
+	}
+	if !strings.Contains(res.Failures[0].Err.Error(), "Failed to create directory") {
+		t.Errorf("failure = %v, want the manifest write failure", res.Failures[0].Err)
+	}
+}
+
+// TestBackupDownloadNoRemoteXMLStatusContract locks the four-state evidence
+// model on the batch chain: a skip justified by a cached manifest and a skip
+// justified by nothing but a size comparison must not share a label.
+func TestBackupDownloadNoRemoteXMLStatusContract(t *testing.T) {
+	const extrasBody = "bytes-of-sound.mp3"
+
+	// Size-only: the extras file is on disk, no manifest exists anywhere, and
+	// the content-length probe matches. The run may skip it, but the ledger
+	// must say the chunks were never looked at. The served bytes are the same
+	// length with different content, so a download would be visible in the
+	// file itself — the only request the skip may make is the HEAD probe.
+	f := oneProductFixture(t, "base.exe", "sound.mp3", "dlc.exe")
+	f.setFile("sound.mp3", strings.Repeat("X", len(extrasBody)))
+	cfg, dir := websiteConfigIn(t)
+	cfg.DownloadConfig.RemoteXML = false
+	extras := filepath.Join(dir, "base_game", "extras", "sound.mp3")
+	if err := os.MkdirAll(filepath.Dir(extras), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(extras, []byte(extrasBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := newGameInfoDownloader(t, f, cfg)
+	res, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
+	if err != nil {
+		t.Fatalf("DownloadWebsite: %v", err)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].Evidence != transfer.SkipSizeOnly {
+		t.Fatalf("skipped = %+v, want exactly the extras file as size-only", res.Skipped)
+	}
+	if !strings.HasSuffix(res.Skipped[0].Destination, "sound.mp3") {
+		t.Errorf("skipped %s, want the extras file", res.Skipped[0].Destination)
+	}
+	if body, err := os.ReadFile(extras); err != nil || string(body) != extrasBody {
+		t.Errorf("extras file was rewritten (%q, %v), want the untouched original", body, err)
+	}
+	if hits := f.count("/games/some-game/sound.mp3"); hits != 1 {
+		t.Errorf("requests for the extras file = %d, want only the size probe", hits)
+	}
+
+	// Manifest: the same file with a valid cached document is a
+	// manifest-backed skip — a different evidence value, not the same label.
+	f2 := oneProductFixture(t, "base.exe", "sound.mp3", "dlc.exe")
+	cfg2, dir2 := websiteConfigIn(t)
+	cfg2.DownloadConfig.RemoteXML = false
+	extras2 := filepath.Join(dir2, "base_game", "extras", "sound.mp3")
+	if err := os.MkdirAll(filepath.Dir(extras2), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(extras2, []byte(extrasBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(cfg2.XMLDirectory, "base_game")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := fmt.Sprintf(`<file name="sound.mp3" chunks="1" total_size="%d" md5="%s"><chunk id="0" from="0" to="%d" method="md5">%s</chunk></file>`,
+		len(extrasBody), coreMD5(extrasBody), len(extrasBody)-1, coreMD5(extrasBody))
+	if err := os.WriteFile(filepath.Join(cache, "sound.mp3.xml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d2 := newGameInfoDownloader(t, f2, cfg2)
+	res2, err := d2.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
+	if err != nil {
+		t.Fatalf("DownloadWebsite: %v", err)
+	}
+	if len(res2.Skipped) != 1 || res2.Skipped[0].Evidence != transfer.SkipVerifiedManifest {
+		t.Fatalf("skipped = %+v, want the extras file as manifest-backed", res2.Skipped)
 	}
 }

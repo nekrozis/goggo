@@ -214,6 +214,7 @@ func ProductInfoToGameDetails(ctx context.Context, raw []byte, cfg config.Downlo
 func convertProduct(ctx context.Context, p rawProduct, raw []byte, cfg config.DownloadConfig,
 	owned map[string]bool, resolve DownlinkResolver) (GameDetails, error) {
 	var gd GameDetails
+	st := &downlinkStats{}
 
 	gamename, err := readProductSlug(p.Slug)
 	if err != nil {
@@ -257,7 +258,7 @@ func convertProduct(ctx context.Context, p rawProduct, raw []byte, cfg config.Do
 		if cfg.Include&v.gate == 0 {
 			continue
 		}
-		files, err := gameFiles(ctx, gamename, gd.Title, v.key, v.groups, v.spec, cfg, resolve)
+		files, err := gameFiles(ctx, gamename, gd.Title, v.key, v.groups, v.spec, cfg, resolve, st)
 		if err != nil {
 			return GameDetails{}, err
 		}
@@ -265,6 +266,7 @@ func convertProduct(ctx context.Context, p rawProduct, raw []byte, cfg config.Do
 	}
 
 	if cfg.Include&config.GFDLC == 0 {
+		gd.Downlink = st.diag()
 		return gd, nil
 	}
 	for i, rawDLC := range p.ExpandedDLCs {
@@ -280,25 +282,35 @@ func convertProduct(ctx context.Context, p rawProduct, raw []byte, cfg config.Do
 		if len(owned) > 0 && !owned[id] {
 			continue
 		}
-		sub, err := convertDLC(ctx, dlc, rawDLC, cfg, owned, resolve)
+		child := &downlinkStats{}
+		sub, err := convertDLC(ctx, dlc, rawDLC, cfg, owned, resolve, child)
 		if err != nil {
 			return GameDetails{}, err
 		}
 		sub.TitleBasegame = gd.Title
 		sub.GamenameBasegame = gd.Gamename
 		retypeDLC(&sub)
-		// A DLC with no files at all is dropped.
+		// A DLC with no files at all is dropped — but its resolver record is
+		// not: the evidence survives, absorbed into the parent's counts.
 		if len(sub.Installers)+len(sub.Extras)+len(sub.Patches)+len(sub.LanguagePacks) == 0 {
+			st.absorb(child)
 			continue
 		}
+		sub.Downlink = child.diag()
 		gd.DLCs = append(gd.DLCs, sub)
 	}
+	gd.Downlink = st.diag()
 	return gd, nil
 }
 
 // raw is the source of truth for ProductJson.
+//
+// convertDLC fills the caller-owned stats record st alongside the entry: the
+// caller decides whether the entry survives, and st must outlive that
+// decision either way — absorbed into the parent on discard, mounted as
+// Downlink on keep.
 func convertDLC(ctx context.Context, dlc rawExpandedDLC, raw []byte, cfg config.DownloadConfig,
-	owned map[string]bool, resolve DownlinkResolver) (GameDetails, error) {
+	owned map[string]bool, resolve DownlinkResolver, st *downlinkStats) (GameDetails, error) {
 	var gd GameDetails
 
 	gamename, err := readProductSlug(dlc.Slug)
@@ -343,7 +355,7 @@ func convertDLC(ctx context.Context, dlc rawExpandedDLC, raw []byte, cfg config.
 		if cfg.Include&v.gate == 0 {
 			continue
 		}
-		files, err := gameFiles(ctx, gamename, gd.Title, v.key, v.groups, v.spec, cfg, resolve)
+		files, err := gameFiles(ctx, gamename, gd.Title, v.key, v.groups, v.spec, cfg, resolve, st)
 		if err != nil {
 			return GameDetails{}, err
 		}
@@ -366,7 +378,8 @@ func convertDLC(ctx context.Context, dlc rawExpandedDLC, raw []byte, cfg config.
 		if len(owned) > 0 && !owned[id] {
 			continue
 		}
-		sub, err := convertDLC(ctx, subDLC, subRawDLC, cfg, owned, resolve)
+		child := &downlinkStats{}
+		sub, err := convertDLC(ctx, subDLC, subRawDLC, cfg, owned, resolve, child)
 		if err != nil {
 			return GameDetails{}, err
 		}
@@ -374,18 +387,66 @@ func convertDLC(ctx context.Context, dlc rawExpandedDLC, raw []byte, cfg config.
 		sub.GamenameBasegame = gd.Gamename
 		retypeDLC(&sub)
 		if len(sub.Installers)+len(sub.Extras)+len(sub.Patches)+len(sub.LanguagePacks) == 0 {
+			st.absorb(child)
 			continue
 		}
+		sub.Downlink = child.diag()
 		gd.DLCs = append(gd.DLCs, sub)
 	}
 
 	return gd, nil
 }
 
+// downlinkStats accumulates the resolver record for one GameDetails entry.
+// The record sites are the whole contract: an attempt is counted before the
+// resolver runs; an error and an unusable path are counted apart, because
+// only an error is API failure evidence.
+type downlinkStats struct {
+	attempts int
+	failures int
+	usable   int
+	firstErr string
+}
+
+func (s *downlinkStats) recordAttempt() { s.attempts++ }
+
+func (s *downlinkStats) recordError(err error) {
+	s.failures++
+	if s.firstErr == "" {
+		s.firstErr = err.Error()
+	}
+}
+
+func (s *downlinkStats) recordUsable() { s.usable++ }
+
+// recordUnusable counts a resolver success whose path the "/secure" rule
+// refuses: attempted, not usable, and NOT a failure.
+func (s *downlinkStats) recordUnusable() {}
+
+// diag mounts the record on the entry: any failure attaches — partial and
+// full alike; no failure, no record.
+func (s *downlinkStats) diag() *DownlinkDiag {
+	if s.failures == 0 {
+		return nil
+	}
+	return &DownlinkDiag{Attempts: s.attempts, Failures: s.failures, Usable: s.usable, FirstError: s.firstErr}
+}
+
+// absorb folds a discarded child's record into the parent's: a dropped DLC
+// entry must not take its failure evidence with it.
+func (s *downlinkStats) absorb(child *downlinkStats) {
+	s.attempts += child.attempts
+	s.failures += child.failures
+	s.usable += child.usable
+	if s.firstErr == "" {
+		s.firstErr = child.firstErr
+	}
+}
+
 // gameFiles converts one downloads vector: the platform/language filter, the
 // empty-node skip and the per-file resolution.
 func gameFiles(ctx context.Context, gamename, title, label string, groups []rawFileGroup, typeValue uint32,
-	cfg config.DownloadConfig, resolve DownlinkResolver) ([]GameFile, error) {
+	cfg config.DownloadConfig, resolve DownlinkResolver, st *downlinkStats) ([]GameFile, error) {
 	var out []GameFile
 	// Extras carry no platform or language and are exempt from both filters.
 	isExtra := typeValue&config.GFBaseExtra != 0
@@ -416,15 +477,21 @@ func gameFiles(ctx context.Context, gamename, title, label string, groups []rawF
 				return nil, wrap(where, err)
 			}
 			downlink := file.Downlink
+			st.recordAttempt()
 			resolved, err := resolve(ctx, gamename, downlink)
 			if err != nil {
 				// An unusable downlink skips the file, the same outcome as an
-				// empty downlink document.
+				// empty downlink document — but the refusal is recorded: the
+				// per-file skip is upstream semantics, the silent loss of the
+				// evidence is not.
+				st.recordError(err)
 				continue
 			}
 			if unusablePath(resolved.Path) {
+				st.recordUnusable()
 				continue
 			}
+			st.recordUsable()
 			gf := GameFile{
 				Gamename:              gamename,
 				ID:                    id,

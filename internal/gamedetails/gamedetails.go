@@ -43,12 +43,38 @@ type GameDetails struct {
 	SerialsDiag     string
 	MetadataDiag    string
 
+	// Downlink records what the downlink resolver could not deliver for this
+	// entry. nil means the entry carries no API-error evidence: no resolver
+	// attempt happened, or every refusal was an error-free unusable path, or
+	// the resolver simply succeeded.
+	Downlink *DownlinkDiag
+
 	SerialsFilepath         string
 	LogoFilepath            string
 	IconFilepath            string
 	ChangelogFilepath       string
 	GameDetailsJSONFilepath string
 	ProductJsonFilepath     string
+}
+
+// DownlinkDiag is the per-entry record of downlink resolution: how many files
+// asked the resolver, how many it refused, how many it delivered with a
+// usable path, and the first refusal's error text. The counts are taken
+// before any type or include filter, so a mask-shrunk answer can never be
+// mistaken for a resolution failure.
+type DownlinkDiag struct {
+	Attempts   int
+	Failures   int
+	Usable     int
+	FirstError string
+}
+
+// FullFailure reports the state the acquisition contract refuses to let pass
+// as "this product has no files": something was asked, nothing usable came
+// back, and at least one refusal was an error. A pure unusable-path answer
+// carries no errors and is therefore not a failure.
+func (d *DownlinkDiag) FullFailure() bool {
+	return d != nil && d.Attempts > 0 && d.Usable == 0 && d.Failures > 0
 }
 
 // FilterWithPriorities removes the entries whose platform/language rank worse

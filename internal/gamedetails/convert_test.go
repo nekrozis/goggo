@@ -1026,3 +1026,181 @@ func TestProductJSONPreservationGuard(t *testing.T) {
 		t.Errorf("DLC ProductJson dropped unmodelled_feature field")
 	}
 }
+
+// --- The downlink resolution record: any failure attaches, partial and full
+// alike, and a dropped DLC keeps its evidence in the parent's counts ---
+
+// TestDownlinkDiagPartialFailure: 5 files, 3 refused, 2 delivered. The record
+// attaches on any failure, partial included, and is not a full failure.
+func TestDownlinkDiagPartialFailure(t *testing.T) {
+	doc := product(map[string]any{"downloads": map[string]any{
+		"installers": nodeList(infoNode("setup", "windows", "en",
+			fileEntry("1", "a.exe", "10"), fileEntry("2", "b.exe", "10"),
+			fileEntry("3", "c.exe", "10"), fileEntry("4", "d.exe", "10"),
+			fileEntry("5", "e.exe", "10"))),
+	}})
+	resolve := stubResolver(map[string]error{
+		"a.exe": errors.New("GET a.exe: HTTP 404"),
+		"b.exe": errors.New("GET b.exe: HTTP 404"),
+		"c.exe": errors.New("GET c.exe: HTTP 404"),
+	})
+	gd, err := ProductInfoToGameDetails(context.Background(), doc, testConfig(), nil, resolve)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	d := gd.Downlink
+	if d == nil {
+		t.Fatal("partial failure must attach a record")
+	}
+	if d.Attempts != 5 || d.Failures != 3 || d.Usable != 2 {
+		t.Errorf("record = %+v, want 5/3/2", d)
+	}
+	if d.FirstError != "GET a.exe: HTTP 404" {
+		t.Errorf("first error = %q, want the first refusal", d.FirstError)
+	}
+	if d.FullFailure() {
+		t.Error("2 usable files came back; this is not a full failure")
+	}
+	if len(gd.Installers) != 2 {
+		t.Errorf("installers = %d, want the 2 successes kept (upstream per-file semantics)", len(gd.Installers))
+	}
+}
+
+// TestDownlinkDiagTrueEmpty: a document with no file entries records nothing.
+// The legitimate empty answer stays byte-identical to the healthy path.
+func TestDownlinkDiagTrueEmpty(t *testing.T) {
+	doc := product(map[string]any{"downloads": map[string]any{"installers": nodeList()}})
+	gd, err := ProductInfoToGameDetails(context.Background(), doc, testConfig(), nil, stubResolver(nil))
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if gd.Downlink != nil {
+		t.Errorf("record = %+v, want nil for a product with nothing to resolve", gd.Downlink)
+	}
+}
+
+// TestDownlinkDiagAllUnusableIsNotFailure: the resolver answered every
+// file, the /secure rule refused every path, no error occurred. An error-free
+// unusable path is out of this record's scope by decision,
+// not by omission.
+func TestDownlinkDiagAllUnusableIsNotFailure(t *testing.T) {
+	doc := product(map[string]any{"downloads": map[string]any{
+		"installers": nodeList(infoNode("setup", "windows", "en",
+			fileEntry("1", "secure", "10"), fileEntry("2", "securex", "10"))),
+	}})
+	gd, err := ProductInfoToGameDetails(context.Background(), doc, testConfig(), nil, stubResolver(nil))
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if gd.Downlink != nil {
+		t.Errorf("record = %+v, want nil: unusable paths carry no failure evidence", gd.Downlink)
+	}
+	if len(gd.Installers) != 0 {
+		t.Errorf("installers = %d, want the upstream skip preserved", len(gd.Installers))
+	}
+}
+
+// TestDownlinkDiagMixedFullFailure: one error plus one unusable path
+// leaves nothing usable with a recorded failure — full failure. A predicate
+// of Failures==Attempts would miss exactly this.
+func TestDownlinkDiagMixedFullFailure(t *testing.T) {
+	doc := product(map[string]any{"downloads": map[string]any{
+		"installers": nodeList(infoNode("setup", "windows", "en",
+			fileEntry("1", "a.exe", "10"), fileEntry("2", "secure", "10"))),
+	}})
+	resolve := stubResolver(map[string]error{"a.exe": errors.New("GET a.exe: HTTP 404")})
+	gd, err := ProductInfoToGameDetails(context.Background(), doc, testConfig(), nil, resolve)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	d := gd.Downlink
+	if d == nil {
+		t.Fatal("mixed error+unusable must attach a record")
+	}
+	if d.Attempts != 2 || d.Failures != 1 || d.Usable != 0 || !d.FullFailure() {
+		t.Errorf("record = %+v, want {2,1,0} and full failure", d)
+	}
+}
+
+// TestDownlinkDiagFilterCannotEraseEvidence: the statistics live before
+// any filter, so a mask-shrunk empty vector must not masquerade as an API
+// failure. A resolve error + a resolve success that the later filter drops
+// still leaves Usable > 0.
+func TestDownlinkDiagFilterCannotEraseEvidence(t *testing.T) {
+	doc := product(map[string]any{"downloads": map[string]any{
+		"installers": nodeList(infoNode("setup", "windows", "en",
+			fileEntry("1", "a.exe", "10"), fileEntry("2", "ok.exe", "10"))),
+	}})
+	resolve := stubResolver(map[string]error{"a.exe": errors.New("GET a.exe: HTTP 404")})
+	gd, err := ProductInfoToGameDetails(context.Background(), doc, testConfig(), nil, resolve)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	before := *gd.Downlink
+	if before.Attempts != 2 || before.Failures != 1 || before.Usable != 1 || before.FullFailure() {
+		t.Fatalf("record = %+v, want {2,1,1} not full", before)
+	}
+	gd.FilterWithType(config.GFExtra) // shrink to extras: every installer is dropped
+	if len(gd.Installers) != 0 {
+		t.Fatalf("installers survived the mask, fixture broken")
+	}
+	after := *gd.Downlink
+	if after != before {
+		t.Errorf("record changed to %+v after filtering; statistics must be filter-independent", after)
+	}
+	if after.FullFailure() {
+		t.Error("a mask-shrunk empty vector must never read as a full API failure")
+	}
+}
+
+// TestDownlinkDiagDiscardedDLCPreservesEvidence: a DLC whose every
+// downlink fails is dropped from the display exactly as before, but its
+// record survives in the parent's counts — and the parent's full-failure
+// verdict stays correct in both directions.
+func TestDownlinkDiagDiscardedDLCPreservesEvidence(t *testing.T) {
+	dlcDownloads := map[string]any{
+		"installers": nodeList(infoNode("d", "windows", "en",
+			fileEntry("d1", "dlc-a.exe", "10"), fileEntry("d2", "dlc-b.exe", "10"))),
+	}
+	doc := product(map[string]any{
+		"downloads": map[string]any{
+			"installers": nodeList(infoNode("base", "windows", "en", fileEntry("b", "base.exe", "10"))),
+		},
+		"expanded_dlcs": []any{dlcNode("100", "Dead DLC", dlcDownloads)},
+	})
+	deadDLC := stubResolver(map[string]error{
+		"dlc-a.exe": errors.New("GET dlc-a.exe: HTTP 404"),
+		"dlc-b.exe": errors.New("GET dlc-b.exe: HTTP 404"),
+	})
+
+	gd, err := ProductInfoToGameDetails(context.Background(), doc, testConfig(), nil, deadDLC)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if len(gd.DLCs) != 0 {
+		t.Fatalf("dlcs = %d, want the display drop unchanged", len(gd.DLCs))
+	}
+	d := gd.Downlink
+	if d == nil {
+		t.Fatal("the discarded DLC's failures must live on in the parent record")
+	}
+	if d.Attempts != 3 || d.Failures != 2 || d.Usable != 1 {
+		t.Errorf("parent record = %+v, want {3,2,1} (base usable + dlc refused)", d)
+	}
+	if d.FullFailure() {
+		t.Error("the base file resolved; this is not a full failure")
+	}
+
+	allDead := stubResolver(map[string]error{
+		"base.exe":  errors.New("GET base.exe: HTTP 404"),
+		"dlc-a.exe": errors.New("GET dlc-a.exe: HTTP 404"),
+		"dlc-b.exe": errors.New("GET dlc-b.exe: HTTP 404"),
+	})
+	gd2, err := ProductInfoToGameDetails(context.Background(), doc, testConfig(), nil, allDead)
+	if err != nil {
+		t.Fatalf("convert all-dead: %v", err)
+	}
+	if gd2.Downlink == nil || !gd2.Downlink.FullFailure() {
+		t.Errorf("parent record = %+v, want a full failure when base and dlc both refuse", gd2.Downlink)
+	}
+}

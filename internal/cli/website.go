@@ -24,7 +24,8 @@ import (
 // cancellation ⇒ 130; a core error before or instead of the queue ⇒ 1.
 // websiteDownloadRequest is the one place a batch invocation's intent reaches
 // core: --type is a per-request mask, never a mutation of the run's
-// configuration (the dead-write defect DEFECT-TYPE1). The builder is pure so
+// configuration — a post-Open write there is invisible to the Downloader's
+// copied cfg and silently drops the filter. The builder is pure so
 // its wiring is testable without a session; dispatch must route through it.
 func websiteDownloadRequest(inv invocation) core.WebsiteDownloadRequest {
 	req := core.WebsiteDownloadRequest{Products: inv.args, RefMode: productRefMode(inv)}

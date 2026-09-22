@@ -102,7 +102,8 @@ func (d *Downloader) DownloadWebsite(ctx context.Context, req WebsiteDownloadReq
 	// One resolution rule, one request input, two consumers: the queue
 	// resolves here, the acquisition resolves inside GameDetails from the
 	// same (req.Include, cfg) pair. The two must never draw from different
-	// include sources — that req/cfg split is the DEFECT-TYPE1 failure mode.
+	// include sources — that req/cfg split is the silent-filter failure mode
+	// this request shape exists to prevent.
 	mask := effectiveInclude(req.Include, d.cfg.DownloadConfig.Include)
 	details, err := d.GameDetails(ctx, GameDetailsRequest{Products: req.Products, RefMode: req.RefMode, Include: req.Include})
 	if err != nil {

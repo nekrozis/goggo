@@ -1,10 +1,10 @@
 package transfer
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/nekrozis/goggo/internal/httpx"
+	"github.com/nekrozis/goggo/internal/manifest/gogxml"
 	"github.com/nekrozis/goggo/internal/model"
 )
 
@@ -55,6 +56,18 @@ type WebsiteURLProvider interface {
 	Resolve(ctx context.Context, task model.WebsiteTask) (downlinkURL, checksumXML string, err error)
 }
 
+// SkipEvidence names what justified a skip-as-current decision in the extras
+// path: the cached checksum document's total size matched the local file
+// (manifest), or only a bare size comparison did (size-only). The distinction
+// exists because the second one does not verify chunk integrity, and reporting
+// it as the first would claim more than happened.
+type SkipEvidence string
+
+const (
+	SkipVerifiedManifest SkipEvidence = "manifest"
+	SkipSizeOnly         SkipEvidence = "size-only"
+)
+
 // WebsiteDeps carries everything the website run needs from outside. The flag
 // fields are explicit values, not configuration reads; the XML directory is
 // where the remote checksum documents are cached.
@@ -67,12 +80,24 @@ type WebsiteDeps struct {
 	RemoteXML         bool
 	TrustAPIForExtras bool
 	SizeOnly          bool
+	// CreateXML generates a checksum document for a file that downloaded
+	// without a remote one. Generation runs only after the file is on disk:
+	// a failed generation fails the task and keeps the downloaded file,
+	// because the bytes are what the user asked for and the manifest is
+	// derived from them. ChunkSize is the chunk size in bytes.
+	CreateXML bool
+	ChunkSize int64
 	// TaskResult, when set, receives the run's terminal outcome for every
 	// task: nil for a success and for each skip the worker semantics authorise,
 	// non-nil for an operational failure. The event stream carries the same
 	// facts as messages; this seam exists because a message kind is not a
 	// result code, so counting failures must not infer from an event sequence.
 	TaskResult func(task model.WebsiteTask, err error)
+	// SkipReport, when set, receives the evidence behind every extras skip.
+	// The batch chain reports it only with remote XML disabled — the offline
+	// run is where "what justified this skip" is a question the front end has
+	// to answer honestly.
+	SkipReport func(task model.WebsiteTask, evidence SkipEvidence)
 }
 
 // RunWebsite executes the website download path as upstream writes it: the
@@ -155,6 +180,10 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 	bSameVersion := true
 	bIsComplete := false
 	var filesizeXML int64
+	// The evidence behind a skip-as-current decision, reported once the skip is
+	// taken: which check authorised it decides how the run describes the file
+	// it did not download.
+	var skipEvidence SkipEvidence
 
 	apiSize, _ := strconv.ParseInt(strings.TrimSpace(task.Size), 10, 64)
 
@@ -196,11 +225,13 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 			bSameVersion = filesizeLocal == filesizeCompare
 			if bSameVersion {
 				bIsComplete = true
+				skipEvidence = SkipVerifiedManifest
 			}
 		} else {
 			if filesizeLocal == filesizeCompare {
 				bIsComplete = true
 				bSameVersion = true
+				skipEvidence = SkipSizeOnly
 			} else {
 				// Assume same version while the local file is smaller than the
 				// remote one.
@@ -211,6 +242,9 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 
 	if bIsComplete {
 		emit(Event{Path: task.Destination, Text: "Skipping complete file: " + name, Kind: EventMessageInfo})
+		if deps.SkipReport != nil && !deps.RemoteXML {
+			deps.SkipReport(task, skipEvidence)
+		}
 	}
 
 	// Resume or rename.
@@ -238,8 +272,20 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 		}
 	}
 
-	// Save the remote checksum document.
+	// A remote document that fails the manifest rules is no document at all.
+	// It is therefore not cached — an unusable file in the cache would shadow
+	// regeneration and mislead the version checks — and it does not suppress
+	// --create-xml either: repairing exactly this case is what the flag exists
+	// for.
+	remoteUsable := false
 	if checksumXML != "" {
+		if _, _, perr := parseFileXML(checksumXML); perr == nil {
+			remoteUsable = true
+		}
+	}
+
+	// Save the remote checksum document.
+	if remoteUsable {
 		bLocalXMLExists := localXMLExists(deps.XMLDirectory, task.Gamename, name)
 		if !bLocalXMLExists || (bLocalXMLExists && !bSameVersion) {
 			xmlDir := filepath.Join(deps.XMLDirectory, task.Gamename)
@@ -259,7 +305,63 @@ func runWebsiteTask(ctx context.Context, task model.WebsiteTask, opts Options, d
 
 	// The download loop — the attempt/retry/cleanup contract shared with the
 	// direct artifact download.
-	return downloadWithRetries(ctx, task, opts, deps, downlink, bResume, emit)
+	if err := downloadWithRetries(ctx, task, opts, deps, downlink, bResume, emit); err != nil {
+		return err
+	}
+
+	// The automatic manifest: a file that ended on disk without a USABLE
+	// checksum document — none served, or one served that fails the manifest
+	// rules — and without a cached one gets a generated manifest. A generation
+	// failure fails the task; the downloaded file stays, because the bytes are
+	// what the user asked for and the manifest is derived from them.
+	if deps.CreateXML && !remoteUsable && !localXMLExists(deps.XMLDirectory, task.Gamename, name) {
+		return createChecksumDocument(task, deps, emit)
+	}
+	return nil
+}
+
+// createChecksumDocument computes the checksum document of the downloaded file
+// and publishes it atomically under the XML directory.
+func createChecksumDocument(task model.WebsiteTask, deps WebsiteDeps, emit func(Event)) error {
+	name := filepath.Base(task.Destination)
+	generate := func() (*gogxml.FileXML, error) {
+		f, err := os.Open(task.Destination)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		fi, err := f.Stat()
+		if err != nil {
+			return nil, err
+		}
+		return gogxml.Generate(f, fi.Size(), deps.ChunkSize, name)
+	}
+	manifest, err := generate()
+	if err != nil {
+		text := "Failed to create XML manifest for " + name + ": " + err.Error()
+		emit(Event{Path: task.Destination, Text: text, Kind: EventMessageError})
+		return errors.New(text)
+	}
+	data, err := gogxml.Marshal(manifest)
+	if err != nil {
+		text := "Failed to create XML manifest for " + name + ": " + err.Error()
+		emit(Event{Path: task.Destination, Text: text, Kind: EventMessageError})
+		return errors.New(text)
+	}
+	xmlDir := filepath.Join(deps.XMLDirectory, task.Gamename)
+	if err := os.MkdirAll(xmlDir, 0o755); err != nil {
+		text := "Failed to create directory: " + xmlDir
+		emit(Event{Path: task.Destination, Text: text, Kind: EventMessageError})
+		return errors.New(text)
+	}
+	path := filepath.Join(xmlDir, name+".xml")
+	if err := gogxml.WriteAtomic(path, data, 0o644); err != nil {
+		text := "Can't create " + path
+		emit(Event{Path: task.Destination, Text: text, Kind: EventMessageError})
+		return errors.New(text)
+	}
+	emit(Event{Path: task.Destination, Text: "Created XML manifest: " + path, Kind: EventMessageInfo})
+	return nil
 }
 
 // downloadWithRetries is the ONE attempt loop: retry classification, the
@@ -433,22 +535,22 @@ func lastModifiedFrom(resp *http.Response) time.Time {
 }
 
 // localFileHash returns the local file's md5: the md5 stored in the cached
-// checksum document wins when that document exists, otherwise the file's own
-// md5 is computed. A document without an md5 attribute yields "" without
-// falling back to computing the hash.
+// checksum document wins when that document exists and satisfies the manifest
+// rules, otherwise the file's own md5 is computed. A cached document that is
+// not a valid manifest yields "" without falling back to computing the hash —
+// the same "no information" answer the missing-md5 case already gave.
 func localFileHash(xmlDir, dest, gamename string) string {
 	localXML := localXMLPath(xmlDir, gamename, dest)
 	if _, err := os.Stat(localXML); err == nil {
-		if data, err := os.ReadFile(localXML); err == nil {
-			var doc struct {
-				MD5 string `xml:"md5,attr"`
-			}
-			if xml.Unmarshal(data, &doc) == nil {
-				return doc.MD5
-			}
+		data, err := os.ReadFile(localXML)
+		if err != nil {
 			return ""
 		}
-		return ""
+		doc, err := gogxml.Parse(bytes.NewReader(data))
+		if err != nil {
+			return ""
+		}
+		return doc.MD5
 	}
 	f, err := os.Open(dest)
 	if err != nil {
@@ -478,21 +580,18 @@ func localXMLExists(xmlDir, gamename, dest string) bool {
 	return err == nil
 }
 
-// parseFileXML reads the md5 and total_size attributes of a checksum document
-// ("<file md5="…" total_size="…"/>"). An unparsable size counts as 0.
+// parseFileXML reads the md5 and total size of a checksum document through the
+// manifest schema: a document that does not satisfy the GOG rules is an error,
+// and every caller treats that as "no version information" rather than as a
+// mismatch. Reading the two attributes directly used to accept a document whose
+// chunk list contradicted its own header; the shared validator replaced that,
+// because a half-read manifest must not decide what a download does.
 func parseFileXML(data string) (md5hex string, totalSize int64, err error) {
-	var doc struct {
-		MD5       string `xml:"md5,attr"`
-		TotalSize string `xml:"total_size,attr"`
-	}
-	if err := xml.Unmarshal([]byte(data), &doc); err != nil {
+	doc, err := gogxml.Parse(strings.NewReader(data))
+	if err != nil {
 		return "", 0, err
 	}
-	n, perr := strconv.ParseInt(strings.TrimSpace(doc.TotalSize), 10, 64)
-	if perr != nil {
-		n = 0
-	}
-	return doc.MD5, n, nil
+	return doc.MD5, doc.TotalSize, nil
 }
 
 // contentLength probes the download url's content length with a HEAD request. A

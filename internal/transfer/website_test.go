@@ -1,6 +1,7 @@
 package transfer
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/nekrozis/goggo/internal/httpx"
+	"github.com/nekrozis/goggo/internal/manifest/gogxml"
 	"github.com/nekrozis/goggo/internal/model"
 )
 
@@ -304,8 +306,7 @@ func TestRunWebsiteChecksummedCompleteSkip(t *testing.T) {
 	if err := os.WriteFile(dest, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sum := md5Of(content)
-	checksumXML := fmt.Sprintf(`<file name="setup.bin" md5="%s" total_size="%d"/>`, sum, len(content))
+	checksumXML := checksumDoc("setup.bin", content)
 
 	env := newWebsiteEnv(t, nil, true, false, false)
 	env.urls.set("setup.bin", resolveResult{downlink: f.url("/file"), checksumXML: checksumXML})
@@ -328,6 +329,45 @@ func TestRunWebsiteChecksummedCompleteSkip(t *testing.T) {
 	}
 }
 
+// TestRunWebsiteCreateXMLRepairsUnusableRemote locks the C1 semantics: a remote
+// checksum document that fails the manifest rules counts as no document — it is
+// neither cached verbatim (an unusable file would shadow regeneration) nor does
+// it suppress the generated manifest under --create-xml.
+func TestRunWebsiteCreateXMLRepairsUnusableRemote(t *testing.T) {
+	f := newWebsiteFixture(t)
+	dest := filepath.Join(t.TempDir(), "game", "setup.bin")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const content = "installer bytes"
+	f.set("/file", content)
+
+	// Declares two chunks but carries one: valid XML, unusable manifest.
+	const unusable = `<file name="setup.bin" chunks="2" total_size="15" md5="00000000000000000000000000000000"><chunk id="0" from="0" to="14" method="md5">00000000000000000000000000000000</chunk></file>`
+
+	env := newWebsiteEnv(t, nil, true, false, false)
+	env.deps.CreateXML = true
+	env.deps.ChunkSize = 1 << 20
+	env.urls.set("setup.bin", resolveResult{downlink: f.url("/file"), checksumXML: unusable})
+
+	if err := RunWebsite(context.Background(), []model.WebsiteTask{
+		{Destination: dest, DownlinkURL: "/downlink", Gamename: "game", Checksummed: true},
+	}, Options{Workers: 1}, env.deps); err != nil {
+		t.Fatalf("RunWebsite: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(env.deps.XMLDirectory, "game", "setup.bin.xml"))
+	if err != nil {
+		t.Fatalf("no usable manifest was cached: %v", err)
+	}
+	if string(data) == unusable {
+		t.Fatal("the unusable remote document was cached verbatim")
+	}
+	if _, perr := gogxml.Parse(bytes.NewReader(data)); perr != nil {
+		t.Errorf("the cached manifest is not valid: %v", perr)
+	}
+}
+
 // TestRunWebsiteVersionRename locks the different-version branch: the local
 // file moves to the dated.old name and the new content downloads.
 func TestRunWebsiteVersionRename(t *testing.T) {
@@ -339,7 +379,7 @@ func TestRunWebsiteVersionRename(t *testing.T) {
 	if err := os.WriteFile(dest, []byte("installer v1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	checksumXML := fmt.Sprintf(`<file name="setup.bin" md5="%s" total_size="%d"/>`, md5Of("installer v2"), len("installer v2"))
+	checksumXML := checksumDoc("setup.bin", "installer v2")
 
 	env := newWebsiteEnv(t, nil, true, false, false)
 	env.urls.set("setup.bin", resolveResult{downlink: f.url("/file"), checksumXML: checksumXML})
@@ -372,7 +412,7 @@ func TestRunWebsiteResume(t *testing.T) {
 	if err := os.WriteFile(dest, []byte("insta"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	checksumXML := fmt.Sprintf(`<file name="setup.bin" md5="%s" total_size="%d"/>`, md5Of(full), len(full))
+	checksumXML := checksumDoc("setup.bin", full)
 
 	// The cached document from the interrupted run makes the fast check report
 	// the remote md5, so the partial file counts as the same version.
@@ -551,6 +591,14 @@ func assertFileAbsent(t *testing.T, path string) {
 func md5Of(s string) string {
 	sum := md5.Sum([]byte(s))
 	return hex.EncodeToString(sum[:])
+}
+
+// checksumDoc builds a valid one-chunk checksum document for content: the shape
+// the live API sends (the manifest rules reject a document whose chunk list
+// contradicts its own header, and these fixtures stand for real documents).
+func checksumDoc(name, content string) string {
+	return fmt.Sprintf(`<file name="%s" chunks="1" total_size="%d" md5="%s"><chunk id="0" from="0" to="%d" method="md5">%s</chunk></file>`,
+		name, len(content), md5Of(content), len(content)-1, md5Of(content))
 }
 
 // TestWebsiteTaskResultVerdicts locks the aggregation seam: the callback sees one

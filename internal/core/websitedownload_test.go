@@ -314,7 +314,7 @@ func TestChecksumDualPolicy(t *testing.T) {
 			f.set("/downlink", fmt.Sprintf(downlinkDoc, f.URL))
 			f.set("/checksum", checksumDoc)
 			refreshes := &atomic.Int32{}
-			p := newProviderWithPolicy(t, f, true, refreshes, tc.policy)
+			p := newProviderWithPolicy(t, true, refreshes, tc.policy)
 			task := tc.task
 			task.DownlinkURL = f.url("/downlink")
 			_, xml, err := p.Resolve(context.Background(), task)
@@ -341,7 +341,7 @@ func TestChecksumAlwaysToleratesFetchFailure(t *testing.T) {
 	f := newProviderFixture(t)
 	f.set("/downlink", `{"downlink":"https://cdn.example.com/file.bin","checksum":"`+f.URL+`/gone"}`)
 	refreshes := &atomic.Int32{}
-	p := newProviderWithPolicy(t, f, false, refreshes, checksumAlways)
+	p := newProviderWithPolicy(t, false, refreshes, checksumAlways)
 	url, xml, err := p.Resolve(context.Background(), model.WebsiteTask{
 		Destination: "file.bin", DownlinkURL: f.url("/downlink"), Gamename: "game",
 	})

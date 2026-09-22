@@ -61,14 +61,14 @@ func (f *providerFixture) url(path string) string { return f.Server.URL + path }
 
 // newProvider builds the provider with a controllable credential state: the
 // expires counter says how many refresh calls still see an expired token.
-func newProvider(t *testing.T, f *providerFixture, remoteXML bool, refreshes *atomic.Int32) *websiteURLProvider {
+func newProvider(t *testing.T, remoteXML bool, refreshes *atomic.Int32) *websiteURLProvider {
 	t.Helper()
-	return newProviderWithPolicy(t, f, remoteXML, refreshes, checksumGated)
+	return newProviderWithPolicy(t, remoteXML, refreshes, checksumGated)
 }
 
 // newProviderWithPolicy is newProvider with the checksum policy pinned: the
 // batch chain runs the gated policy, the single-file chain the always policy.
-func newProviderWithPolicy(t *testing.T, f *providerFixture, remoteXML bool, refreshes *atomic.Int32, policy checksumPolicy) *websiteURLProvider {
+func newProviderWithPolicy(t *testing.T, remoteXML bool, refreshes *atomic.Int32, policy checksumPolicy) *websiteURLProvider {
 	t.Helper()
 	hx, err := httpx.New(httpx.Config{UserAgent: "goggo-test/1.0"})
 	if err != nil {
@@ -114,7 +114,7 @@ func TestWebsiteURLProviderResolve(t *testing.T) {
 	f.set("/checksum", checksumDoc)
 
 	refreshes := &atomic.Int32{}
-	p := newProvider(t, f, true, refreshes)
+	p := newProvider(t, true, refreshes)
 	task := model.WebsiteTask{Destination: "setup.bin", DownlinkURL: f.url("/downlink"), Gamename: "game", Checksummed: true}
 
 	url, checksumXML, err := p.Resolve(context.Background(), task)
@@ -134,7 +134,7 @@ func TestWebsiteURLProviderResolve(t *testing.T) {
 	// A non-checksummed file must not touch the checksum document.
 	f2 := newProviderFixture(t)
 	f2.set("/downlink", fmt.Sprintf(downlinkDoc, f2.URL))
-	p2 := newProvider(t, f2, true, refreshes)
+	p2 := newProvider(t, true, refreshes)
 	if _, _, err := p2.Resolve(context.Background(), model.WebsiteTask{
 		Destination: "extra.bin", DownlinkURL: f2.url("/downlink"),
 	}); err != nil {
@@ -148,7 +148,7 @@ func TestWebsiteURLProviderResolve(t *testing.T) {
 	// transfer sentinels the worker skips on.
 	f3 := newProviderFixture(t)
 	f3.set("/downlink", `{}`)
-	p3 := newProvider(t, f3, true, refreshes)
+	p3 := newProvider(t, true, refreshes)
 	_, _, err = p3.Resolve(context.Background(), model.WebsiteTask{DownlinkURL: f3.url("/downlink")})
 	if !errors.Is(err, transfer.ErrEmptyDownlink) {
 		t.Errorf("empty document err = %v, want ErrEmptyDownlink", err)
@@ -156,7 +156,7 @@ func TestWebsiteURLProviderResolve(t *testing.T) {
 
 	f4 := newProviderFixture(t)
 	f4.set("/downlink", `{"other":1}`)
-	p4 := newProvider(t, f4, true, refreshes)
+	p4 := newProvider(t, true, refreshes)
 	_, _, err = p4.Resolve(context.Background(), model.WebsiteTask{DownlinkURL: f4.url("/downlink")})
 	if !errors.Is(err, transfer.ErrNoDownlink) {
 		t.Errorf("no downlink err = %v, want ErrNoDownlink", err)
@@ -171,7 +171,7 @@ func TestWebsiteURLProviderConcurrentRefresh(t *testing.T) {
 	f.set("/downlink", `{"downlink":"https://cdn.example.com/file.bin"}`)
 
 	refreshes := &atomic.Int32{}
-	p := newProvider(t, f, false, refreshes)
+	p := newProvider(t, false, refreshes)
 
 	const workers = 8
 	var wg sync.WaitGroup

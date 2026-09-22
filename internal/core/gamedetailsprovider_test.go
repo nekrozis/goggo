@@ -17,7 +17,7 @@ import (
 // contract lives.
 var _ gamedetails.DownlinkResolver = (*gamedetailsResolver)(nil).Resolve
 
-func newGamedetailsResolver(t *testing.T, f *providerFixture, refreshes *atomic.Int32) *gamedetailsResolver {
+func newGamedetailsResolver(t *testing.T, refreshes *atomic.Int32) *gamedetailsResolver {
 	t.Helper()
 	hx, err := httpx.New(httpx.Config{UserAgent: "goggo-test/1.0"})
 	if err != nil {
@@ -53,7 +53,7 @@ func TestGamedetailsResolverResolve(t *testing.T) {
 	f.set("/dlc", `{"downlink":"`+downlink+`"}`)
 
 	var refreshes atomic.Int32
-	r := newGamedetailsResolver(t, f, &refreshes)
+	r := newGamedetailsResolver(t, &refreshes)
 
 	got, err := r.Resolve(context.Background(), "gamename", f.url("/dlc"))
 	if err != nil {
@@ -94,7 +94,7 @@ func TestGamedetailsResolverRejectsMalformedDownlinks(t *testing.T) {
 			f.set("/dlc", tc.body)
 
 			var refreshes atomic.Int32
-			got, err := newGamedetailsResolver(t, f, &refreshes).Resolve(context.Background(), "gamename", f.url("/dlc"))
+			got, err := newGamedetailsResolver(t, &refreshes).Resolve(context.Background(), "gamename", f.url("/dlc"))
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("error = %v, want %v", err, tc.want)
 			}

@@ -33,12 +33,10 @@ type gameInfoFixture struct {
 	list     string
 	failures map[string]int
 	probe    *requestProbe
-	// files and dlDocs are the transfer's inputs: the bytes the website
-	// transfer fetches from the downlink url, and whole-document overrides for
-	// the /dl/<name> answers (a checksum member the default document lacks).
-	// Unset means today's behaviour: 404 for files, the default document.
-	files  map[string]string
-	dlDocs map[string]string
+	// files are the transfer's inputs: the bytes the website
+	// transfer fetches from the downlink url.
+	// Unset means today's behaviour: 404 for files.
+	files map[string]string
 	// gameDetails serves the /account/gameDetails/<id>.json documents the
 	// save-* acquisition fetches.
 	gameDetails map[string]string
@@ -52,7 +50,6 @@ func newGameInfoFixture(t *testing.T) *gameInfoFixture {
 		list:        `{"page":1,"totalPages":1,"products":[]}`,
 		failures:    map[string]int{},
 		files:       map[string]string{},
-		dlDocs:      map[string]string{},
 		gameDetails: map[string]string{},
 	}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +60,6 @@ func newGameInfoFixture(t *testing.T) *gameInfoFixture {
 		status := f.failures[path]
 		doc, isProduct := f.products[productDocumentID(path)]
 		file, hasFile := f.files[path]
-		dlDoc, hasDL := f.dlDocs[path]
 		gdDoc, hasGD := f.gameDetails[path]
 		expanded, owned, list, probe := f.expanded, f.owned, f.list, f.probe
 		f.mu.Unlock()
@@ -84,16 +80,13 @@ func newGameInfoFixture(t *testing.T) *gameInfoFixture {
 		case path == "/dlc-expanded":
 			_, _ = w.Write([]byte(expanded))
 		case isProduct:
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(doc))
 		case hasFile:
 			_, _ = w.Write([]byte(file))
 		case hasGD:
 			_, _ = w.Write([]byte(gdDoc))
 		case strings.HasPrefix(path, "/dl/"):
-			if hasDL {
-				_, _ = w.Write([]byte(dlDoc))
-				return
-			}
 			// One downlink document per file entry: the url it names is what
 			// the conversion derives the file's path from.
 			name := strings.TrimPrefix(path, "/dl/")
@@ -165,13 +158,6 @@ func (f *gameInfoFixture) setFile(name, body string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.files["/games/some-game/"+name] = body
-}
-
-// setDownlinkDoc overrides the whole JSON answer for /dl/<name>.
-func (f *gameInfoFixture) setDownlinkDoc(name, doc string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.dlDocs["/dl/"+name] = doc
 }
 
 // setGameDetails serves the per-game details document for a product id

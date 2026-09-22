@@ -23,6 +23,21 @@ import (
 // size and the per-task verdicts travel as structured results the CLI maps onto
 // output and exit codes.
 
+// WebsiteDownloadRequest is one batch download run's input. It carries the
+// caller's intent explicitly: the type mask is a per-request decision (what
+// --type asked for), not a mutation of the run's persistent configuration.
+type WebsiteDownloadRequest struct {
+	// Products are the games to download, in the selector's reading.
+	Products []string
+	// RefMode says how Products are read: by slug, or as --regex selects.
+	RefMode ProductRefMode
+	// Include overrides the run's type mask for this download when set. Its
+	// only producer is --type on the batch leaf; nil means the configured
+	// mask. The same resolution feeds the acquisition and the queue, so a
+	// category run filters both faces identically.
+	Include *uint32
+}
+
 // WebsiteTaskFailure is one task's operational failure: what happened, and
 // where. The event stream already showed the text; the record exists so the
 // aggregate exit code never depends on re-reading messages.
@@ -79,12 +94,15 @@ func (r WebsiteDownloadResult) Failed() bool {
 // --all escape hatch. Acquisition keeps its complete-or-nothing contract; the
 // transfer run is per-task: a failure neither cancels the queue nor hides
 // itself from the aggregate verdict.
-func (d *Downloader) DownloadWebsite(ctx context.Context, products []string, mode ProductRefMode) (WebsiteDownloadResult, error) {
-	if len(products) == 0 {
+func (d *Downloader) DownloadWebsite(ctx context.Context, req WebsiteDownloadRequest) (WebsiteDownloadResult, error) {
+	if len(req.Products) == 0 {
 		return WebsiteDownloadResult{}, errors.New("download: no games selected")
 	}
 
-	details, err := d.GameDetails(ctx, GameDetailsRequest{Products: products, RefMode: mode})
+	// One mask resolution, two consumers: the acquisition filters with it and
+	// the queue filters with it, so a category run can never half-filter.
+	mask := effectiveInclude(req.Include, d.cfg.DownloadConfig.Include)
+	details, err := d.GameDetails(ctx, GameDetailsRequest{Products: req.Products, RefMode: req.RefMode, Include: req.Include})
 	if err != nil {
 		return WebsiteDownloadResult{}, err
 	}
@@ -107,7 +125,7 @@ func (d *Downloader) DownloadWebsite(ctx context.Context, products []string, mod
 		// artifact is written even when the transfer later fails, and vice
 		// versa.
 		saved = append(saved, d.saveGameArtifacts(ctx, &details[i])...)
-		for _, gf := range details[i].GetGameFileVectorFiltered(d.cfg.DownloadConfig.Include) {
+		for _, gf := range details[i].GetGameFileVectorFiltered(mask) {
 			tasks = append(tasks, websiteTaskFor(gf))
 		}
 	}

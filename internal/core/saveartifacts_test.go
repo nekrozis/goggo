@@ -109,7 +109,7 @@ func TestSaveSectionFailClosedAndContracts(t *testing.T) {
 	cfg.DownloadConfig.SaveChangelogs = true
 	d := newGameInfoDownloader(t, f, cfg)
 
-	res, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
+	res, err := d.DownloadWebsite(context.Background(), WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
 	if err != nil {
 		t.Fatalf("DownloadWebsite: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestSaveAcquisitionRequestCounting(t *testing.T) {
 			cfg.DownloadConfig.SaveChangelogs = tc.changelog
 			cfg.DownloadConfig.SaveGameDetailsJSON = tc.gdJSON
 			d := newGameInfoDownloader(t, f, cfg)
-			if _, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact); err != nil {
+			if _, err := d.DownloadWebsite(context.Background(), WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact}); err != nil {
 				t.Fatal(err)
 			}
 			if got := f.count("/account/gameDetails"); got != tc.want {
@@ -183,14 +183,14 @@ func TestSaveChangelogAlreadyPresentSkipsOnSecondRun(t *testing.T) {
 	cfg.DownloadConfig.SaveChangelogs = true
 	d := newGameInfoDownloader(t, f, cfg)
 
-	if _, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact); err != nil {
+	if _, err := d.DownloadWebsite(context.Background(), WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact}); err != nil {
 		t.Fatal(err)
 	}
 	serials := filepath.Join(dir, "base_game", "serials.txt")
 	if err := os.WriteFile(serials, []byte("user edit"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
+	res, err := d.DownloadWebsite(context.Background(), WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestArtifactFailureMovesExitCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := newGameInfoDownloader(t, f, cfg)
-	res, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
+	res, err := d.DownloadWebsite(context.Background(), WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
 	if err != nil {
 		t.Fatalf("DownloadWebsite: %v", err)
 	}

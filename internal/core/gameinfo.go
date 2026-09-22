@@ -42,9 +42,10 @@ type GameDetailsRequest struct {
 	// default of eight does not carry over.
 	InfoThreads int
 
-	// Include overrides the run's type mask for this acquisition when set. Its
-	// only producer is the download file chain, which forces "all" — a file
-	// looked up by id must be findable whatever the mask says.
+	// Include overrides the run's type mask for this acquisition when set.
+	// Its producers are the download chains: the file chain forces "all" — a
+	// file looked up by id must be findable whatever the mask says — and the
+	// batch chain forwards the caller's --type intent (WebsiteDownloadRequest).
 	Include *uint32
 }
 
@@ -81,7 +82,7 @@ func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([
 		ids = append(ids, id)
 	}
 
-	include := d.effectiveInclude(req)
+	include := effectiveInclude(req.Include, d.cfg.DownloadConfig.Include)
 	owned, err := d.ownedGameIDs(ctx, include)
 	if err != nil {
 		return nil, err
@@ -328,11 +329,13 @@ func cdKeyString(v jsontext.Value) (string, error) {
 	return "", fmt.Errorf("expected a string, got %s", v.Kind())
 }
 
-// effectiveInclude is the type mask an acquisition run consumes: the request's
-// override when it carries one, and the run's configured mask otherwise.
-func (d *Downloader) effectiveInclude(req GameDetailsRequest) uint32 {
-	if req.Include != nil {
-		return *req.Include
+// effectiveInclude is the type mask one run consumes: an explicit request
+// intent wins; nil falls back to the configured mask. It is the single
+// resolution point for both consumers of a download run's mask (the
+// acquisition and the queue), so the two can never disagree.
+func effectiveInclude(include *uint32, fallback uint32) uint32 {
+	if include != nil {
+		return *include
 	}
-	return d.cfg.DownloadConfig.Include
+	return fallback
 }

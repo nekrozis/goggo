@@ -34,7 +34,7 @@ func (c *console) runWebsiteDownload(ctx context.Context, d *core.Downloader, in
 	c.renderer.Start()
 	func() {
 		defer func() { c.renderer.Stop(result) }()
-		res, runErr = d.DownloadWebsite(ctx, inv.args, productRefMode(inv))
+		res, runErr = d.DownloadWebsite(ctx, core.WebsiteDownloadRequest{Products: inv.args, RefMode: productRefMode(inv)})
 		result = classifyInstallResult(runErr, ctx)
 	}()
 	stopSignal()

@@ -68,7 +68,7 @@ func TestDownloadWebsiteBatchAssemblesAndRuns(t *testing.T) {
 	cfg, dir := websiteConfigIn(t)
 	d := newGameInfoDownloader(t, f, cfg)
 
-	res, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
+	res, err := d.DownloadWebsite(context.Background(), WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
 	if err != nil {
 		t.Fatalf("DownloadWebsite: %v", err)
 	}
@@ -102,6 +102,78 @@ func TestDownloadWebsiteBatchAssemblesAndRuns(t *testing.T) {
 	}
 }
 
+// TestDownloadWebsiteTypeIntentFiltersBothFaces is the DEFECT-TYPE1 behaviour
+// guard: a request-carried mask must reach the queue (G1a) and the acquisition
+// (G1b), not just the Parse face. G1b asserts through the owned-games endpoint
+// because that is where the acquisition's mask is observable independently of
+// the queue filter: a mask without DLC bits must not ask the account who owns
+// what.
+func TestDownloadWebsiteTypeIntentFiltersBothFaces(t *testing.T) {
+	t.Run("G1a queue filtering", func(t *testing.T) {
+		f := oneProductFixture(t, "base.exe", "sound.mp3", "dlc.exe")
+		cfg, dir := websiteConfigIn(t)
+		d := newGameInfoDownloader(t, f, cfg)
+
+		extra := uint32(config.GFExtra)
+		res, err := d.DownloadWebsite(context.Background(), WebsiteDownloadRequest{
+			Products: []string{"100"}, RefMode: ProductRefExact, Include: &extra,
+		})
+		if err != nil {
+			t.Fatalf("DownloadWebsite: %v", err)
+		}
+		if res.Tasks != 1 {
+			t.Errorf("tasks = %d, want only the base extra", res.Tasks)
+		}
+		if res.TotalSize != 10 {
+			t.Errorf("total size = %d, want the extras-only sum", res.TotalSize)
+		}
+		if body, err := os.ReadFile(filepath.Join(dir, "base_game", "extras", "sound.mp3")); err != nil || string(body) != "bytes-of-sound.mp3" {
+			t.Errorf("extra download missing: %v", err)
+		}
+		for _, absent := range []string{
+			filepath.Join(dir, "base_game", "base.exe"),
+			filepath.Join(dir, "base_game", "dlc", "base_game_dlc", "dlc.exe"),
+		} {
+			if _, err := os.Stat(absent); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("installer entered the queue under --type extras: %s", absent)
+			}
+		}
+	})
+
+	t.Run("G1b acquisition filtering", func(t *testing.T) {
+		ownedPath := "/www/user/data/games"
+		// A mask without any DLC bit must not trigger the owned-games fetch:
+		// the acquisition consumed the request intent, not the configured all.
+		f := oneProductFixture(t, "base.exe", "sound.mp3", "dlc.exe")
+		cfg, _ := websiteConfigIn(t)
+		d := newGameInfoDownloader(t, f, cfg)
+		baseExtra := uint32(config.GFBaseExtra)
+		if _, err := d.DownloadWebsite(context.Background(), WebsiteDownloadRequest{
+			Products: []string{"100"}, RefMode: ProductRefExact, Include: &baseExtra,
+		}); err != nil {
+			t.Fatalf("DownloadWebsite: %v", err)
+		}
+		if got := f.seen(ownedPath); got != 0 {
+			t.Errorf("owned-games fetched %d times under a DLC-free mask, want 0 (acquisition ignored req.Include)", got)
+		}
+
+		// The same run without the intent falls back to the configured mask,
+		// which carries DLC bits: the fetch must happen. This pins the nil
+		// semantics of effectiveInclude and kills a mutation that drops the
+		// fallback.
+		f2 := oneProductFixture(t, "base.exe", "sound.mp3", "dlc.exe")
+		d2 := newGameInfoDownloader(t, f2, cfg)
+		if _, err := d2.DownloadWebsite(context.Background(), WebsiteDownloadRequest{
+			Products: []string{"100"}, RefMode: ProductRefExact,
+		}); err != nil {
+			t.Fatalf("DownloadWebsite (nil Include): %v", err)
+		}
+		if got := f2.seen(ownedPath); got == 0 {
+			t.Errorf("owned-games not fetched under the configured all-mask, want the fallback to fire")
+		}
+	})
+}
+
 // TestDownloadWebsiteAggregateKeepsRunningAndReports locks the aggregate exit
 // contract on the batch chain: a failing task in the MIDDLE of the queue does
 // not stop the tasks after it, the successful downloads are kept, and the
@@ -112,7 +184,7 @@ func TestDownloadWebsiteAggregateKeepsRunningAndReports(t *testing.T) {
 	cfg, dir := websiteConfigIn(t)
 	d := newGameInfoDownloader(t, f, cfg)
 
-	res, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
+	res, err := d.DownloadWebsite(context.Background(), WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
 	if err != nil {
 		t.Fatalf("DownloadWebsite: %v", err)
 	}
@@ -144,7 +216,7 @@ func TestDownloadWebsiteFreeSpaceGate(t *testing.T) {
 	cfg.DownloadConfig.FreeSpaceCheck = true
 	d := newGameInfoDownloader(t, f, cfg)
 
-	res, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
+	res, err := d.DownloadWebsite(context.Background(), WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
 	if err == nil || !strings.Contains(err.Error(), "not enough free space") {
 		t.Fatalf("err = %v, want the free-space refusal", err)
 	}
@@ -395,7 +467,7 @@ func TestDownloadWebsiteRefreshFailureIsNotSwallowed(t *testing.T) {
 	d.token.StoreLoginResponse(map[string]any{"access_token": "a", "expires_at": 1})
 	f.setFailure("/token", 500)
 
-	_, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
+	_, err := d.DownloadWebsite(context.Background(), WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
 	if err == nil || !strings.Contains(err.Error(), "refresh") {
 		t.Fatalf("err = %v, want the refresh reason", err)
 	}
@@ -411,7 +483,7 @@ func TestDownloadWebsiteCancellationTravels(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := d.DownloadWebsite(ctx, []string{"100"}, ProductRefExact)
+	_, err := d.DownloadWebsite(ctx, WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
@@ -453,7 +525,7 @@ func TestBackupDownloadCreateXMLAtomicFallback(t *testing.T) {
 	cfg, dir := websiteConfigIn(t)
 	cfg.DownloadConfig.CreateXML = true
 	d := newGameInfoDownloader(t, f, cfg)
-	if _, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact); err != nil {
+	if _, err := d.DownloadWebsite(context.Background(), WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact}); err != nil {
 		t.Fatalf("DownloadWebsite: %v", err)
 	}
 	docPath := filepath.Join(cfg.XMLDirectory, "base_game", "base.exe.xml")
@@ -484,7 +556,7 @@ func TestBackupDownloadCreateXMLAtomicFallback(t *testing.T) {
 	}
 	cfg2.XMLDirectory = blocked
 	d2 := newGameInfoDownloader(t, f2, cfg2)
-	res, err := d2.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
+	res, err := d2.DownloadWebsite(context.Background(), WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
 	if err != nil {
 		t.Fatalf("DownloadWebsite: %v", err)
 	}
@@ -522,7 +594,7 @@ func TestBackupDownloadNoRemoteXMLStatusContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := newGameInfoDownloader(t, f, cfg)
-	res, err := d.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
+	res, err := d.DownloadWebsite(context.Background(), WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
 	if err != nil {
 		t.Fatalf("DownloadWebsite: %v", err)
 	}
@@ -561,7 +633,7 @@ func TestBackupDownloadNoRemoteXMLStatusContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	d2 := newGameInfoDownloader(t, f2, cfg2)
-	res2, err := d2.DownloadWebsite(context.Background(), []string{"100"}, ProductRefExact)
+	res2, err := d2.DownloadWebsite(context.Background(), WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
 	if err != nil {
 		t.Fatalf("DownloadWebsite: %v", err)
 	}

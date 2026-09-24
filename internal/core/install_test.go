@@ -281,7 +281,7 @@ func TestInstallPublishesProgressThroughTheRun(t *testing.T) {
 	destination := filepath.Join(cfg.Directories.Directory, "W3 GOTY", "game", "data.bin")
 	progress := transfer.NewProgress()
 
-	target, err := url.Parse(f.Server.URL)
+	target, err := url.Parse(f.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

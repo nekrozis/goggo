@@ -78,7 +78,7 @@ func TestKeyCanonicalisation(t *testing.T) {
 	}
 
 	dom := mustParse(t, "https://sub.gog.com/")
-	s.SetCookies(dom, []*http.Cookie{&http.Cookie{Name: "c", Value: "3", Domain: ".GOG.com"}})
+	s.SetCookies(dom, []*http.Cookie{{Name: "c", Value: "3", Domain: ".GOG.com"}})
 	if _, ok := s.persist[cookieKey{domain: "gog.com", path: "/", name: "c"}]; !ok {
 		t.Errorf("domain cookie key must be lowercase without leading dot")
 	}
@@ -125,8 +125,8 @@ func TestDeleteRemovesOnlyExactKey(t *testing.T) {
 	s := newTestStore()
 	u := mustParse(t, "https://gog.com/")
 	s.SetCookies(u, []*http.Cookie{
-		&http.Cookie{Name: "SID", Value: "v", Path: "/foo"},
-		&http.Cookie{Name: "SID", Value: "w", Path: "/bar"},
+		{Name: "SID", Value: "v", Path: "/foo"},
+		{Name: "SID", Value: "w", Path: "/bar"},
 	})
 	// Delete /foo only.
 	del := &http.Cookie{Name: "SID", Value: "", MaxAge: -1, Path: "/foo"}
@@ -143,7 +143,7 @@ func TestDeleteRemovesOnlyExactKey(t *testing.T) {
 func TestEmptyValueIsNotDeletion(t *testing.T) {
 	s := newTestStore()
 	u := mustParse(t, "https://gog.com/")
-	s.SetCookies(u, []*http.Cookie{&http.Cookie{Name: "SID", Value: ""}})
+	s.SetCookies(u, []*http.Cookie{{Name: "SID", Value: ""}})
 	key := cookieKey{domain: "gog.com", path: "/", name: "SID", hostOnly: true}
 	if _, ok := s.persist[key]; !ok {
 		t.Error("empty-value cookie must be upserted, not deleted")
@@ -153,7 +153,7 @@ func TestEmptyValueIsNotDeletion(t *testing.T) {
 func TestMaxAgePositiveExpiry(t *testing.T) {
 	s := newTestStore()
 	u := mustParse(t, "https://gog.com/")
-	s.SetCookies(u, []*http.Cookie{&http.Cookie{Name: "a", Value: "1", MaxAge: 60}})
+	s.SetCookies(u, []*http.Cookie{{Name: "a", Value: "1", MaxAge: 60}})
 	key := cookieKey{domain: "gog.com", path: "/", name: "a", hostOnly: true}
 	if got := s.persist[key].expires; !got.Equal(fixedNow.Add(60 * time.Second)) {
 		t.Errorf("expires = %v, want now+60s (%v)", got, fixedNow.Add(60*time.Second))
@@ -164,7 +164,7 @@ func TestExpiredCookieNotPersisted(t *testing.T) {
 	s := newTestStore()
 	u := mustParse(t, "https://gog.com/")
 	past := fixedNow.Add(-time.Hour)
-	s.SetCookies(u, []*http.Cookie{&http.Cookie{Name: "a", Value: "1", Expires: past}})
+	s.SetCookies(u, []*http.Cookie{{Name: "a", Value: "1", Expires: past}})
 	if len(s.persist) != 0 {
 		t.Errorf("expired cookie was persisted: %v", s.persist)
 	}
@@ -174,7 +174,7 @@ func TestMaxAgeWinsOverPastExpires(t *testing.T) {
 	s := newTestStore()
 	u := mustParse(t, "https://gog.com/")
 	past := fixedNow.Add(-time.Hour)
-	s.SetCookies(u, []*http.Cookie{&http.Cookie{Name: "a", Value: "1", Expires: past, MaxAge: 60}})
+	s.SetCookies(u, []*http.Cookie{{Name: "a", Value: "1", Expires: past, MaxAge: 60}})
 	key := cookieKey{domain: "gog.com", path: "/", name: "a", hostOnly: true}
 	if _, ok := s.persist[key]; !ok {
 		t.Fatal("positive MaxAge must win over a past Expires (RFC 6265)")
@@ -187,7 +187,7 @@ func TestMaxAgeWinsOverPastExpires(t *testing.T) {
 func TestSecureAndHttpOnlyPreserved(t *testing.T) {
 	s := newTestStore()
 	u := mustParse(t, "https://gog.com/")
-	s.SetCookies(u, []*http.Cookie{&http.Cookie{Name: "a", Value: "1", Secure: true, HttpOnly: true}})
+	s.SetCookies(u, []*http.Cookie{{Name: "a", Value: "1", Secure: true, HttpOnly: true}})
 	st := s.persist[cookieKey{domain: "gog.com", path: "/", name: "a", hostOnly: true}]
 	if !st.secure || !st.httpOnly {
 		t.Errorf("state = %+v, want secure+httpOnly", st)
@@ -209,8 +209,8 @@ func TestCookiesDelegatesToBareJar(t *testing.T) {
 		cs  []*http.Cookie
 	}{
 		{"https://gog.com/", []*http.Cookie{hostCookie("SID", "abc")}},
-		{"https://sub.gog.com/x", []*http.Cookie{&http.Cookie{Name: "dom", Value: "1", Domain: ".gog.com", Path: "/"}}},
-		{"https://gog.com/secure", []*http.Cookie{&http.Cookie{Name: "s", Value: "2", Secure: true, Path: "/"}}},
+		{"https://sub.gog.com/x", []*http.Cookie{{Name: "dom", Value: "1", Domain: ".gog.com", Path: "/"}}},
+		{"https://gog.com/secure", []*http.Cookie{{Name: "s", Value: "2", Secure: true, Path: "/"}}},
 	}
 	probes := []string{
 		"https://gog.com/",

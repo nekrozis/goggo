@@ -1038,8 +1038,7 @@ func TestRetryWaitIsMilliseconds(t *testing.T) {
 		{500, 500 * time.Millisecond},
 		{2000, 2 * time.Second},
 	} {
-		cfg := config.Config{}
-		cfg.Wait = tc.wait
+		cfg := config.Config{Wait: tc.wait}
 		if got := retryWait(cfg); got != tc.want {
 			t.Errorf("retryWait(--wait %d) = %v, want %v", tc.wait, got, tc.want)
 		}
@@ -1056,9 +1055,7 @@ func TestSessionRetryWaitReachesTheWire(t *testing.T) {
 	// The construction point itself: the policy core hands to httpx. Core owns
 	// the mapping from cfg.Wait; the attempt formula (min(retries,3)+1) belongs
 	// to webapi.RetryPolicyFor and is pinned in webapi/retrypolicy_test.go.
-	cfg := config.Config{}
-	cfg.Wait = 200
-	cfg.Retries = 3
+	cfg := config.Config{Wait: 200, Retries: 3}
 	built := httpxCfg(cfg, Dependencies{})
 	if built.RetryPolicy.Wait != 200*time.Millisecond {
 		t.Fatalf("httpxCfg policy wait = %v, want 200ms", built.RetryPolicy.Wait)
@@ -1089,9 +1086,7 @@ func TestSessionRetryWaitReachesTheWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg2 := config.Config{}
-	cfg2.Wait = 200
-	cfg2.Retries = 3
+	cfg2 := config.Config{Wait: 200, Retries: 3}
 	hx, err := httpx.New(httpxCfg(cfg2, Dependencies{HTTPTransport: &gogHostTransport{target: target}}))
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)

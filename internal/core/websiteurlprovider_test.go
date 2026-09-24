@@ -57,7 +57,7 @@ func (f *providerFixture) hitCount(path string) int {
 	return f.hits[path]
 }
 
-func (f *providerFixture) url(path string) string { return f.Server.URL + path }
+func (f *providerFixture) url(path string) string { return f.URL + path }
 
 // newProvider builds the provider with a controllable credential state: the
 // expires counter says how many refresh calls still see an expired token.

@@ -103,7 +103,7 @@ func (f *websiteFixture) set(path, body string) {
 	f.bodies[path] = body
 }
 
-func (f *websiteFixture) url(path string) string { return f.Server.URL + path }
+func (f *websiteFixture) url(path string) string { return f.URL + path }
 
 func (f *websiteFixture) hitCount(path string) int {
 	f.mu.Lock()

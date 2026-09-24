@@ -183,7 +183,7 @@ func TestProductExpandsDLCsInOneRequest(t *testing.T) {
 				"slug": "game",
 				"dlcs": map[string]any{
 					"products":                  []any{map[string]any{"id": "2"}, map[string]any{"id": "3"}},
-					"expanded_all_products_url": f.Server.URL + "/expanded",
+					"expanded_all_products_url": f.URL + "/expanded",
 				},
 			}), http.StatusOK
 		}
@@ -254,7 +254,7 @@ func TestProductBatchesDLCIDs(t *testing.T) {
 						"products": entries,
 						// Present but never used on this branch: the batch url is
 						// built here, not read from the document.
-						"expanded_all_products_url": f.Server.URL + "/expanded",
+						"expanded_all_products_url": f.URL + "/expanded",
 					},
 				}), http.StatusOK
 			})
@@ -454,7 +454,7 @@ func TestProductRejectsANonArrayExpansion(t *testing.T) {
 				"id": "1",
 				"dlcs": map[string]any{
 					"products":                  []any{map[string]any{"id": "2"}},
-					"expanded_all_products_url": f.Server.URL + "/expanded",
+					"expanded_all_products_url": f.URL + "/expanded",
 				},
 			}), http.StatusOK
 		}
@@ -609,7 +609,7 @@ func TestProductPreservesDocumentFidelity(t *testing.T) {
 		f := newProductFixture(t)
 		f.setServe(func(uri string) (string, int) {
 			if strings.HasPrefix(uri, "/products/1") {
-				return fmt.Sprintf(`{"id":58812465975493914,"slug":"witcher-3","title":"The Witcher 3","unknown_large_int":9007199254740993,"dlcs":{"products":[{"id":"dlc-1"}],"expanded_all_products_url":"%s/expanded"}}`, f.Server.URL), http.StatusOK
+				return fmt.Sprintf(`{"id":58812465975493914,"slug":"witcher-3","title":"The Witcher 3","unknown_large_int":9007199254740993,"dlcs":{"products":[{"id":"dlc-1"}],"expanded_all_products_url":"%s/expanded"}}`, f.URL), http.StatusOK
 			}
 			return `[{"id":"dlc-1","title":"Hearts of Stone"}]`, http.StatusOK
 		})

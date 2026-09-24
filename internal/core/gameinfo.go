@@ -112,9 +112,7 @@ func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([
 	// own slot, so results need no lock; the first failure records itself and
 	// cancels the rest.
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				i := int(cursor.Add(1)) - 1
 				if i >= len(ids) || workCtx.Err() != nil {
@@ -130,7 +128,7 @@ func (d *Downloader) GameDetails(ctx context.Context, req GameDetailsRequest) ([
 				}
 				results[i] = gd
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

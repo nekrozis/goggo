@@ -1,6 +1,9 @@
 package config
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // This file is the single source of truth for the six website subdirectory
 // options: the field each one fills, its default and the whole values carrying a
@@ -76,10 +79,5 @@ func SubdirValueAccepted(opt SubdirOption, value string) bool {
 	if !strings.Contains(value, "%") {
 		return true
 	}
-	for _, template := range opt.Templates {
-		if template == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(opt.Templates, value)
 }

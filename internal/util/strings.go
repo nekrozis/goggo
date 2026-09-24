@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -164,10 +165,5 @@ func DLCNamesFromJSON(v jsontext.Value) ([]string, error) {
 
 // containsString reports whether want is already in list.
 func containsString(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, want)
 }

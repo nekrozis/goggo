@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/nekrozis/goggo/internal/config"
@@ -506,12 +507,7 @@ func joinOptions(lists ...[]optionID) []optionID {
 }
 
 func containsOption(ids []optionID, id optionID) bool {
-	for _, have := range ids {
-		if have == id {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ids, id)
 }
 
 // optionSet is a small helper for the shared option list.

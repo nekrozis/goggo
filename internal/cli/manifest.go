@@ -80,8 +80,7 @@ func runManifestInspect(ui *console, inv invocation) outcome {
 	manifest, err := gogxml.Parse(f)
 	if err != nil {
 		errorKind := "XML_PARSE_ERROR"
-		var semErr *gogxml.SemanticValidationError
-		if errors.As(err, &semErr) {
+		if _, ok := errors.AsType[*gogxml.SemanticValidationError](err); ok {
 			errorKind = "MANIFEST_SEMANTIC_ERROR"
 		}
 		if inv.json {
@@ -227,8 +226,7 @@ func runManifestVerify(ui *console, inv invocation) outcome {
 	manifest, err := gogxml.Parse(xmlF)
 	if err != nil {
 		errorKind := "XML_PARSE_ERROR"
-		var semErr *gogxml.SemanticValidationError
-		if errors.As(err, &semErr) {
+		if _, ok := errors.AsType[*gogxml.SemanticValidationError](err); ok {
 			errorKind = "MANIFEST_SEMANTIC_ERROR"
 		}
 		if inv.json {

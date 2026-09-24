@@ -99,10 +99,7 @@ func truncateVisible(s string, maxCells int) string {
 // ALL rows draw from one budget, so the invariant holds at any terminal height.
 func layoutFrame(vm viewModel, width, height int, bar func(cells int, fraction float64) string, unit uint32) []string {
 	maxCells := width - 1
-	maxRows := height - 1
-	if maxRows < 0 {
-		maxRows = 0
-	}
+	maxRows := max(height-1, 0)
 	add := func(lines []string, s string) []string {
 		return append(lines, truncateVisible(s, maxCells))
 	}
@@ -131,10 +128,7 @@ func layoutFrame(vm viewModel, width, height int, bar func(cells int, fraction f
 	// shown, not from the pre-reservation budget: the reservation itself
 	// shrinks what fits, and a notice that miscounts its own hidden rows is
 	// worse than none.
-	available := maxRows - len(lines)
-	if available < 0 {
-		available = 0
-	}
+	available := max(maxRows-len(lines), 0)
 	shown := len(vm.tasks)
 	overflow := 0
 	if shown > available {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -756,12 +757,7 @@ func archCode(flag uint32) string {
 
 // containsString reports whether needle is one of the entries.
 func containsString(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(haystack, needle)
 }
 
 // readInfoBuildID reads buildId out of a goggame-<product>.info file. A parse

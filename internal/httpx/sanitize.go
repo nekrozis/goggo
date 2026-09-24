@@ -3,6 +3,7 @@ package httpx
 import (
 	"errors"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -52,10 +53,7 @@ func SanitizeURL(rawURL string) string {
 	pairs := strings.Split(query, "&")
 	kept := make([]string, 0, len(pairs))
 	for _, pair := range pairs {
-		key := pair
-		if eq := strings.IndexByte(pair, '='); eq >= 0 {
-			key = pair[:eq]
-		}
+		key, _, _ := strings.Cut(pair, "=")
 		if isCredentialParam(key) {
 			continue
 		}
@@ -69,12 +67,7 @@ func SanitizeURL(rawURL string) string {
 
 // isCredentialParam reports whether key names a credential parameter.
 func isCredentialParam(key string) bool {
-	for _, name := range credentialParams {
-		if key == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(credentialParams, key)
 }
 
 // SanitizeError removes credential-bearing URLs from err while preserving its

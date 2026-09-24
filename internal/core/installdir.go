@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/nekrozis/goggo/internal/util"
 )
@@ -22,12 +23,7 @@ var InstallSubdirTemplates = []string{
 // IsInstallSubdirTemplate reports whether name is one of the known templates.
 // A front end uses it to tell a template from a concrete directory name.
 func IsInstallSubdirTemplate(name string) bool {
-	for _, template := range InstallSubdirTemplates {
-		if template == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(InstallSubdirTemplates, name)
 }
 
 // InstallSubdirNeedsProductInfo reports whether a template's value comes from

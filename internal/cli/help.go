@@ -168,7 +168,7 @@ func detailedOptionLines(ids []optionID) string {
 			continue
 		}
 		fmt.Fprintf(&b, "  %-26s%s\n", optionUsage(spec), spec.summary)
-		for _, line := range strings.Split(spec.detail, "\n") {
+		for line := range strings.SplitSeq(spec.detail, "\n") {
 			if line == "" {
 				continue
 			}

@@ -30,7 +30,7 @@ func LoadFilterList(path string) ([]string, error) {
 		return nil, fmt.Errorf("catalog: read game filter list %q: %w", path, err)
 	}
 	var lines []string
-	for _, raw := range strings.Split(string(data), "\n") {
+	for raw := range strings.SplitSeq(string(data), "\n") {
 		if line := strings.TrimSuffix(raw, "\r"); line != "" {
 			lines = append(lines, line)
 		}

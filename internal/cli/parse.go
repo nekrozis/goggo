@@ -630,7 +630,6 @@ var subdirOptionIDs = map[string]optionID{
 func subdirOptionSpecs() []optionSpec {
 	specs := make([]optionSpec, 0, len(config.SubdirOptions))
 	for _, opt := range config.SubdirOptions {
-		opt := opt
 		id, ok := subdirOptionIDs[opt.Name]
 		if !ok {
 			panic("cli: config.SubdirOptions carries a name the option table does not declare: " + opt.Name)
@@ -690,10 +689,8 @@ func init() {
 // splitOption separates "name=value" into its parts; a token without "=" leaves
 // hasValue false.
 func splitOption(token string) (name, value string, hasValue bool) {
-	if eq := strings.IndexByte(token, '='); eq >= 0 {
-		return token[:eq], token[eq+1:], true
-	}
-	return token, "", false
+	name, value, hasValue = strings.Cut(token, "=")
+	return
 }
 
 // removedOptions maps an option this CLI deliberately dropped onto the command
@@ -1310,8 +1307,7 @@ func setNonNegative(dst *int, value, option string) error {
 // parseTypeOption parses a comma-separated list of category names for --type into an include mask.
 func parseTypeOption(v string) (uint32, error) {
 	var mask uint32
-	parts := strings.Split(v, ",")
-	for _, p := range parts {
+	for p := range strings.SplitSeq(v, ",") {
 		token := strings.TrimSpace(strings.ToLower(p))
 		switch token {
 		case "installers", "installer", "i":

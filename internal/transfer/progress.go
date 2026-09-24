@@ -178,11 +178,7 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	n, err := pr.r.Read(p)
 	if n > 0 {
 		pr.read += int64(n)
-		value := pr.base + pr.read
-		if value > pr.end {
-			value = pr.end
-		}
-		pr.slot.store(value)
+		pr.slot.store(min(pr.base+pr.read, pr.end))
 	}
 	return n, err
 }

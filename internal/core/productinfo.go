@@ -203,10 +203,8 @@ func readStringValue(v jsontext.Value) (string, error) {
 
 func cleanReleaseDate(date string) string {
 	date = strings.TrimSpace(date)
-	if idx := strings.Index(date, "T"); idx != -1 {
-		return date[:idx]
-	}
-	return date
+	day, _, _ := strings.Cut(date, "T")
+	return day
 }
 
 func normalizeImageURL(u string) string {

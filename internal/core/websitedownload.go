@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -296,10 +297,8 @@ func (d *Downloader) downloadWebsiteFile(ctx context.Context, spec, outputFile s
 func parseWebsiteFileSpec(spec string) (game, dlc, fileid string, err error) {
 	raw := strings.TrimPrefix(spec, config.ProtocolPrefix)
 	parts := strings.Split(raw, "/")
-	for _, p := range parts {
-		if p == "" {
-			return "", "", "", fmt.Errorf("invalid file id %q: empty segment", spec)
-		}
+	if slices.Contains(parts, "") {
+		return "", "", "", fmt.Errorf("invalid file id %q: empty segment", spec)
 	}
 	switch len(parts) {
 	case 2:

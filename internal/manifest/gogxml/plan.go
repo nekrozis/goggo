@@ -22,7 +22,7 @@ func SplitChunks(totalSize int64, chunkSize int64) ([]ChunkPlan, error) {
 
 	numChunks := 1 + int((totalSize-1)/chunkSize)
 	plans := make([]ChunkPlan, numChunks)
-	for i := 0; i < numChunks; i++ {
+	for i := range numChunks {
 		from := int64(i) * chunkSize
 		// The closing bound is decided by subtraction: the last chunk ends at
 		// totalSize-1, every other one at from+chunkSize-1 — and that addition

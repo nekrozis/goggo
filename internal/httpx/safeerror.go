@@ -23,14 +23,12 @@ func SafeError(err error) string {
 		return ""
 	}
 
-	// errors.As walks the wrapping chain established by fmt.Errorf("%w") and
-	// by *url.Error.Unwrap.
-	var status *StatusError
-	if errors.As(err, &status) {
+	// errors.AsType walks the wrapping chain established by fmt.Errorf("%w")
+	// and by *url.Error.Unwrap.
+	if status, ok := errors.AsType[*StatusError](err); ok {
 		return fmt.Sprintf("HTTP %d", status.Code)
 	}
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
+	if urlErr, ok := errors.AsType[*url.Error](err); ok {
 		// The URL is urlErr.URL; the cause is re-rendered by the same rules
 		// rather than trusted blindly, because the cause can itself be a
 		// wrapper around another URL carrier.

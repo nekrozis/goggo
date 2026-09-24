@@ -120,7 +120,7 @@ func (b *Bar) Create(length int, fraction float64) string {
 	if b.useColor {
 		out = append(out, ansiBarColor...)
 	}
-	for i := 0; i < whole; i++ {
+	for range whole {
 		out = append(out, fullChar...)
 	}
 	if whole < length {

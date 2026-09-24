@@ -37,10 +37,10 @@ func anyFullFailure(games []gamedetails.GameDetails) bool {
 // the filter) and irrelevant for JSON (it filters nothing). A full downlink
 // failure renders its line and then fails the command: the diagnosis and
 // the exit code arrive together, neither swallowing the other.
-func runListDetails(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer) outcome {
+func runListDetails(ctx context.Context, ui *console, d *core.Downloader, inv invocation) outcome {
 	games, err := d.ListGameDetails(ctx, inv.args, productRefMode(inv))
 	if err != nil {
-		return reportError(stderr, err)
+		return reportError(ui.ErrOut(), err)
 	}
 
 	if inv.json {
@@ -48,8 +48,8 @@ func runListDetails(ctx context.Context, d *core.Downloader, inv invocation, std
 		for i := range games {
 			list = append(list, games[i].GetDetailsAsJson())
 		}
-		if err := util.WriteStyledJSON(stdout, list); err != nil {
-			return reportError(stderr, err)
+		if err := util.WriteStyledJSON(ui.Out(), list); err != nil {
+			return reportError(ui.ErrOut(), err)
 		}
 		if anyFullFailure(games) {
 			return outcomeOperationFailure
@@ -59,9 +59,9 @@ func runListDetails(ctx context.Context, d *core.Downloader, inv invocation, std
 
 	bl, err := blacklist.LoadBlacklist(inv.cfg.BlacklistFilePath)
 	if err != nil {
-		return reportError(stderr, err)
+		return reportError(ui.ErrOut(), err)
 	}
-	renderGameDetailsText(stdout, stderr, games, bl, inv.cfg.MsgLevel >= msgLevelVerbose)
+	renderGameDetailsText(ui.Out(), ui.ErrOut(), games, bl, inv.cfg.MsgLevel >= msgLevelVerbose)
 	if anyFullFailure(games) {
 		return outcomeOperationFailure
 	}
@@ -71,28 +71,28 @@ func runListDetails(ctx context.Context, d *core.Downloader, inv invocation, std
 // renderArtifacts turns the write side's ledger into lines. Serials finding an
 // existing file prints NOTHING — the skip is recorded in the ledger, and the
 // exit code is unaffected.
-func renderArtifacts(out, errOut io.Writer, saved []core.SavedArtifact) {
+func renderArtifacts(ui *console, saved []core.SavedArtifact) {
 	for _, a := range saved {
 		switch a.Action {
 		case core.ArtifactWrote:
 			switch a.Kind {
 			case core.ArtifactSerials:
-				fmt.Fprintf(out, "Saving serials: %s\n", a.Path)
+				fmt.Fprintf(ui.Out(), "Saving serials: %s\n", a.Path)
 			case core.ArtifactChangelog:
-				fmt.Fprintf(out, "Saving changelog: %s\n", a.Path)
+				fmt.Fprintf(ui.Out(), "Saving changelog: %s\n", a.Path)
 			case core.ArtifactGameDetailsJSON, core.ArtifactProductJSON:
-				fmt.Fprintf(out, "Saving JSON data: %s\n", a.Path)
+				fmt.Fprintf(ui.Out(), "Saving JSON data: %s\n", a.Path)
 			default:
-				fmt.Fprintf(out, "Saving %s: %s\n", a.Kind, a.Path)
+				fmt.Fprintf(ui.Out(), "Saving %s: %s\n", a.Kind, a.Path)
 			}
 		case core.ArtifactSkippedExists:
 			// silent by design
 		case core.ArtifactSkippedUnchanged:
-			fmt.Fprintf(out, "Changelog unchanged. Skipping: %s\n", a.Path)
+			fmt.Fprintf(ui.Out(), "Changelog unchanged. Skipping: %s\n", a.Path)
 		case core.ArtifactSkippedFormat:
-			fmt.Fprintf(errOut, "Warning: %v: %s\n", a.Err, a.Path)
+			fmt.Fprintf(ui.ErrOut(), "Warning: %v: %s\n", a.Err, a.Path)
 		case core.ArtifactFailed:
-			fmt.Fprintf(errOut, "Failed: %s: %v\n", a.Path, a.Err)
+			fmt.Fprintf(ui.ErrOut(), "Failed: %s: %v\n", a.Path, a.Err)
 		}
 	}
 }

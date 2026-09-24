@@ -17,13 +17,13 @@ import (
 // under the installation root is not explained by the manifest. The exit code
 // therefore reports whether the CHECK worked — unlike `verify`, whose mismatch
 // means the installation does not match what it should be.
-func (c *console) runOrphansCheck(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer) outcome {
+func (c *console) runOrphansCheck(ctx context.Context, d *core.Downloader, inv invocation) outcome {
 	res, err := d.CheckOrphans(ctx, core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build, productRefMode(inv)))
-	renderNotices(stdout, stderr, res.Notices)
+	renderNotices(c, res.Notices)
 	if err != nil {
-		return reportError(stderr, err)
+		return reportError(c.ErrOut(), err)
 	}
-	renderOrphans(stdout, res)
+	renderOrphans(c.Out(), res)
 	return outcomeOK
 }
 
@@ -36,17 +36,17 @@ func (c *console) runOrphansCheck(ctx context.Context, d *core.Downloader, inv i
 //
 // The interrupt context is set up here because a cancelled removal stops and
 // still reports what it deleted.
-func (c *console) runOrphansRemove(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer) outcome {
+func (c *console) runOrphansRemove(ctx context.Context, d *core.Downloader, inv invocation) outcome {
 	ctx, stopSignal := signal.NotifyContext(ctx, os.Interrupt)
 	defer stopSignal()
 
 	res, err := d.CheckOrphans(ctx, core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build, productRefMode(inv)))
-	renderNotices(stdout, stderr, res.Notices)
+	renderNotices(c, res.Notices)
 	if err != nil {
-		return reportError(stderr, err)
+		return reportError(c.ErrOut(), err)
 	}
-	renderOrphans(stdout, res)
-	return c.removeOrphans(ctx, d, res, inv.yes, stdout, stderr)
+	renderOrphans(c.Out(), res)
+	return c.removeOrphans(ctx, d, res, inv.yes)
 }
 
 // removeOrphans authorizes and applies one removal.
@@ -55,18 +55,18 @@ func (c *console) runOrphansRemove(ctx context.Context, d *core.Downloader, inv 
 // sources: the explicit --yes flag, which says "I authorized this — do not
 // ask", or the answer the terminal gives. A run without authorization deletes
 // nothing and reports that.
-func (c *console) removeOrphans(ctx context.Context, d *core.Downloader, res core.OrphansResult, yes bool, stdout, stderr io.Writer) outcome {
+func (c *console) removeOrphans(ctx context.Context, d *core.Downloader, res core.OrphansResult, yes bool) outcome {
 	if len(res.Files) == 0 {
 		// Nothing to authorize and nothing to delete; the count line above
 		// already said so.
 		return outcomeOK
 	}
 	if !c.authorized(yes, len(res.Files)) {
-		fmt.Fprintln(stderr, "Nothing was deleted.")
+		fmt.Fprintln(c.ErrOut(), "Nothing was deleted.")
 		return outcomeOK
 	}
 
-	fmt.Fprintf(stdout, "Deleting %d orphaned files\n", len(res.Files))
+	fmt.Fprintf(c.Out(), "Deleting %d orphaned files\n", len(res.Files))
 	attempts, err := d.RemoveOrphans(ctx, res)
 	failed := 0
 	for _, attempt := range attempts {
@@ -75,19 +75,19 @@ func (c *console) removeOrphans(ctx context.Context, d *core.Downloader, res cor
 			// The CLI names the reason as well as the object: a failed deletion
 			// is the one thing here a user may have to act on with the
 			// filesystem (the install tail reports the object alone).
-			fmt.Fprintf(stderr, "Failed to delete %s: %v\n", attempt.Path, attempt.Err)
+			fmt.Fprintf(c.ErrOut(), "Failed to delete %s: %v\n", attempt.Path, attempt.Err)
 			continue
 		}
-		fmt.Fprintf(stdout, "  %s\n", res.Relative(attempt.Path))
+		fmt.Fprintf(c.Out(), "  %s\n", res.Relative(attempt.Path))
 	}
 	if err != nil {
 		// An interruption: what was deleted has been reported above, and the
 		// run says why it stopped.
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-			fmt.Fprintf(stderr, "Error: %v\n", err)
+			fmt.Fprintf(c.ErrOut(), "Error: %v\n", err)
 			return outcomeInterrupted
 		}
-		return reportError(stderr, err)
+		return reportError(c.ErrOut(), err)
 	}
 	if failed > 0 {
 		return outcomeOperationFailure

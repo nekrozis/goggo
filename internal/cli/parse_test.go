@@ -556,7 +556,7 @@ func TestManifestCreateStdoutFailure(t *testing.T) {
 		inv := invocation{cfg: cfg, outputFile: "-"}
 		inv.target.Product = target
 		var errOut bytes.Buffer
-		if got := runManifestCreate(inv, w, &errOut); got != outcomeOperationFailure {
+		if got := runManifestCreate(newConsole(strings.NewReader(""), w, &errOut), inv); got != outcomeOperationFailure {
 			t.Errorf("%s: outcome = %v, want an operation failure", name, got)
 		}
 	}

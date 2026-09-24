@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -360,4 +361,29 @@ func TestRunListDetailsDownlinkVerdict(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestRenderArtifactsStreamRouting pins the migrated helper's channel
+// decisions: failures and format warnings go to the error stream, the
+// progress and skip lines go to the output stream.
+func TestRenderArtifactsStreamRouting(t *testing.T) {
+	var out, errOut bytes.Buffer
+	ui := newConsole(strings.NewReader(""), &out, &errOut)
+	renderArtifacts(ui, []core.SavedArtifact{
+		{Kind: core.ArtifactSerials, Action: core.ArtifactWrote, Path: "s.txt"},
+		{Kind: core.ArtifactGameDetailsJSON, Action: core.ArtifactFailed, Path: "g.json", Err: errors.New("disk on fire")},
+		{Kind: core.ArtifactChangelog, Action: core.ArtifactSkippedFormat, Path: "c.txt", Err: errors.New("unsupported markup")},
+	})
+	gotOut, gotErr := out.String(), errOut.String()
+	if !strings.Contains(gotOut, "Saving serials: s.txt") {
+		t.Errorf("stdout = %q, want the wrote-line", gotOut)
+	}
+	if strings.Contains(gotOut, "disk on fire") || strings.Contains(gotOut, "unsupported markup") {
+		t.Errorf("stdout carries failure/warning text:\n%s", gotOut)
+	}
+	for _, want := range []string{"Failed: g.json: disk on fire", "Warning: unsupported markup: c.txt"} {
+		if !strings.Contains(gotErr, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, gotErr)
+		}
+	}
 }

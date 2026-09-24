@@ -195,11 +195,11 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		}
 		return outcomeOK
 	case cmdManifestInspect:
-		return runManifestInspect(inv, stdout, stderr)
+		return runManifestInspect(ui, inv)
 	case cmdManifestVerify:
-		return runManifestVerify(inv, stdout, stderr)
+		return runManifestVerify(ui, inv)
 	case cmdManifestCreate:
-		return runManifestCreate(inv, stdout, stderr)
+		return runManifestCreate(ui, inv)
 	case cmdAuthLogin:
 		// An explicit login always runs the flow, even with a usable session
 		// stored: that is what asking to log in means.
@@ -301,7 +301,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		return outcomeOK
 
 	case cmdBackupList:
-		return runListDetails(ctx, d, inv, stdout, stderr)
+		return runListDetails(ctx, ui, d, inv)
 
 	case cmdGalaxyBuilds, cmdGalaxyManifest:
 		// "galaxy builds" lists a product's builds; "galaxy manifest" shows one
@@ -326,7 +326,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 			// The Linux support messages are rendered even when the run then fails:
 			// they go to stdout and the missing fallback is reported on stderr
 			// afterwards.
-			renderNotice(stdout, stderr, res.Notice)
+			renderNotice(ui, res.Notice)
 		}
 		if err != nil {
 			return reportError(stderr, err)
@@ -369,7 +369,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 				fmt.Fprintln(stderr, res.Notice.Text)
 			}
 		} else {
-			renderNotice(stdout, stderr, res.Notice)
+			renderNotice(ui, res.Notice)
 		}
 		if err != nil {
 			return reportError(stderr, err)
@@ -397,7 +397,7 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		req := core.NewInstallRequest(inv.cfg, inv.target.Product, inv.target.Build, productRefMode(inv))
 		res, err := d.Verify(ctx, req)
 		for _, notice := range res.Notices {
-			renderNotice(stdout, stderr, notice)
+			renderNotice(ui, notice)
 		}
 		if err != nil {
 			return reportError(stderr, err)
@@ -405,11 +405,11 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		return renderVerify(stdout, stderr, res)
 
 	case cmdOrphansCheck:
-		return ui.runOrphansCheck(ctx, d, inv, stdout, stderr)
+		return ui.runOrphansCheck(ctx, d, inv)
 
 	case cmdBackupDownload:
 		if len(inv.args) == 1 && strings.Contains(inv.args[0], "/") {
-			return ui.runWebsiteFiles(ctx, d, inv, stdout, stderr, progress)
+			return ui.runWebsiteFiles(ctx, d, inv, progress)
 		}
 		if len(inv.args) >= 2 {
 			filesInv := inv
@@ -419,12 +419,12 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 				specs = append(specs, game+"/"+fileID)
 			}
 			filesInv.args = specs
-			return ui.runWebsiteFiles(ctx, d, filesInv, stdout, stderr, progress)
+			return ui.runWebsiteFiles(ctx, d, filesInv, progress)
 		}
-		return ui.runWebsiteDownload(ctx, d, inv, stdout, stderr, progress)
+		return ui.runWebsiteDownload(ctx, d, inv, progress)
 
 	case cmdOrphansRemove:
-		return ui.runOrphansRemove(ctx, d, inv, stdout, stderr)
+		return ui.runOrphansRemove(ctx, d, inv)
 
 	case cmdInstall:
 		// The lifecycle has one owner and one order: signal context → renderer

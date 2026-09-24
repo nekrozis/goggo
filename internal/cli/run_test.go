@@ -559,12 +559,12 @@ func TestRenderCDNNames(t *testing.T) {
 func TestRenderNotice(t *testing.T) {
 	var out, errOut bytes.Buffer
 
-	renderNotice(&out, &errOut, core.Notice{})
+	renderNotice(newConsole(strings.NewReader(""), &out, &errOut), core.Notice{})
 	if out.Len() != 0 || errOut.Len() != 0 {
 		t.Errorf("an empty notice wrote %q / %q, want nothing", out.String(), errOut.String())
 	}
 
-	renderNotice(&out, &errOut, core.Notice{Text: "Only generation 2 builds are supported currently"})
+	renderNotice(newConsole(strings.NewReader(""), &out, &errOut), core.Notice{Text: "Only generation 2 builds are supported currently"})
 	if want := "Only generation 2 builds are supported currently\n"; out.String() != want {
 		t.Errorf("stdout = %q, want %q", out.String(), want)
 	}
@@ -573,7 +573,7 @@ func TestRenderNotice(t *testing.T) {
 	}
 
 	out.Reset()
-	renderNotice(&out, &errOut, core.Notice{Text: "Didn't match any products", Err: true})
+	renderNotice(newConsole(strings.NewReader(""), &out, &errOut), core.Notice{Text: "Didn't match any products", Err: true})
 	if out.Len() != 0 {
 		t.Errorf("stdout = %q, want nothing for a stderr notice", out.String())
 	}

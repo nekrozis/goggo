@@ -38,23 +38,23 @@ func renderCDNNames(w io.Writer, names []string) error {
 // renderNotice prints one of the messages a command emits instead of doing the
 // work, on the stream the notice carries. These are not failures: the run still
 // ends with exit code 0.
-func renderNotice(stdout, stderr io.Writer, n core.Notice) {
+func renderNotice(ui *console, n core.Notice) {
 	if n.Text == "" {
 		return
 	}
 	if n.Err {
-		fmt.Fprintln(stderr, n.Text)
+		fmt.Fprintln(ui.ErrOut(), n.Text)
 		return
 	}
-	fmt.Fprintln(stdout, n.Text)
+	fmt.Fprintln(ui.Out(), n.Text)
 }
 
 // renderNotices writes a whole message list in order. The read-only commands
 // (verify, orphans) receive the plan's diagnostics as data and show them the way
 // an install streams them: the error notices on the error stream, everything else
 // on the output stream.
-func renderNotices(stdout, stderr io.Writer, notices []core.Notice) {
+func renderNotices(ui *console, notices []core.Notice) {
 	for _, notice := range notices {
-		renderNotice(stdout, stderr, notice)
+		renderNotice(ui, notice)
 	}
 }

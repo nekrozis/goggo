@@ -192,7 +192,7 @@ func TestRemoveOrphansWithYesDoesNotAsk(t *testing.T) {
 	var out, errOut bytes.Buffer
 	ui := newConsole(strings.NewReader(""), &out, &errOut)
 
-	got := ui.removeOrphans(context.Background(), d, res, true, &out, &errOut)
+	got := ui.removeOrphans(context.Background(), d, res, true)
 
 	if got != outcomeOK {
 		t.Errorf("outcome = %v, want success", got)
@@ -250,7 +250,7 @@ func TestRemoveOrphansAsksWithoutYes(t *testing.T) {
 			var out, errOut bytes.Buffer
 			ui := newConsole(strings.NewReader(c.stdin), &out, &errOut)
 
-			got := ui.removeOrphans(context.Background(), d, res, false, &out, &errOut)
+			got := ui.removeOrphans(context.Background(), d, res, false)
 
 			if got != outcomeOK {
 				t.Errorf("outcome = %v, want success: a declined removal is not a failure", got)
@@ -292,7 +292,7 @@ func TestRemoveOrphansWithoutFilesNeedsNoAuthorization(t *testing.T) {
 	ui := newConsole(strings.NewReader(""), &out, &errOut)
 
 	if got := ui.removeOrphans(context.Background(), &core.Downloader{},
-		core.OrphansResult{InstallPath: t.TempDir()}, false, &out, &errOut); got != outcomeOK {
+		core.OrphansResult{InstallPath: t.TempDir()}, false); got != outcomeOK {
 		t.Errorf("outcome = %v, want success", got)
 	}
 	if errOut.Len() != 0 || out.Len() != 0 {

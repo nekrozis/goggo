@@ -58,10 +58,10 @@ func writeJSONError(w io.Writer, targetFile, manifestFile, errorKind, message st
 	})
 }
 
-func runManifestInspect(inv invocation, stdout, stderr io.Writer) outcome {
+func runManifestInspect(ui *console, inv invocation) outcome {
 	target := inv.target.Product
 	if target == "" {
-		fmt.Fprintln(stderr, "Error: manifest inspect requires a manifest file path")
+		fmt.Fprintln(ui.ErrOut(), "Error: manifest inspect requires a manifest file path")
 		return outcomeUsageFailure
 	}
 
@@ -69,9 +69,9 @@ func runManifestInspect(inv invocation, stdout, stderr io.Writer) outcome {
 	if err != nil {
 		kind := openKind(err, "MISSING_MANIFEST")
 		if inv.json {
-			writeJSONError(stdout, "", target, kind, err.Error())
+			writeJSONError(ui.Out(), "", target, kind, err.Error())
 		} else {
-			fmt.Fprintf(stderr, "Error: cannot open manifest %s: %v\n", target, err)
+			fmt.Fprintf(ui.ErrOut(), "Error: cannot open manifest %s: %v\n", target, err)
 		}
 		return outcomeUsageFailure
 	}
@@ -85,29 +85,29 @@ func runManifestInspect(inv invocation, stdout, stderr io.Writer) outcome {
 			errorKind = "MANIFEST_SEMANTIC_ERROR"
 		}
 		if inv.json {
-			writeJSONError(stdout, "", target, errorKind, err.Error())
+			writeJSONError(ui.Out(), "", target, errorKind, err.Error())
 		} else {
-			fmt.Fprintf(stderr, "Error: %s: %v\n", errorKind, err)
+			fmt.Fprintf(ui.ErrOut(), "Error: %s: %v\n", errorKind, err)
 		}
 		return outcomeUsageFailure
 	}
 
 	if inv.json {
-		enc := json.NewEncoder(stdout)
+		enc := json.NewEncoder(ui.Out())
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(manifest)
 		return outcomeOK
 	}
 
-	fmt.Fprintf(stdout, "Manifest: %s\n", target)
-	fmt.Fprintf(stdout, "  File:        %s\n", manifest.Name)
-	fmt.Fprintf(stdout, "  Total Size:  %d bytes\n", manifest.TotalSize)
-	fmt.Fprintf(stdout, "  Total Chunks: %d\n", manifest.Chunks)
-	fmt.Fprintf(stdout, "  File MD5:    %s\n", manifest.MD5)
+	fmt.Fprintf(ui.Out(), "Manifest: %s\n", target)
+	fmt.Fprintf(ui.Out(), "  File:        %s\n", manifest.Name)
+	fmt.Fprintf(ui.Out(), "  Total Size:  %d bytes\n", manifest.TotalSize)
+	fmt.Fprintf(ui.Out(), "  Total Chunks: %d\n", manifest.Chunks)
+	fmt.Fprintf(ui.Out(), "  File MD5:    %s\n", manifest.MD5)
 	if len(manifest.ChunkList) > 0 {
-		fmt.Fprintf(stdout, "Chunks:\n")
+		fmt.Fprintf(ui.Out(), "Chunks:\n")
 		for _, c := range manifest.ChunkList {
-			fmt.Fprintf(stdout, "  [%3d] range: %10d - %10d (%8d bytes) md5: %s\n",
+			fmt.Fprintf(ui.Out(), "  [%3d] range: %10d - %10d (%8d bytes) md5: %s\n",
 				c.ID, c.From, c.To, c.To-c.From+1, c.Hash)
 		}
 	}
@@ -172,10 +172,10 @@ func resolveManifestPath(targetFile, explicitXML, gameName, xmlDir string) (stri
 	return "", fmt.Errorf("no manifest xml found for %s (searched canonical paths)", filepath.Base(targetFile))
 }
 
-func runManifestVerify(inv invocation, stdout, stderr io.Writer) outcome {
+func runManifestVerify(ui *console, inv invocation) outcome {
 	target := inv.target.Product
 	if target == "" {
-		fmt.Fprintln(stderr, "Error: manifest verify requires a target file path")
+		fmt.Fprintln(ui.ErrOut(), "Error: manifest verify requires a target file path")
 		return outcomeUsageFailure
 	}
 
@@ -183,9 +183,9 @@ func runManifestVerify(inv invocation, stdout, stderr io.Writer) outcome {
 	if err != nil {
 		kind := openKind(err, "MISSING_FILE")
 		if inv.json {
-			writeJSONError(stdout, target, inv.xmlPath, kind, err.Error())
+			writeJSONError(ui.Out(), target, inv.xmlPath, kind, err.Error())
 		} else {
-			fmt.Fprintf(stderr, "Error: cannot open target file %s: %v\n", target, err)
+			fmt.Fprintf(ui.ErrOut(), "Error: cannot open target file %s: %v\n", target, err)
 		}
 		return outcomeUsageFailure
 	}
@@ -194,9 +194,9 @@ func runManifestVerify(inv invocation, stdout, stderr io.Writer) outcome {
 	fi, err := targetF.Stat()
 	if err != nil {
 		if inv.json {
-			writeJSONError(stdout, target, inv.xmlPath, "IO_ERROR", err.Error())
+			writeJSONError(ui.Out(), target, inv.xmlPath, "IO_ERROR", err.Error())
 		} else {
-			fmt.Fprintf(stderr, "Error: cannot stat target file %s: %v\n", target, err)
+			fmt.Fprintf(ui.ErrOut(), "Error: cannot stat target file %s: %v\n", target, err)
 		}
 		return outcomeUsageFailure
 	}
@@ -205,9 +205,9 @@ func runManifestVerify(inv invocation, stdout, stderr io.Writer) outcome {
 	if err != nil {
 		kind := openKind(err, "MISSING_MANIFEST")
 		if inv.json {
-			writeJSONError(stdout, target, inv.xmlPath, kind, err.Error())
+			writeJSONError(ui.Out(), target, inv.xmlPath, kind, err.Error())
 		} else {
-			fmt.Fprintf(stderr, "Error: %v\n", err)
+			fmt.Fprintf(ui.ErrOut(), "Error: %v\n", err)
 		}
 		return outcomeUsageFailure
 	}
@@ -216,9 +216,9 @@ func runManifestVerify(inv invocation, stdout, stderr io.Writer) outcome {
 	if err != nil {
 		kind := openKind(err, "MISSING_MANIFEST")
 		if inv.json {
-			writeJSONError(stdout, target, resolvedXML, kind, err.Error())
+			writeJSONError(ui.Out(), target, resolvedXML, kind, err.Error())
 		} else {
-			fmt.Fprintf(stderr, "Error: cannot open manifest %s: %v\n", resolvedXML, err)
+			fmt.Fprintf(ui.ErrOut(), "Error: cannot open manifest %s: %v\n", resolvedXML, err)
 		}
 		return outcomeUsageFailure
 	}
@@ -232,9 +232,9 @@ func runManifestVerify(inv invocation, stdout, stderr io.Writer) outcome {
 			errorKind = "MANIFEST_SEMANTIC_ERROR"
 		}
 		if inv.json {
-			writeJSONError(stdout, target, resolvedXML, errorKind, err.Error())
+			writeJSONError(ui.Out(), target, resolvedXML, errorKind, err.Error())
 		} else {
-			fmt.Fprintf(stderr, "Error: %s in %s: %v\n", errorKind, resolvedXML, err)
+			fmt.Fprintf(ui.ErrOut(), "Error: %s in %s: %v\n", errorKind, resolvedXML, err)
 		}
 		return outcomeUsageFailure
 	}
@@ -242,16 +242,16 @@ func runManifestVerify(inv invocation, stdout, stderr io.Writer) outcome {
 	// Manifest applicability check
 	if inv.xmlPath != "" && filepath.Base(target) != manifest.Name {
 		if !inv.json {
-			fmt.Fprintf(stderr, "warning: manifest name %q does not match target file name %q\n", manifest.Name, filepath.Base(target))
+			fmt.Fprintf(ui.ErrOut(), "warning: manifest name %q does not match target file name %q\n", manifest.Name, filepath.Base(target))
 		}
 	}
 
 	report, err := gogxml.Verify(targetF, fi.Size(), manifest)
 	if err != nil {
 		if inv.json {
-			writeJSONError(stdout, target, resolvedXML, "IO_ERROR", err.Error())
+			writeJSONError(ui.Out(), target, resolvedXML, "IO_ERROR", err.Error())
 		} else {
-			fmt.Fprintf(stderr, "Error during verification: %v\n", err)
+			fmt.Fprintf(ui.ErrOut(), "Error during verification: %v\n", err)
 		}
 		return outcomeOperationFailure
 	}
@@ -265,10 +265,10 @@ func runManifestVerify(inv invocation, stdout, stderr io.Writer) outcome {
 		// the manifest never applied — while a corrupt file is CORRUPT.
 		switch report.Status {
 		case gogxml.StatusSizeMismatch:
-			writeJSONError(stdout, target, resolvedXML, "SIZE_MISMATCH",
+			writeJSONError(ui.Out(), target, resolvedXML, "SIZE_MISMATCH",
 				fmt.Sprintf("file is %d bytes, manifest declares %d", report.ActualSize, report.ExpectedSize))
 		default:
-			enc := json.NewEncoder(stdout)
+			enc := json.NewEncoder(ui.Out())
 			enc.SetIndent("", "  ")
 			_ = enc.Encode(verifyResultJSON{
 				VerifyReport: report,
@@ -281,23 +281,23 @@ func runManifestVerify(inv invocation, stdout, stderr io.Writer) outcome {
 		return outcomeOperationFailure
 	}
 
-	fmt.Fprintf(stdout, "Target:   %s (%d bytes)\n", target, fi.Size())
-	fmt.Fprintf(stdout, "Manifest: %s\n", resolvedXML)
-	fmt.Fprintf(stdout, "Status:   %s\n", report.Status)
+	fmt.Fprintf(ui.Out(), "Target:   %s (%d bytes)\n", target, fi.Size())
+	fmt.Fprintf(ui.Out(), "Manifest: %s\n", resolvedXML)
+	fmt.Fprintf(ui.Out(), "Status:   %s\n", report.Status)
 
 	if report.Status == gogxml.StatusSizeMismatch {
-		fmt.Fprintf(stdout, "Error: size mismatch (expected %d bytes, got %d bytes)\n", report.ExpectedSize, report.ActualSize)
+		fmt.Fprintf(ui.Out(), "Error: size mismatch (expected %d bytes, got %d bytes)\n", report.ExpectedSize, report.ActualSize)
 		return outcomeOperationFailure
 	}
 
-	fmt.Fprintf(stdout, "Chunks:   %d total, %d corrupt\n", report.TotalChunks, report.CorruptChunks)
-	fmt.Fprintf(stdout, "File MD5: expected %s, actual %s (match: %v)\n", report.ExpectedMD5, report.ActualMD5, report.FileMD5Match)
+	fmt.Fprintf(ui.Out(), "Chunks:   %d total, %d corrupt\n", report.TotalChunks, report.CorruptChunks)
+	fmt.Fprintf(ui.Out(), "File MD5: expected %s, actual %s (match: %v)\n", report.ExpectedMD5, report.ActualMD5, report.FileMD5Match)
 
 	if report.CorruptChunks > 0 {
-		fmt.Fprintf(stdout, "Corrupt Chunks:\n")
+		fmt.Fprintf(ui.Out(), "Corrupt Chunks:\n")
 		for _, c := range report.Chunks {
 			if !c.OK {
-				fmt.Fprintf(stdout, "  [%3d] [%10d, %10d] expected %s, actual %s\n", c.ID, c.From, c.To, c.ExpectedMD5, c.ActualMD5)
+				fmt.Fprintf(ui.Out(), "  [%3d] [%10d, %10d] expected %s, actual %s\n", c.ID, c.From, c.To, c.ExpectedMD5, c.ActualMD5)
 			}
 		}
 	}
@@ -308,23 +308,23 @@ func runManifestVerify(inv invocation, stdout, stderr io.Writer) outcome {
 	return outcomeOperationFailure
 }
 
-func runManifestCreate(inv invocation, stdout, stderr io.Writer) outcome {
+func runManifestCreate(ui *console, inv invocation) outcome {
 	target := inv.target.Product
 	if target == "" {
-		fmt.Fprintln(stderr, "Error: manifest create requires a target file path")
+		fmt.Fprintln(ui.ErrOut(), "Error: manifest create requires a target file path")
 		return outcomeUsageFailure
 	}
 
 	f, err := os.Open(target)
 	if err != nil {
-		fmt.Fprintf(stderr, "Error: cannot open %s: %v\n", target, err)
+		fmt.Fprintf(ui.ErrOut(), "Error: cannot open %s: %v\n", target, err)
 		return outcomeUsageFailure
 	}
 	defer f.Close()
 
 	fi, err := f.Stat()
 	if err != nil {
-		fmt.Fprintf(stderr, "Error: cannot stat %s: %v\n", target, err)
+		fmt.Fprintf(ui.ErrOut(), "Error: cannot stat %s: %v\n", target, err)
 		return outcomeUsageFailure
 	}
 
@@ -335,25 +335,25 @@ func runManifestCreate(inv invocation, stdout, stderr io.Writer) outcome {
 
 	manifest, err := gogxml.Generate(f, fi.Size(), chunkSize, filepath.Base(target))
 	if err != nil {
-		fmt.Fprintf(stderr, "Error generating manifest: %v\n", err)
+		fmt.Fprintf(ui.ErrOut(), "Error generating manifest: %v\n", err)
 		return outcomeOperationFailure
 	}
 
 	data, err := gogxml.Marshal(manifest)
 	if err != nil {
-		fmt.Fprintf(stderr, "Error marshaling manifest: %v\n", err)
+		fmt.Fprintf(ui.ErrOut(), "Error marshaling manifest: %v\n", err)
 		return outcomeOperationFailure
 	}
 
-	// Output to stdout if -o -. A write failure — including a short write — is
+	// Output to ui.Out() if -o -. A write failure — including a short write — is
 	// an operation failure: a half-emitted manifest must not exit 0.
 	if inv.outputFile == "-" {
-		n, err := stdout.Write(data)
+		n, err := ui.Out().Write(data)
 		if err == nil && n != len(data) {
 			err = io.ErrShortWrite
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "Error writing manifest to stdout: %v\n", err)
+			fmt.Fprintf(ui.ErrOut(), "Error writing manifest to ui.Out(): %v\n", err)
 			return outcomeOperationFailure
 		}
 		return outcomeOK
@@ -370,10 +370,10 @@ func runManifestCreate(inv invocation, stdout, stderr io.Writer) outcome {
 	}
 
 	if err := gogxml.WriteAtomic(outputPath, data, 0o644); err != nil {
-		fmt.Fprintf(stderr, "Error writing manifest to %s: %v\n", outputPath, err)
+		fmt.Fprintf(ui.ErrOut(), "Error writing manifest to %s: %v\n", outputPath, err)
 		return outcomeOperationFailure
 	}
 
-	fmt.Fprintf(stdout, "Created XML manifest: %s\n", outputPath)
+	fmt.Fprintf(ui.Out(), "Created XML manifest: %s\n", outputPath)
 	return outcomeOK
 }

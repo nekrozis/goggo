@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 
@@ -36,7 +35,7 @@ func websiteDownloadRequest(inv invocation) core.WebsiteDownloadRequest {
 	return req
 }
 
-func (c *console) runWebsiteDownload(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer, progress *transfer.Progress) outcome {
+func (c *console) runWebsiteDownload(ctx context.Context, d *core.Downloader, inv invocation, progress *transfer.Progress) outcome {
 	ctx, stopSignal := signal.NotifyContext(ctx, os.Interrupt)
 	c.attachInstallUI(inv.cfg, progress, "Download")
 
@@ -54,32 +53,32 @@ func (c *console) runWebsiteDownload(ctx context.Context, d *core.Downloader, in
 	stopSignal()
 	c.endInstallScope()
 
-	renderNotices(stdout, stderr, res.Notices)
-	renderArtifacts(stdout, stderr, res.Saved)
+	renderNotices(c, res.Notices)
+	renderArtifacts(c, res.Saved)
 	// The "Total size" line prints whenever a queue existed — including the run
 	// the free-space gate then refused. It is rendered after the frame, not
 	// before the queue starts, because the renderer owns the terminal while it
 	// lives. The number is core's, the placement is the front end's.
 	if res.Tasks > 0 {
-		fmt.Fprintf(stdout, "Total size: %s\n", util.SizeString(uint64(res.TotalSize), inv.cfg.UnitFormat))
+		fmt.Fprintf(c.Out(), "Total size: %s\n", util.SizeString(uint64(res.TotalSize), inv.cfg.UnitFormat))
 	}
 
 	if result == stopCanceled {
 		return outcomeInterrupted
 	}
 	if runErr != nil {
-		fmt.Fprintf(stderr, "Error: %v\n", runErr)
+		fmt.Fprintf(c.ErrOut(), "Error: %v\n", runErr)
 		return outcomeOperationFailure
 	}
 	for _, f := range res.Failures {
-		fmt.Fprintf(stderr, "Failed: %s: %v\n", f.Destination, f.Err)
+		fmt.Fprintf(c.ErrOut(), "Failed: %s: %v\n", f.Destination, f.Err)
 	}
 	for _, s := range res.Skipped {
 		switch s.Evidence {
 		case transfer.SkipVerifiedManifest:
-			fmt.Fprintf(stdout, "Skipped (verified via local xml manifest): %s\n", s.Destination)
+			fmt.Fprintf(c.Out(), "Skipped (verified via local xml manifest): %s\n", s.Destination)
 		default:
-			fmt.Fprintf(stdout, "Skipped (size match, no xml manifest, chunk integrity unverified): %s\n", s.Destination)
+			fmt.Fprintf(c.Out(), "Skipped (size match, no xml manifest, chunk integrity unverified): %s\n", s.Destination)
 		}
 	}
 	if res.Failed() {
@@ -93,12 +92,12 @@ func (c *console) runWebsiteDownload(ctx context.Context, d *core.Downloader, in
 // spec fails; the command exits 1 iff any spec failed. Cancellation
 // outranks the aggregate: a stopped run reports 130, not the per-spec noise of
 // the specs it never reached.
-func (c *console) runWebsiteFiles(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer, progress *transfer.Progress) outcome {
+func (c *console) runWebsiteFiles(ctx context.Context, d *core.Downloader, inv invocation, progress *transfer.Progress) outcome {
 	// -o must not name an existing directory: that is a wrong argument, so it
 	// is answered as a usage error before any network work.
 	if inv.outputFile != "" {
 		if fi, err := os.Stat(inv.outputFile); err == nil && fi.IsDir() {
-			return reportError(stderr, usagef("-o names a directory: %s", inv.outputFile))
+			return reportError(c.ErrOut(), usagef("-o names a directory: %s", inv.outputFile))
 		}
 	}
 
@@ -130,7 +129,7 @@ func (c *console) runWebsiteFiles(ctx context.Context, d *core.Downloader, inv i
 	for _, o := range res.Outcomes {
 		if o.Err != nil {
 			failed = true
-			fmt.Fprintf(stderr, "Failed: %s: %v\n", o.Spec, o.Err)
+			fmt.Fprintf(c.ErrOut(), "Failed: %s: %v\n", o.Spec, o.Err)
 		}
 	}
 	if failed {

@@ -2,8 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/core"
@@ -220,4 +223,90 @@ func TestAuthStatusReportsSessionsSeparately(t *testing.T) {
 			t.Errorf("stdout = %q, want the bare first line", got)
 		}
 	})
+}
+
+// probeFlakyConsoleTransport fails the first www.gog.com/account request and
+// delegates the rest: the status report's seam for "the probe could not
+// answer".
+type probeFlakyConsoleTransport struct {
+	base    *sentinelTransport
+	mu      sync.Mutex
+	pending bool
+}
+
+func (t *probeFlakyConsoleTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.mu.Lock()
+	fail := t.pending && req.URL.Host == "www.gog.com" && req.URL.Path == "/account"
+	if fail {
+		t.pending = false
+	}
+	t.mu.Unlock()
+	if fail {
+		return nil, errors.New("fixture: probe transport down")
+	}
+	return t.base.RoundTrip(req)
+}
+
+func flakyProbeSentinelDeps(t *testing.T, f *sentinelFixture) core.Dependencies {
+	t.Helper()
+	target, err := url.Parse(f.URL)
+	if err != nil {
+		t.Fatalf("parse fixture URL: %v", err)
+	}
+	return core.Dependencies{HTTPTransport: &probeFlakyConsoleTransport{
+		base:    &sentinelTransport{target: target},
+		pending: true,
+	}}
+}
+
+// TestAuthStatusUnknownProbe locks the third probe answer: a transport
+// failure is reported as unknown — never as "Not logged in", which would
+// send the user to re-login a session that may be fine — and the exit code
+// stays 1 because unknown is not healthy for a script.
+func TestAuthStatusUnknownProbe(t *testing.T) {
+	sentinelRoots(t, sentinelExpiry(false))
+	f := newSentinelFixture(t)
+	var stdout, stderr bytes.Buffer
+	code := runWithDeps([]string{"auth", "status"}, strings.NewReader(""), &stdout, &stderr,
+		flakyProbeSentinelDeps(t, f))
+	if code != 1 {
+		t.Errorf("exit = %d, want 1: unknown is not healthy", code)
+	}
+	out := stdout.String()
+	if !strings.HasPrefix(out, "Login status: Unknown (probe failed: ") {
+		t.Errorf("stdout = %q, want the unknown line", out)
+	}
+	if strings.Contains(out, "Not logged in") {
+		t.Errorf("stdout folds unknown into not-logged-in:\n%s", out)
+	}
+	if strings.Contains(out, "API session: degraded") {
+		t.Errorf("no refresh was attempted on a live token; degraded must not appear:\n%s", out)
+	}
+}
+
+// TestAuthStatusParallelEvidence locks the composition: when the probe and
+// the refresh both fail, the two lines stand side by side, session first,
+// each naming its own evidence — never one as the cause of the other.
+func TestAuthStatusParallelEvidence(t *testing.T) {
+	sentinelRoots(t, sentinelExpiry(true))
+	f := newSentinelFixture(t)
+	f.setTokenStatus(http.StatusBadGateway)
+	var stdout, stderr bytes.Buffer
+	code := runWithDeps([]string{"auth", "status"}, strings.NewReader(""), &stdout, &stderr,
+		flakyProbeSentinelDeps(t, f))
+	if code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+	out := stdout.String()
+	i := strings.Index(out, "Login status: Unknown (probe failed: ")
+	j := strings.Index(out, "API session: degraded (refresh failed: ")
+	if i < 0 || j < 0 {
+		t.Fatalf("both evidence lines must appear:\n%s", out)
+	}
+	if i > j {
+		t.Errorf("session evidence must precede the API evidence:\n%s", out)
+	}
+	if strings.Contains(out, "because") {
+		t.Errorf("the lines must not be merged into a causal sentence:\n%s", out)
+	}
 }

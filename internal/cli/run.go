@@ -181,10 +181,17 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 			fmt.Fprintln(stdout, "API session: unknown")
 			return outcomeOK
 		}
-		fmt.Fprintln(stdout, "Login status: Not logged in")
-		// The first line is unchanged and so is the exit code; this line only
-		// explains why the API credential could not be renewed. The web
-		// session may differ — its state is not inferred here.
+		// The probe's own three answers, read once so the two lines below
+		// describe one moment: unknown is not the same fact as "not logged
+		// in", and saying so is what keeps a network blip from reading as a
+		// credential problem.
+		if perr := d.SessionProbeErr(); perr != nil {
+			fmt.Fprintf(stdout, "Login status: Unknown (probe failed: %v)\n", perr)
+		} else {
+			fmt.Fprintln(stdout, "Login status: Not logged in")
+		}
+		// The exit code is unchanged; this line states the API session's own
+		// evidence — parallel to the line above, never a cause of it.
 		if diag := d.APISessionDiag(); diag != "" {
 			fmt.Fprintf(stdout, "API session: degraded (refresh failed: %s)\n", diag)
 		}

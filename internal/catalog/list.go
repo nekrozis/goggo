@@ -33,9 +33,6 @@ type ProductFetcher interface {
 
 // ListOptions carries the configuration values one listing run reads.
 type ListOptions struct {
-	// Tags is forwarded to the products query, already split on commas.
-	Tags []string
-
 	// GameRegex is --game; FilterListPath is --game-list-file (used only
 	// when GameRegex is empty).
 	GameRegex      string
@@ -43,6 +40,8 @@ type ListOptions struct {
 
 	// IgnoreDLCCountRE is --ignore-dlc-count-regex.
 	IgnoreDLCCountRE string
+	// Tags is forwarded to the products query, already split on commas.
+	Tags []string
 
 	// InstallerPlatform is the platform mask the product must support when
 	// PlatformDetection is on.

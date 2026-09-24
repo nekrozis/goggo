@@ -12,6 +12,8 @@ import (
 // plus the item it was compared against, so a front end can report the size and
 // the hash without reading anything itself.
 type FileFact struct {
+	// Err is the observation failure — the file's state could not be read.
+	Err         error
 	Destination string
 	Item        model.GalaxyDepotItem
 
@@ -19,9 +21,6 @@ type FileFact struct {
 	// no fact about a file that could not be read, and neither "absent" nor
 	// "fine" may be claimed for it.
 	Status reconcile.FileStatus
-
-	// Err is the observation failure — the file's state could not be read.
-	Err error
 }
 
 // VerifyResult is one verification run's outcome. Like PlanResult it is data:

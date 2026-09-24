@@ -19,21 +19,25 @@ import (
 // GameDetails is one product's download face: the four file vectors, the DLC
 // subtree and the metadata. A DLC is a full GameDetails, not a flat entry.
 type GameDetails struct {
-	Installers    []GameFile
-	Extras        []GameFile
-	Patches       []GameFile
-	LanguagePacks []GameFile
-	DLCs          []GameDetails
+	// Downlink records what the downlink resolver could not deliver for this
+	// entry. nil means the entry carries no API-error evidence: no resolver
+	// attempt happened, or every refusal was an error-free unusable path, or
+	// the resolver simply succeeded.
+	Downlink                *DownlinkDiag
+	GamenameBasegame        string
+	ProductID               string
+	ProductJsonFilepath     string
+	GameDetailsJSONFilepath string
 
-	Gamename         string
-	GamenameBasegame string
-	ProductID        string
-	Title            string
-	TitleBasegame    string
-	Icon             string
-	Serials          string
-	Changelog        string
-	Logo             string
+	Gamename          string
+	ChangelogFilepath string
+	Changelog         string
+	Title             string
+	TitleBasegame     string
+	Icon              string
+	IconFilepath      string
+	Serials           string
+	MetadataDiag      string
 
 	// The rendered JSON documents the save-* flags request, and the diagnostics record
 	// what the extraction refused to guess at: SerialsDiag why serials stayed empty, and
@@ -42,20 +46,15 @@ type GameDetails struct {
 	ProductJson     string
 	GameDetailsJson string
 	SerialsDiag     string
-	MetadataDiag    string
+	Logo            string
+	LogoFilepath    string
 
-	// Downlink records what the downlink resolver could not deliver for this
-	// entry. nil means the entry carries no API-error evidence: no resolver
-	// attempt happened, or every refusal was an error-free unusable path, or
-	// the resolver simply succeeded.
-	Downlink *DownlinkDiag
-
-	SerialsFilepath         string
-	LogoFilepath            string
-	IconFilepath            string
-	ChangelogFilepath       string
-	GameDetailsJSONFilepath string
-	ProductJsonFilepath     string
+	SerialsFilepath string
+	Extras          []GameFile
+	Patches         []GameFile
+	Installers      []GameFile
+	DLCs            []GameDetails
+	LanguagePacks   []GameFile
 }
 
 // DownlinkDiag is the per-entry record of downlink resolution: how many files
@@ -64,10 +63,10 @@ type GameDetails struct {
 // before any type or include filter, so a mask-shrunk answer can never be
 // mistaken for a resolution failure.
 type DownlinkDiag struct {
+	FirstError string
 	Attempts   int
 	Failures   int
 	Usable     int
-	FirstError string
 }
 
 // FullFailure reports the state the acquisition contract refuses to let pass

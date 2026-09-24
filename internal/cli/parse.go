@@ -131,17 +131,17 @@ const (
 // everything option-specific lives here, which is what keeps the parse loop
 // from growing a name-by-name chain.
 type optionSpec struct {
-	id      optionID
+	parse   func(inv *invocation, value string) error
 	long    string
-	aliases []string
-	value   valueMode
-	hidden  bool
 	arg     string
 	summary string
 	// detail is the longer explanation a command topic prints under the
 	// option. Empty means the summary says everything.
-	detail string
-	parse  func(inv *invocation, value string) error
+	detail  string
+	aliases []string
+	id      optionID
+	value   valueMode
+	hidden  bool
 }
 
 // optionTable is the CLI's complete option vocabulary. The six

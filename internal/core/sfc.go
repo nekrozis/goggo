@@ -141,8 +141,8 @@ func (d *Downloader) extractContainer(ctx context.Context, src io.Reader, group 
 // transfer as a task, and that download must use the member's own chunks, hash
 // and size rather than anything derived again from the manifest.
 type sfcMember struct {
-	item        model.GalaxyDepotItem
 	destination string
+	item        model.GalaxyDepotItem
 }
 
 // sfcRegion is one distinct byte range of a container, with every member that
@@ -150,8 +150,9 @@ type sfcMember struct {
 // deduplicates identical files, so the region is read and hashed once for all of
 // them.
 type sfcRegion struct {
-	offset, size uint64
-	members      []sfcMember
+	members []sfcMember
+	offset  uint64
+	size    uint64
 }
 
 // declaresHash reports whether any member of the region carries a hash to check

@@ -52,17 +52,17 @@ func (d *Downloader) GetProductInfo(ctx context.Context, ref string, mode Produc
 }
 
 type rawProductInfoDoc struct {
+	Images                     rawProductImages `json:"images"`
+	Title                      string           `json:"title"`
+	ReleaseDate                string           `json:"release_date"`
 	ID                         jsontext.Value   `json:"id"`
 	Slug                       jsontext.Value   `json:"slug"`
-	Title                      string           `json:"title"`
-	ContentSystemCompatibility rawCompatibility `json:"content_system_compatibility"`
-	Platforms                  rawCompatibility `json:"platforms"`
-	Images                     rawProductImages `json:"images"`
-	ReleaseDate                string           `json:"release_date"`
 	Description                jsontext.Value   `json:"description"`
 	Tags                       jsontext.Value   `json:"tags"`
 	Genres                     jsontext.Value   `json:"genres"`
 	ExpandedDLCs               []jsontext.Value `json:"expanded_dlcs"`
+	ContentSystemCompatibility rawCompatibility `json:"content_system_compatibility"`
+	Platforms                  rawCompatibility `json:"platforms"`
 }
 
 type rawCompatibility struct {
@@ -78,9 +78,9 @@ type rawProductImages struct {
 }
 
 type rawDLCItem struct {
+	Title string         `json:"title"`
 	ID    jsontext.Value `json:"id"`
 	Slug  jsontext.Value `json:"slug"`
-	Title string         `json:"title"`
 }
 
 func parseProductInfo(raw []byte) (model.ProductInfo, error) {

@@ -19,11 +19,22 @@ import (
 // (and available generically through DoWithRetry); policies are not baked
 // into Do/Get.
 type Config struct {
-	// RetryPolicy is the default retry behaviour for GetBytesWithRetry.
-	// A zero MaxAttempts yields a single attempt (no retry). Business layers
-	// that need bespoke behaviour (e.g. OAuth 401-refresh) compose
-	// DoWithRetry with their own policy instead.
-	RetryPolicy RetryPolicy
+	// Transport optionally replaces the network exit of the client this
+	// package builds: the cookie jar and CookieFile persistence, the retry
+	// policy and the low-speed guard all stay this package's decisions.
+	//
+	// It is ignored when HTTPClient is set, and the TLS settings and connect
+	// timeout describe the default transport only, so they are not applied to a
+	// replacement.
+	Transport http.RoundTripper
+
+	// HTTPClient optionally overrides the underlying client; nil builds one
+	// from the other settings.
+	//
+	// Prefer Transport when only the network exit has to change: a
+	// caller-provided client also decides the jar, so it cannot be combined
+	// with CookieFile.
+	HTTPClient *http.Client
 
 	// UserAgent is sent on every request when set.
 	UserAgent string
@@ -41,22 +52,11 @@ type Config struct {
 	// (ErrCookieFileUnsupported): the caller's jar cannot be replaced.
 	CookieFile string
 
-	// Transport optionally replaces the network exit of the client this
-	// package builds: the cookie jar and CookieFile persistence, the retry
-	// policy and the low-speed guard all stay this package's decisions.
-	//
-	// It is ignored when HTTPClient is set, and the TLS settings and connect
-	// timeout describe the default transport only, so they are not applied to a
-	// replacement.
-	Transport http.RoundTripper
-
-	// HTTPClient optionally overrides the underlying client; nil builds one
-	// from the other settings.
-	//
-	// Prefer Transport when only the network exit has to change: a
-	// caller-provided client also decides the jar, so it cannot be combined
-	// with CookieFile.
-	HTTPClient *http.Client
+	// RetryPolicy is the default retry behaviour for GetBytesWithRetry.
+	// A zero MaxAttempts yields a single attempt (no retry). Business layers
+	// that need bespoke behaviour (e.g. OAuth 401-refresh) compose
+	// DoWithRetry with their own policy instead.
+	RetryPolicy RetryPolicy
 
 	// Timeout bounds the TCP connect; the zero value leaves the default dial
 	// timeout.
@@ -88,11 +88,11 @@ type Config struct {
 // client was built here; then the jar is a *cookieStore, which also maintains
 // reconstructable persistence state.
 type Client struct {
-	policy        RetryPolicy
-	ua            string
-	cookieFile    string
 	hc            *http.Client
 	store         *cookieStore
+	ua            string
+	cookieFile    string
+	policy        RetryPolicy
 	lowSpeedTime  time.Duration
 	lowSpeedLimit int64
 	lowSpeedGuard bool

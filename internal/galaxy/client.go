@@ -41,9 +41,9 @@ type AuthorizationSource interface{ AuthorizationValue() string }
 
 // Client drives the Galaxy content API over an httpx transport.
 type Client struct {
-	ep    endpoints
 	authz AuthorizationSource
 	hx    *httpx.Client
+	ep    endpoints
 }
 
 // New builds a Client on a caller-provided transport and credential source.

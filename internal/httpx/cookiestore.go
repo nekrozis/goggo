@@ -23,13 +23,10 @@ import (
 // advance together and persist never regresses. Cookies takes the jar lock only
 // and Save takes mu only, so there is no jar→mu path and no inversion.
 type cookieStore struct {
-	jar *cookiejar.Jar
-	mu  sync.Mutex
-	// persist keys are produced by keyFor only, so record/delete/load never
-	// re-implement canonicalisation.
+	jar     *cookiejar.Jar
 	persist map[cookieKey]cookieState
-	// now is injectable per instance for deterministic tests (no global).
-	now func() time.Time
+	now     func() time.Time
+	mu      sync.Mutex
 }
 
 // cookieKey identifies one persisted cookie. All canonicalisation lives in

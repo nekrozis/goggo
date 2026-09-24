@@ -62,8 +62,8 @@ func (d *Downloader) CheckOrphans(ctx context.Context, req InstallRequest) (Orph
 // was removed; anything else is that file's own failure, reported while the rest
 // of the batch goes on.
 type DeletionAttempt struct {
-	Path string
 	Err  error
+	Path string
 }
 
 // RemoveOrphans deletes exactly the files an OrphansResult lists, in order, and

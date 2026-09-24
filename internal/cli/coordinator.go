@@ -26,11 +26,11 @@ import (
 // and stays down, so the cursor stops moving under the user's input and the
 // answer is not painted over.
 type terminalCoordinator struct {
-	mu      sync.Mutex
 	out     io.Writer
 	errOut  io.Writer
 	frame   []string // the frame currently on screen
 	pending []string // the frame a paused coordinator paints on resume
+	mu      sync.Mutex
 	paused  bool
 	stopped bool
 }

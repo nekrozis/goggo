@@ -87,19 +87,18 @@ var (
 // String method: the state holds an authentication CSRF token that must never leak
 // into logs.
 type LoginChallenge struct {
-	// state is the opaque continuation state owned by Client.
-	state challengeState
+	// client is the Client that produced this challenge.
+	client *Client
 
 	// BrowserURL is the authorize URL to open for a ChallengeBrowser
 	// challenge.
 	BrowserURL string
+	// state is the opaque continuation state owned by Client.
+	state challengeState
 
 	// CodeLength is the expected one-time code length for a
 	// ChallengeTwoFactor challenge (4 or 6).
 	CodeLength int
-
-	// client is the Client that produced this challenge.
-	client *Client
 
 	// used is set atomically before the first network side effect of
 	// ContinueLogin, so a challenge can never be submitted twice.
@@ -112,9 +111,9 @@ type LoginChallenge struct {
 // submission: the challenge CSRF token and the submit endpoint, plus which
 // code flavour it is.
 type challengeState struct {
-	kind   codeKind
 	token  string
 	submit string
+	kind   codeKind
 }
 
 // recaptchaMarker is the login-form fragment that indicates a captcha.
@@ -135,8 +134,8 @@ const (
 // Invariant: code != "" implies challenge == nil, and challenge != nil
 // implies code == "".
 type loginStep struct {
-	code      string
 	challenge *LoginChallenge
+	code      string
 }
 
 // Login performs the website OAuth login up to the first interaction it needs,

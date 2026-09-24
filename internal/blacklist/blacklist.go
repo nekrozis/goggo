@@ -11,9 +11,9 @@ import (
 
 // item is one parsed blacklist line.
 type item struct {
-	linenr int
-	source string
 	re     *regexp.Regexp
+	source string
+	linenr int
 }
 
 // flag bits.

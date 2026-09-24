@@ -22,16 +22,15 @@ const (
 // ProductDocument carries the raw payload of a Galaxy product and the
 // metadata needed by consumers.
 type ProductDocument struct {
-	// JSON owns the encoded product document bytes.
-	// When no DLC expansion is performed it is the API response bytes;
-	// when DLCs are expanded it is the augmented document encoding.
-	JSON []byte
-
 	// Slug is the product's slug (gamename), if present.
 	Slug string
 
 	// Title is the product's human-readable title, if present.
 	Title string
+	// JSON owns the encoded product document bytes.
+	// When no DLC expansion is performed it is the API response bytes;
+	// when DLCs are expanded it is the augmented document encoding.
+	JSON []byte
 }
 
 type rawDLCs struct {

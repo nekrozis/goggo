@@ -46,9 +46,9 @@ type ClientIdentity interface {
 
 // Client drives the GOG website login flow over an httpx transport.
 type Client struct {
-	ep     endpoints
 	galaxy ClientIdentity
 	hx     *httpx.Client
+	ep     endpoints
 }
 
 // New builds a Client on a caller-provided transport. galaxy is required, and so
@@ -115,8 +115,8 @@ func (c *Client) IsLoggedIn(ctx context.Context) (bool, error) {
 // URL parsed when the request was built, while Location stays the raw header
 // value (resolution is centralised in resolveLocation).
 type responseMeta struct {
-	Location   string
 	URL        *url.URL
+	Location   string
 	StatusCode int
 }
 

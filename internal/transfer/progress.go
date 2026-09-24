@@ -17,9 +17,9 @@ import (
 // Bytes and Total answer false once a task's slot is gone. A nil *Progress is a
 // usable no-op.
 type Progress struct {
-	mu    sync.Mutex
 	slots map[string]*progressSlot
 	queue progressQueue
+	mu    sync.Mutex
 }
 
 // progressQueue is the run-level queue snapshot: how many tasks the run started

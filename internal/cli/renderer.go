@@ -106,25 +106,25 @@ type runStats struct {
 // only. EventProgress carries no display state: the renderer never reads its
 // Current, though the field stays in the event contract.
 type renderer struct {
-	bar      *progress.Bar
-	interval time.Duration
-	unit     uint32
-	now      func() time.Time // swappable for tests
-	source   progressSource   // the numeric authority; never nil in production
-	sink     sink
+	source      progressSource // the numeric authority; never nil in production
+	sink        sink
+	activeTasks map[string]*renderTask
+	stopped     chan struct{}
 
-	mu             sync.Mutex
-	activeTasks    map[string]*renderTask
+	stop           chan struct{}
+	now            func() time.Time // swappable for tests
+	bar            *progress.Bar
+	installRoot    string // the plan's semantic install root; "" until handed over
+	message        string // the latest transient info/success line
 	order          []string
 	finishedCount  int
-	startedBytes   int64  // Σ started tasks' totals, accumulated at TaskStart
-	message        string // the latest transient info/success line
-	installRoot    string // the plan's semantic install root; "" until handed over
-	resumed        int    // resumed tasks, counted from the explicit marker alone
-	skippedDynamic int    // transfer-side skips, counted from the explicit marker alone
+	startedBytes   int64 // Σ started tasks' totals, accumulated at TaskStart
+	resumed        int   // resumed tasks, counted from the explicit marker alone
+	skippedDynamic int   // transfer-side skips, counted from the explicit marker alone
+	interval       time.Duration
 
-	stop     chan struct{}
-	stopped  chan struct{}
+	mu       sync.Mutex
+	unit     uint32
 	finalize bool // Stop ran; further Stops are no-ops
 	started  bool // Start ran; Stop waits for the loop only when it did
 }
@@ -146,6 +146,8 @@ func newRenderTask(path string, now time.Time) *renderTask {
 // viewModel is the derived presentation state: everything the frame or the
 // log summary shows, computed at one instant.
 type viewModel struct {
+	message   string
+	tasks     []taskRow
 	active    int // running tasks
 	queued    int // not yet started (snapshot − started)
 	resumed   int // resumed tasks seen so far (explicit marker count only)
@@ -153,14 +155,12 @@ type viewModel struct {
 	remaining int64
 	etaSecs   float64
 	etaValid  bool
-	message   string
-	tasks     []taskRow
 }
 
 // taskRow is one active task's derived numbers.
 type taskRow struct {
-	index int // 1-based, TaskStart arrival order, stable across frames
 	path  string
+	index int // 1-based, TaskStart arrival order, stable across frames
 	pct   float64
 	done  int64
 	total int64
@@ -510,9 +510,9 @@ type ttySink struct {
 	bar    func(cells int, fraction float64) string
 	width  func() int
 	height func() int
-	unit   uint32
 	// subject names the run for the closing line ("Installation", "Download").
 	subject string
+	unit    uint32
 }
 
 func (s *ttySink) info(string)            {} // the frame's message row shows it
@@ -533,14 +533,13 @@ func (s *ttySink) finalize(reason stopReason, st runStats) {
 // cursor sequences, no progress frames. Progress events never become lines;
 // only lifecycle and message events do.
 type logSink struct {
-	out     io.Writer
-	errOut  io.Writer
-	unit    uint32
-	now     func() time.Time
-	subject string // names the run for the closing line
-
 	lastSummary   time.Time
+	out           io.Writer
+	errOut        io.Writer
+	now           func() time.Time
+	subject       string // names the run for the closing line
 	finishedSince int
+	unit          uint32
 }
 
 func (s *logSink) info(text string)             { fmt.Fprintln(s.out, text) }

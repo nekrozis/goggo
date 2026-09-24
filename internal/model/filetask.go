@@ -9,6 +9,6 @@ package model
 // Item is copied by value, which shallow-copies its Chunks slice: the plan and the
 // task share one backing array, which is fine for a read-only plan.
 type FileTask struct {
-	Item        GalaxyDepotItem
 	Destination string
+	Item        GalaxyDepotItem
 }

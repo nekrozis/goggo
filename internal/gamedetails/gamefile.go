@@ -4,24 +4,24 @@ package gamedetails
 // the JSON mapping stays auditable; the WebsiteTask and download-task
 // conversions happen at the consumer layer.
 type GameFile struct {
-	Updated               int
-	Gamename              string
+	Title                 string
+	GamenameBasegame      string
 	ID                    string
 	Name                  string
 	Path                  string
 	Size                  string
 	GalaxyDownlinkJSONURL string
 	Version               string
-	Title                 string
-	GamenameBasegame      string
+	Gamename              string
 	TitleBasegame         string
-	Platform              uint32
-	Language              uint32
-	Type                  uint32
-	Score                 int
-	Silent                int
 
 	filepath string
+	Score    int
+	Silent   int
+	Updated  int
+	Platform uint32
+	Language uint32
+	Type     uint32
 }
 
 // SetFilepath stores the derived local path.

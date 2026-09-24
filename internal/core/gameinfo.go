@@ -25,6 +25,11 @@ const defaultInfoThreads = 4
 
 // GameDetailsRequest is one acquisition run's input.
 type GameDetailsRequest struct {
+	// Include overrides the run's type mask for this acquisition when set.
+	// Its producers are the download chains: the file chain forces "all" — a
+	// file looked up by id must be findable whatever the mask says — and the
+	// batch chain forwards the caller's --type intent (WebsiteDownloadRequest).
+	Include *uint32
 	// Products are the products to fetch: a numeric id passes through, anything
 	// else is a game name looked up in the account's product list the way
 	// RefMode asks, with the interactive selection a name gets elsewhere in
@@ -33,20 +38,14 @@ type GameDetailsRequest struct {
 	// no files".
 	Products []string
 
-	// RefMode says how Products are read: by slug, or as the expression --regex
-	// selects.
-	RefMode ProductRefMode
-
 	// InfoThreads is how many fetches run at once; zero means the run's
 	// setting. It is NOT --threads — that one is the download concurrency, whose
 	// default of eight does not carry over.
 	InfoThreads int
 
-	// Include overrides the run's type mask for this acquisition when set.
-	// Its producers are the download chains: the file chain forces "all" — a
-	// file looked up by id must be findable whatever the mask says — and the
-	// batch chain forwards the caller's --type intent (WebsiteDownloadRequest).
-	Include *uint32
+	// RefMode says how Products are read: by slug, or as the expression --regex
+	// selects.
+	RefMode ProductRefMode
 }
 
 // GameDetails fetches and converts the download face of every requested

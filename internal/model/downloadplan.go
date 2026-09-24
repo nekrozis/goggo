@@ -21,6 +21,6 @@ type DownloadPlan struct {
 // SFCGroup is one small-files container and the depot items whose bytes it
 // carries.
 type SFCGroup struct {
-	Container GalaxyDepotItem
 	Items     []GalaxyDepotItem
+	Container GalaxyDepotItem
 }

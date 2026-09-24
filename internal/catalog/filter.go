@@ -9,14 +9,13 @@ import (
 
 // Filters holds the compiled name filters of one listing run.
 type Filters struct {
+	// IgnoreDLCCount matches game names whose DLC information is fetched even
+	// when the product reports no DLCs.
+	IgnoreDLCCount *regexp.Regexp
 	// Games is the game name filter list, built from --game when that is
 	// set, otherwise from the lines of --game-list-file. The two are mutually
 	// exclusive.
 	Games []*regexp.Regexp
-
-	// IgnoreDLCCount matches game names whose DLC information is fetched even
-	// when the product reports no DLCs.
-	IgnoreDLCCount *regexp.Regexp
 }
 
 // LoadFilterList reads a game filter list file: one regular expression per

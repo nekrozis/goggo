@@ -19,8 +19,8 @@ const defaultTokenURL = "https://auth.gog.com/token"
 // method because it needs an httpx transport and a token endpoint; token-file
 // operations live on Store because they are stateful.
 type Client struct {
-	tokenURL string
 	hx       *httpx.Client
+	tokenURL string
 }
 
 // NewClient builds an auth Client using hx for HTTP. The token URL defaults

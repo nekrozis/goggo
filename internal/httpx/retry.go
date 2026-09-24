@@ -17,9 +17,9 @@ type ShouldRetry func(resp *http.Response, err error) bool
 // RetryPolicy configures the DoWithRetry decorator. MaxAttempts is the total
 // number of attempts (>= 1); Wait is the pause inserted before every retry.
 type RetryPolicy struct {
+	ShouldRetry ShouldRetry
 	MaxAttempts int
 	Wait        time.Duration
-	ShouldRetry ShouldRetry
 }
 
 // DefaultShouldRetry retries transport-level errors, retries HTTP errors except

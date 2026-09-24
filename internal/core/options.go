@@ -26,10 +26,10 @@ type InstallOptionsResult struct {
 }
 
 type depotCandidate struct {
-	index        int
 	manifestHash string
 	languages    []string
 	osBitness    []string
+	index        int
 	size         int64
 }
 

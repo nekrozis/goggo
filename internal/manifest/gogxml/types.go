@@ -10,19 +10,19 @@ import (
 type FileXML struct {
 	XMLName   xml.Name   `xml:"file" json:"-"`
 	Name      string     `xml:"name,attr" json:"file"`
-	Chunks    int        `xml:"chunks,attr" json:"chunks"`
-	TotalSize int64      `xml:"total_size,attr" json:"total_size"`
 	MD5       string     `xml:"md5,attr" json:"md5"` // Mandatory 32-hex lowercase/uppercase
 	ChunkList []ChunkXML `xml:"chunk" json:"chunk_list"`
+	Chunks    int        `xml:"chunks,attr" json:"chunks"`
+	TotalSize int64      `xml:"total_size,attr" json:"total_size"`
 }
 
 // ChunkXML represents one <chunk> element in a GOG checksum document.
 type ChunkXML struct {
+	Method string `xml:"method,attr" json:"method"`
+	Hash   string `xml:",chardata" json:"hash"`
 	ID     int    `xml:"id,attr" json:"id"`
 	From   int64  `xml:"from,attr" json:"from"`
 	To     int64  `xml:"to,attr" json:"to"`
-	Method string `xml:"method,attr" json:"method"`
-	Hash   string `xml:",chardata" json:"hash"`
 }
 
 // ChunkPlan describes the byte range of one chunk slice.
@@ -44,11 +44,11 @@ const (
 
 // ChunkResult records the result of verifying an individual chunk.
 type ChunkResult struct {
+	ExpectedMD5 string `json:"expected_md5"`
+	ActualMD5   string `json:"actual_md5"`
 	ID          int    `json:"id"`
 	From        int64  `json:"from"`
 	To          int64  `json:"to"`
-	ExpectedMD5 string `json:"expected_md5"`
-	ActualMD5   string `json:"actual_md5"`
 	OK          bool   `json:"ok"`
 }
 
@@ -57,14 +57,14 @@ type VerifyReport struct {
 	TargetFile    string        `json:"target_file"`
 	ManifestFile  string        `json:"manifest_file,omitempty"`
 	Status        VerifyStatus  `json:"status"`
-	ExpectedSize  int64         `json:"expected_size"`
-	ActualSize    int64         `json:"actual_size"`
 	ExpectedMD5   string        `json:"expected_md5"`
 	ActualMD5     string        `json:"actual_md5,omitempty"`
-	FileMD5Match  bool          `json:"file_md5_match"`
+	Chunks        []ChunkResult `json:"chunks,omitempty"`
+	ExpectedSize  int64         `json:"expected_size"`
+	ActualSize    int64         `json:"actual_size"`
 	CorruptChunks int           `json:"corrupt_chunks"`
 	TotalChunks   int           `json:"total_chunks"`
-	Chunks        []ChunkResult `json:"chunks,omitempty"`
+	FileMD5Match  bool          `json:"file_md5_match"`
 }
 
 // Domain errors.
@@ -78,8 +78,8 @@ var (
 
 // SemanticValidationError records a failure of manifest domain invariants.
 type SemanticValidationError struct {
-	Rule    int
 	Message string
+	Rule    int
 }
 
 func (e *SemanticValidationError) Error() string {

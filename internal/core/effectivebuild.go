@@ -8,17 +8,17 @@ import (
 
 // EffectiveBuild is the resolved target Galaxy build and its associated manifest.
 type EffectiveBuild struct {
+	Manifest   map[string]any
 	ProductID  string
 	Platform   string
 	BuildID    string
 	BuildHash  string
-	Generation int
 	Link       string
-	Index      int
-	Items      []any
-	Manifest   map[string]any
 	GameTitle  string
+	Items      []any
 	Notices    []string
+	Generation int
+	Index      int
 }
 
 // resolveEffectiveBuild is the single authoritative build resolver shared by

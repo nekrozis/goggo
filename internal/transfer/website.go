@@ -72,21 +72,10 @@ const (
 // fields are explicit values, not configuration reads; the XML directory is
 // where the remote checksum documents are cached.
 type WebsiteDeps struct {
-	HTTP              *httpx.Client
-	URL               WebsiteURLProvider
-	Observer          Observer
-	Blacklist         func(path string) bool // nil disables the per-file filter
-	XMLDirectory      string
-	RemoteXML         bool
-	TrustAPIForExtras bool
-	SizeOnly          bool
-	// CreateXML generates a checksum document for a file that downloaded
-	// without a remote one. Generation runs only after the file is on disk:
-	// a failed generation fails the task and keeps the downloaded file,
-	// because the bytes are what the user asked for and the manifest is
-	// derived from them. ChunkSize is the chunk size in bytes.
-	CreateXML bool
-	ChunkSize int64
+	URL       WebsiteURLProvider
+	Observer  Observer
+	HTTP      *httpx.Client
+	Blacklist func(path string) bool // nil disables the per-file filter
 	// TaskResult, when set, receives the run's terminal outcome for every
 	// task: nil for a success and for each skip the worker semantics authorise,
 	// non-nil for an operational failure. The event stream carries the same
@@ -97,7 +86,18 @@ type WebsiteDeps struct {
 	// The batch chain reports it only with remote XML disabled — the offline
 	// run is where "what justified this skip" is a question the front end has
 	// to answer honestly.
-	SkipReport func(task model.WebsiteTask, evidence SkipEvidence)
+	SkipReport        func(task model.WebsiteTask, evidence SkipEvidence)
+	XMLDirectory      string
+	ChunkSize         int64
+	RemoteXML         bool
+	TrustAPIForExtras bool
+	SizeOnly          bool
+	// CreateXML generates a checksum document for a file that downloaded
+	// without a remote one. Generation runs only after the file is on disk:
+	// a failed generation fails the task and keeps the downloaded file,
+	// because the bytes are what the user asked for and the manifest is
+	// derived from them. ChunkSize is the chunk size in bytes.
+	CreateXML bool
 }
 
 // RunWebsite executes the website download path as upstream writes it: the

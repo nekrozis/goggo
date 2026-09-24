@@ -129,25 +129,23 @@ type target struct {
 // core types — an invocation says what the user asked for, not how it will be
 // done.
 type invocation struct {
-	cfg config.Config
-
-	meta     metaAction
-	helpPath []string
-
-	cmd commandID
-	// session is the resolved command's session class, copied from its tree
-	// node — never re-derived here, so the declaration the help shows and the
-	// policy the dispatcher applies are the same value.
-	session sessionClass
-	target  target
-	// args carries the one-or-more positional arguments of the variadic
-	// commands (download, download file). The fixed-arity commands use
-	// target instead; the two are never both filled.
-	args []string
+	target target
 	// outputFile is the -o value of download file, kept raw: the parser
 	// refuses it with several specs, and the dispatcher refuses a
 	// directory.
 	outputFile string
+	// xmlPath carries --xml: external XML manifest path.
+	xmlPath  string
+	helpPath []string
+	// args carries the one-or-more positional arguments of the variadic
+	// commands (download, download file). The fixed-arity commands use
+	// target instead; the two are never both filled.
+	args []string
+	cfg  config.Config
+	// typeMask and typeSet carry --type: backup download category filtering.
+	typeMask uint32
+
+	cmd commandID
 	// yes carries the destructive-confirmation flag. Only the destructive
 	// commands accept it.
 	yes bool
@@ -156,11 +154,13 @@ type invocation struct {
 	productRefRegex bool
 	// json carries --json: format command output as JSON.
 	json bool
-	// typeMask and typeSet carry --type: backup download category filtering.
-	typeMask uint32
-	typeSet  bool
-	// xmlPath carries --xml: external XML manifest path.
-	xmlPath string
+	// session is the resolved command's session class, copied from its tree
+	// node — never re-derived here, so the declaration the help shows and the
+	// policy the dispatcher applies are the same value.
+	session sessionClass
+	typeSet bool
+
+	meta metaAction
 }
 
 // commandNode is one node of the tree.
@@ -176,13 +176,13 @@ type invocation struct {
 type commandNode struct {
 	name     string
 	summary  string
-	id       commandID
-	session  sessionClass
 	options  []optionID
 	children []commandNode
 	// notes are the lines a reader must see before running the command: the
 	// help prints them between the summary and the options.
-	notes []string
+	notes   []string
+	id      commandID
+	session sessionClass
 }
 
 // orphanNotes is the warning both orphan commands carry.

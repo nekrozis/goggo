@@ -28,33 +28,28 @@ import (
 // caller's intent explicitly: the type mask is a per-request decision (what
 // --type asked for), not a mutation of the run's persistent configuration.
 type WebsiteDownloadRequest struct {
-	// Products are the games to download, in the selector's reading.
-	Products []string
-	// RefMode says how Products are read: by slug, or as --regex selects.
-	RefMode ProductRefMode
 	// Include overrides the run's type mask for this download when set. Its
 	// only producer is --type on the batch leaf; nil means the configured
 	// mask. The same resolution feeds the acquisition and the queue, so a
 	// category run filters both faces identically.
 	Include *uint32
+	// Products are the games to download, in the selector's reading.
+	Products []string
+	// RefMode says how Products are read: by slug, or as --regex selects.
+	RefMode ProductRefMode
 }
 
 // WebsiteTaskFailure is one task's operational failure: what happened, and
 // where. The event stream already showed the text; the record exists so the
 // aggregate exit code never depends on re-reading messages.
 type WebsiteTaskFailure struct {
+	Err         error
 	Destination string
 	Gamename    string
-	Err         error
 }
 
 // WebsiteDownloadResult is the batch run's structured answer.
 type WebsiteDownloadResult struct {
-	// TotalSize is the sum of the queue's API-reported sizes, unparsable forms
-	// counting as zero — the number behind the CLI's "Total size" line.
-	TotalSize int64
-	// Tasks is the queue length.
-	Tasks int
 	// Failures lists every task that ended in an operational failure.
 	// Empty means the run may exit zero: successes and the skips the
 	// worker semantics authorise.
@@ -77,6 +72,11 @@ type WebsiteDownloadResult struct {
 	// Notices carries the run's non-progress messages (blacklist
 	// diagnostics) for the front end to render.
 	Notices []Notice
+	// TotalSize is the sum of the queue's API-reported sizes, unparsable forms
+	// counting as zero — the number behind the CLI's "Total size" line.
+	TotalSize int64
+	// Tasks is the queue length.
+	Tasks int
 }
 
 // Failed reports whether any task ended in an operational failure. Artifact
@@ -207,9 +207,9 @@ func (d *Downloader) DownloadWebsite(ctx context.Context, req WebsiteDownloadReq
 // WebsiteFileOutcome is one download file spec's verdict. Err is nil for a
 // success and for the worker-authorised skips.
 type WebsiteFileOutcome struct {
+	Err         error
 	Spec        string
 	Destination string
-	Err         error
 }
 
 // WebsiteFileResult is the aggregate answer of the download file chain.
@@ -349,9 +349,9 @@ type WebsiteSkippedTask struct {
 // arrive on the worker goroutines, and an unsynchronised append here would race
 // the moment a queue runs wider than one thread.
 type websiteAggregate struct {
-	mu       sync.Mutex
 	failures []WebsiteTaskFailure
 	skipped  []WebsiteSkippedTask
+	mu       sync.Mutex
 }
 
 func (a *websiteAggregate) record(task model.WebsiteTask, err error) {

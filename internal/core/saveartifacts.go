@@ -77,11 +77,11 @@ const (
 // the contract was evaluated against; Err carries the reason for the two
 // non-clean states.
 type SavedArtifact struct {
-	Kind     ArtifactKind
+	Err      error
 	Gamename string
 	Path     string
+	Kind     ArtifactKind
 	Action   ArtifactAction
-	Err      error
 }
 
 // saveGameArtifacts runs the save section for one product: the base game's

@@ -35,10 +35,10 @@ const defaultExpiresIn int64 = 3600
 // Use it through a pointer: sharing the pointer IS the design, and a copy would
 // duplicate the lock and the state.
 type Store struct {
-	mu       sync.RWMutex
-	path     string
 	token    map[string]any
+	path     string
 	redirect string
+	mu       sync.RWMutex
 }
 
 // StorePath is where the session's credential store lives. It is defined here

@@ -15,9 +15,9 @@ import (
 // completed is not issued twice. The unlocked check first keeps the lock off
 // the hot path.
 type tokenRefresher struct {
-	mu      sync.Mutex
 	refresh func(context.Context) error
 	expired func() bool
+	mu      sync.Mutex
 }
 
 // refreshIfExpired refreshes the credentials when they have expired.
@@ -54,9 +54,9 @@ const (
 // version check compares against.
 type websiteURLProvider struct {
 	galaxy    *galaxy.Client
-	remoteXML bool
-	policy    checksumPolicy
 	refresh   tokenRefresher
+	policy    checksumPolicy
+	remoteXML bool
 }
 
 // Resolve implements transfer.WebsiteURLProvider. Workers call it

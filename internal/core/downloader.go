@@ -18,8 +18,14 @@ import (
 // protocol clients, the optional progress registry and the Galaxy credential
 // store. State is added when its first consumer arrives.
 type Downloader struct {
-	cfg config.Config
-	ui  Console
+	ui Console
+
+	// probeErr is the login probe's transport failure, nil when the probe
+	// answered. (loggedIn, probeErr) is the tri-state of the website session:
+	// true/false+nil/false+err read as logged in / definitely not / unknown.
+	// Written once during Open, before any command runs, and read after —
+	// the same unlocked lifetime loggedIn has always had.
+	probeErr error
 
 	http   *httpx.Client
 	web    *webapi.Client
@@ -32,19 +38,13 @@ type Downloader struct {
 
 	token *auth.Store
 
-	loggedIn bool
-
 	// apiSessionDiag records why the Galaxy API session could not be renewed:
 	// the one refresh OpenWith attempts, when it fails. It is an observation
 	// only — the store, the token and the run's outcome are untouched by it.
 	apiSessionDiag string
+	cfg            config.Config
 
-	// probeErr is the login probe's transport failure, nil when the probe
-	// answered. (loggedIn, probeErr) is the tri-state of the website session:
-	// true/false+nil/false+err read as logged in / definitely not / unknown.
-	// Written once during Open, before any command runs, and read after —
-	// the same unlocked lifetime loggedIn has always had.
-	probeErr error
+	loggedIn bool
 }
 
 // SessionProbeErr reports why the website session could not be confirmed, or

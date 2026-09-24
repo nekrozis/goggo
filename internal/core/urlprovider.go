@@ -17,15 +17,15 @@ import (
 // token refresh are mutex-guarded. Dependency chunks re-resolve on every call
 // and never touch the cache.
 type chunkURLProvider struct {
-	galaxy   *galaxy.Client
-	priority []string
-	refresh  func(context.Context) error
-	expired  func() bool
-
-	refreshMu   sync.Mutex
-	mu          sync.Mutex
+	galaxy      *galaxy.Client
+	refresh     func(context.Context) error
+	expired     func() bool
 	prevProduct string
+	priority    []string
 	templates   []string
+
+	refreshMu sync.Mutex
+	mu        sync.Mutex
 }
 
 // URL implements transfer.URLProvider.

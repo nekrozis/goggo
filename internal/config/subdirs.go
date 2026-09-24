@@ -18,6 +18,8 @@ import (
 
 // SubdirOption describes one --subdir-* option.
 type SubdirOption struct {
+	// Set writes the parsed value into its DirectoryConfig field.
+	Set func(conf *DirectoryConfig, value string)
 	// Name is the option's suffix: --subdir-<Name>.
 	Name string
 	// Default is the directory name used when the option is not given.
@@ -26,8 +28,6 @@ type SubdirOption struct {
 	// this field. A value without '%' is a literal directory name and is
 	// accepted whatever this list says.
 	Templates []string
-	// Set writes the parsed value into its DirectoryConfig field.
-	Set func(conf *DirectoryConfig, value string)
 }
 
 // SubdirOptions are the six website subdirectory domains.

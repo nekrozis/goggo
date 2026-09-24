@@ -89,9 +89,9 @@ type rawFileGroup struct {
 	Version   string    `json:"version"`
 	OS        string    `json:"os"`
 	Language  string    `json:"language"`
+	Files     []rawFile `json:"files"`
 	Count     uint64    `json:"count"`
 	TotalSize uint64    `json:"total_size"`
-	Files     []rawFile `json:"files"`
 }
 
 type rawFile struct {
@@ -244,16 +244,16 @@ func convertProduct(ctx context.Context, p rawProduct, raw []byte, cfg config.Do
 	}
 
 	for _, v := range []struct {
-		gate   uint32
-		spec   uint32
+		dst    *[]GameFile
 		key    string
 		groups []rawFileGroup
-		dst    *[]GameFile
+		gate   uint32
+		spec   uint32
 	}{
-		{config.GFInstaller, config.GFBaseInstaller, "installers", p.Downloads.Installers, &gd.Installers},
-		{config.GFExtra, config.GFBaseExtra, "bonus_content", p.Downloads.BonusContent, &gd.Extras},
-		{config.GFPatch, config.GFBasePatch, "patches", p.Downloads.Patches, &gd.Patches},
-		{config.GFLangPack, config.GFBaseLangPack, "language_packs", p.Downloads.LanguagePacks, &gd.LanguagePacks},
+		{gate: config.GFInstaller, spec: config.GFBaseInstaller, key: "installers", groups: p.Downloads.Installers, dst: &gd.Installers},
+		{gate: config.GFExtra, spec: config.GFBaseExtra, key: "bonus_content", groups: p.Downloads.BonusContent, dst: &gd.Extras},
+		{gate: config.GFPatch, spec: config.GFBasePatch, key: "patches", groups: p.Downloads.Patches, dst: &gd.Patches},
+		{gate: config.GFLangPack, spec: config.GFBaseLangPack, key: "language_packs", groups: p.Downloads.LanguagePacks, dst: &gd.LanguagePacks},
 	} {
 		if cfg.Include&v.gate == 0 {
 			continue
@@ -341,16 +341,16 @@ func convertDLC(ctx context.Context, dlc rawExpandedDLC, raw []byte, cfg config.
 	}
 
 	for _, v := range []struct {
-		gate   uint32
-		spec   uint32
+		dst    *[]GameFile
 		key    string
 		groups []rawFileGroup
-		dst    *[]GameFile
+		gate   uint32
+		spec   uint32
 	}{
-		{config.GFInstaller, config.GFBaseInstaller, "installers", dlc.Downloads.Installers, &gd.Installers},
-		{config.GFExtra, config.GFBaseExtra, "bonus_content", dlc.Downloads.BonusContent, &gd.Extras},
-		{config.GFPatch, config.GFBasePatch, "patches", dlc.Downloads.Patches, &gd.Patches},
-		{config.GFLangPack, config.GFBaseLangPack, "language_packs", dlc.Downloads.LanguagePacks, &gd.LanguagePacks},
+		{gate: config.GFInstaller, spec: config.GFBaseInstaller, key: "installers", groups: dlc.Downloads.Installers, dst: &gd.Installers},
+		{gate: config.GFExtra, spec: config.GFBaseExtra, key: "bonus_content", groups: dlc.Downloads.BonusContent, dst: &gd.Extras},
+		{gate: config.GFPatch, spec: config.GFBasePatch, key: "patches", groups: dlc.Downloads.Patches, dst: &gd.Patches},
+		{gate: config.GFLangPack, spec: config.GFBaseLangPack, key: "language_packs", groups: dlc.Downloads.LanguagePacks, dst: &gd.LanguagePacks},
 	} {
 		if cfg.Include&v.gate == 0 {
 			continue
@@ -402,10 +402,10 @@ func convertDLC(ctx context.Context, dlc rawExpandedDLC, raw []byte, cfg config.
 // resolver runs; an error and an unusable path are counted apart, because
 // only an error is API failure evidence.
 type downlinkStats struct {
+	firstErr string
 	attempts int
 	failures int
 	usable   int
-	firstErr string
 }
 
 func (s *downlinkStats) recordAttempt() { s.attempts++ }

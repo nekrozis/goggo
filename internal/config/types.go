@@ -18,34 +18,32 @@ type DirectoryConfig struct {
 // platform/language fields and the priority lists use the bit flags and
 // Option tables from options.go.
 type DownloadConfig struct {
-	PlatformPriority  []uint32
-	LanguagePriority  []uint32
-	GalaxyCDNPriority []string
-	Tags              []string
-
-	InstallerPlatform uint32
-	InstallerLanguage uint32
-	Include           uint32
-	GalaxyPlatform    uint32
-	GalaxyLanguage    uint32
-	GalaxyLanguageRaw string
-	GalaxyArch        uint32
-
-	RemoteXML           bool
+	GalaxyLanguageRaw   string
+	PlatformPriority    []uint32
+	LanguagePriority    []uint32
+	GalaxyCDNPriority   []string
+	Tags                []string
+	ChunkSize           int64 // in bytes
+	InstallerPlatform   uint32
+	InstallerLanguage   uint32
+	Include             uint32
+	GalaxyPlatform      uint32
+	GalaxyLanguage      uint32
+	GalaxyArch          uint32
 	SaveChangelogs      bool
-	SaveSerials         bool
+	IgnoreDLCCount      bool
 	SaveGameDetailsJSON bool
 	SaveProductJSON     bool
 	SaveLogo            bool
 	SaveIcon            bool
 	FreeSpaceCheck      bool
-	IgnoreDLCCount      bool
+	SaveSerials         bool
 	DuplicateHandler    bool
 	GalaxyDependencies  bool
 	DeleteOrphans       bool
 	GalaxyLowercasePath bool
 	CreateXML           bool
-	ChunkSize           int64 // in bytes
+	RemoteXML           bool
 }
 
 // CurlConfig holds the transport options. Timeouts are in seconds.
@@ -62,42 +60,38 @@ type CurlConfig struct {
 // Config is the complete configuration value passed down through the
 // application layers.
 type Config struct {
-	Directories    DirectoryConfig
-	DownloadConfig DownloadConfig
-	Curl           CurlConfig
-
+	VersionString           string
+	IgnorelistFilePath      string
+	GalaxyBuildSortingOrder string
 	CacheDirectory          string
 	XMLDirectory            string
 	ConfigDirectory         string
-	BlacklistFilePath       string
-	IgnorelistFilePath      string
-	GameListFilePath        string
 	GameRegex               string
+	Email                   string
+	GameListFilePath        string
+	BlacklistFilePath       string
 	IgnoreDLCCountRegex     string
 	PlatformPriority        string
 	LanguagePriority        string
-	VersionString           string
-	Email                   string
-	GalaxyBuildSortingOrder string
-
-	Retries          int
-	Wait             int
-	ProgressInterval int
-	MsgLevel         int
-
-	Threads     uint32
-	InfoThreads uint32
-	UnitFormat  uint32
-
-	Login                 bool
-	ForceBrowserLogin     bool
-	Updated               bool
-	New                   bool
-	IncludeHiddenProducts bool
-	SizeOnly              bool
-	Unicode               bool
-	Color                 bool
-	PlatformDetection     bool
-	TrustAPIForExtras     bool
-	UpdateCache           bool
+	Directories             DirectoryConfig
+	Curl                    CurlConfig
+	DownloadConfig          DownloadConfig
+	Retries                 int
+	Wait                    int
+	ProgressInterval        int
+	MsgLevel                int
+	Threads                 uint32
+	InfoThreads             uint32
+	UnitFormat              uint32
+	Login                   bool
+	ForceBrowserLogin       bool
+	Updated                 bool
+	New                     bool
+	IncludeHiddenProducts   bool
+	SizeOnly                bool
+	Unicode                 bool
+	Color                   bool
+	PlatformDetection       bool
+	TrustAPIForExtras       bool
+	UpdateCache             bool
 }

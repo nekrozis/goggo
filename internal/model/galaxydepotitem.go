@@ -21,17 +21,14 @@ type GalaxyDepotItemChunk struct {
 // SFCOffset and SFCSize are zero unless IsInSFC is set. ProductID is left empty
 // by the depot reader and stamped by its caller.
 type GalaxyDepotItem struct {
-	Chunks []GalaxyDepotItemChunk
-
-	Path      string
-	MD5       string
-	ProductID string
-
-	TotalCompressedSize uint64
-	TotalSize           uint64
-	SFCOffset           uint64
-	SFCSize             uint64
-
+	Path                  string
+	MD5                   string
+	ProductID             string
+	Chunks                []GalaxyDepotItemChunk
+	TotalCompressedSize   uint64
+	TotalSize             uint64
+	SFCOffset             uint64
+	SFCSize               uint64
 	IsDependency          bool
 	IsSmallFilesContainer bool
 	IsInSFC               bool

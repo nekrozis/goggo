@@ -241,7 +241,7 @@ func downloadChunk(ctx context.Context, task model.FileTask, index int, chunk mo
 		}
 
 		if err == nil {
-			if err := appendChunk(ctx, task.Destination, body, chunk.MD5); err != nil {
+			if err := appendChunk(task.Destination, body, chunk.MD5); err != nil {
 				return err
 			}
 			if !lastModified.IsZero() {
@@ -310,7 +310,7 @@ func fetchChunkBody(ctx context.Context, hx *httpx.Client, url string, resume bo
 // next run's boundary reconcile reliable. An uncompressed md5 mismatch is not
 // retried: the compressed bytes already passed their hash, so re-fetching the
 // same chunk would produce the same result.
-func appendChunk(ctx context.Context, destination string, compressed []byte, wantMD5 string) error {
+func appendChunk(destination string, compressed []byte, wantMD5 string) error {
 	zr, err := zlib.NewReader(bytes.NewReader(compressed))
 	if err != nil {
 		return fmt.Errorf("zlib: %w", err)

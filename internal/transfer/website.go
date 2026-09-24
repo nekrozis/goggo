@@ -389,7 +389,7 @@ func downloadWithRetries(ctx context.Context, task model.WebsiteTask, opts Optio
 				Kind: EventMessageInfo})
 		}
 
-		lastModified, derr := websiteDownloadAttempt(ctx, task, deps, downlink, bResume, emit)
+		lastModified, derr := websiteDownloadAttempt(ctx, task, deps, downlink, bResume)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -444,7 +444,7 @@ func downloadWithRetries(ctx context.Context, task model.WebsiteTask, opts Optio
 // downloadError means the attempt succeeded. The failure classification happens
 // where each error is produced — network-side failures keep the partial file,
 // local-side failures remove it.
-func websiteDownloadAttempt(ctx context.Context, task model.WebsiteTask, deps WebsiteDeps, url string, resume bool, emit func(Event)) (lastModified time.Time, derr *downloadError) {
+func websiteDownloadAttempt(ctx context.Context, task model.WebsiteTask, deps WebsiteDeps, url string, resume bool) (lastModified time.Time, derr *downloadError) {
 	var f *os.File
 	var err error
 	if resume {

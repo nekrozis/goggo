@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"bytes"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/core"
@@ -157,6 +160,64 @@ func TestOnlyWritingCommandsMayLogIn(t *testing.T) {
 				t.Errorf("%s may log in (interactive=%v): it does not write and is not a login",
 					n.name, interactive)
 			}
+		}
+	})
+}
+
+// --- the status report's two-session model ---
+
+// TestAuthStatusReportsSessionsSeparately locks the frozen table: the website
+// observation and the API credential observation are separate lines, the
+// first line never changes, no exit code changes, and the command never
+// probes the API.
+func TestAuthStatusReportsSessionsSeparately(t *testing.T) {
+	t.Run("expired and refresh refused: not logged in, degraded", func(t *testing.T) {
+		sentinelRoots(t, sentinelExpiry(true))
+		f := newSentinelFixture(t)
+		f.setTokenStatus(http.StatusBadGateway)
+		var stdout, stderr bytes.Buffer
+		code := runWithDeps([]string{"auth", "status"}, strings.NewReader(""), &stdout, &stderr, sentinelDeps(t, f))
+		if code != 1 {
+			t.Errorf("exit = %d, want 1 (unchanged by this round)", code)
+		}
+		out := stdout.String()
+		if !strings.HasPrefix(out, "Login status: Not logged in\n") {
+			t.Errorf("first line changed:\n%s", out)
+		}
+		if !strings.Contains(out, "API session: degraded (refresh failed: ") {
+			t.Errorf("output lacks the degraded explanation:\n%s", out)
+		}
+		if f.hits("/token") == 0 {
+			t.Error("the refresh was never attempted: the degraded line must explain a real failure")
+		}
+	})
+
+	t.Run("live credential: logged in, API unknown", func(t *testing.T) {
+		sentinelRoots(t, sentinelExpiry(false))
+		f := newSentinelFixture(t)
+		var stdout, stderr bytes.Buffer
+		code := runWithDeps([]string{"auth", "status"}, strings.NewReader(""), &stdout, &stderr, sentinelDeps(t, f))
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr.String())
+		}
+		want := "Login status: Logged in\nAPI session: unknown\n"
+		if stdout.String() != want {
+			t.Errorf("stdout = %q, want %q", stdout.String(), want)
+		}
+	})
+
+	t.Run("empty store: not logged in, no second line", func(t *testing.T) {
+		isolateRoots(t)
+		// No credentials file at all: nothing was renewed, so nothing failed —
+		// the degraded line must not leak onto this path.
+		f := newSentinelFixture(t)
+		var stdout, stderr bytes.Buffer
+		code := runWithDeps([]string{"auth", "status"}, strings.NewReader(""), &stdout, &stderr, sentinelDeps(t, f))
+		if code != 1 {
+			t.Errorf("exit = %d, want 1", code)
+		}
+		if got := stdout.String(); got != "Login status: Not logged in\n" {
+			t.Errorf("stdout = %q, want the bare first line", got)
 		}
 	})
 }

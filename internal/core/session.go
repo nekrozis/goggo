@@ -41,20 +41,10 @@ type SessionRequest struct {
 // so every command reports the same sentence instead of inventing its own.
 var ErrSessionRequired = errors.New("not logged in; run `goggo auth login`")
 
-// Open prepares the run with production dependencies and then answers what req
-// asks for.
-//
-// req exists because callers have different needs: --check-login-status is
-// answered before logging in is considered, and a command that may not log in
-// must fail rather than start an interactive login on a machine that cannot
-// answer it.
-func Open(ctx context.Context, cfg config.Config, ui Console, req SessionRequest) (*Downloader, error) {
-	return OpenWith(ctx, cfg, ui, req, Dependencies{})
-}
-
-// OpenWith is Open with the outside pieces supplied (see Dependencies). Only
-// the network exit of the transport can differ, which is what makes this seam
-// worth having.
+// OpenWith is the session opener with the outside pieces supplied (see
+// Dependencies). Only the network exit of the transport can differ, which is
+// what makes this seam worth having; a caller with nothing to replace passes
+// the zero Dependencies.
 func OpenWith(ctx context.Context, cfg config.Config, ui Console, req SessionRequest,
 	deps Dependencies) (*Downloader, error) {
 	// Directories first: every persistence path below writes into them.
@@ -92,6 +82,12 @@ func OpenWith(ctx context.Context, cfg config.Config, ui Console, req SessionReq
 	if store.Expired() && !store.Empty() {
 		if err := store.Refresh(ctx, auth.NewClient(hx)); err == nil {
 			_ = store.Save()
+		} else {
+			// The failure is kept as an observation, not returned: the login
+			// flow below still decides the run, and a command that answers
+			// without a session (the status report) must be able to say WHY
+			// the session could not be renewed instead of dropping the reason.
+			d.apiSessionDiag = err.Error()
 		}
 	}
 

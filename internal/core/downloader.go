@@ -33,7 +33,18 @@ type Downloader struct {
 	token *auth.Store
 
 	loggedIn bool
+
+	// apiSessionDiag records why the Galaxy API session could not be renewed:
+	// the one refresh OpenWith attempts, when it fails. It is an observation
+	// only — the store, the token and the run's outcome are untouched by it.
+	apiSessionDiag string
 }
+
+// APISessionDiag reports the stored refresh failure, or "" when no refresh
+// was attempted or it succeeded. A local credential that never needed a
+// refresh carries no evidence either way: absence of this diagnosis is not
+// proof that the API accepts the credential.
+func (d *Downloader) APISessionDiag() string { return d.apiSessionDiag }
 
 // Config returns the effective configuration.
 //

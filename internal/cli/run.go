@@ -166,15 +166,28 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 	// which would write the removed cookie file straight back).
 	switch inv.cmd {
 	case cmdAuthStatus:
-		d, err := core.Open(ctx, inv.cfg, ui, sessionRequest(inv.session, ui.IsTerminal()))
+		// OpenWith rather than Open: identical in production (Open is the
+		// empty-deps call), and it lets the status report be tested through
+		// the same transport seam every other command already uses.
+		d, err := core.OpenWith(ctx, inv.cfg, ui, sessionRequest(inv.session, ui.IsTerminal()), deps)
 		if err != nil {
 			return reportError(stderr, err)
 		}
 		if d.LoggedIn() {
+			// The two sessions are separate facts. This command never asks
+			// the API anything, so a live local credential is reported as
+			// unproven rather than as usable: no active probe, no inference.
 			fmt.Fprintln(stdout, "Login status: Logged in")
+			fmt.Fprintln(stdout, "API session: unknown")
 			return outcomeOK
 		}
 		fmt.Fprintln(stdout, "Login status: Not logged in")
+		// The first line is unchanged and so is the exit code; this line only
+		// explains why the API credential could not be renewed. The web
+		// session may differ — its state is not inferred here.
+		if diag := d.APISessionDiag(); diag != "" {
+			fmt.Fprintf(stdout, "API session: degraded (refresh failed: %s)\n", diag)
+		}
 		return outcomeOperationFailure
 	case cmdAuthClear:
 		if err := clearAuth(inv.cfg, stdout); err != nil {

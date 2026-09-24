@@ -249,8 +249,7 @@ func TestSanitizeErrorCoversATransportFailure(t *testing.T) {
 	if strings.Contains(err.Error(), "long-lived-token") {
 		t.Errorf("error = %q, want the token stripped by the boundary", err)
 	}
-	var urlErr *url.Error
-	if !errors.As(err, &urlErr) {
+	if _, ok := errors.AsType[*url.Error](err); !ok {
 		t.Fatalf("error = %T, want a *url.Error to survive for the retry policy", err)
 	}
 	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {

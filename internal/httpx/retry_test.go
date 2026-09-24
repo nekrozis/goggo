@@ -129,10 +129,10 @@ func TestDoWithRetryTransportErrors(t *testing.T) {
 	}))
 	defer okSrv.Close()
 
-	var attempts int32
+	var attempts atomic.Int32
 	policy := retryPolicy(3, time.Millisecond)
 	resp, err := DoWithRetry(context.Background(), policy, func(ctx context.Context) (*http.Response, error) {
-		if atomic.AddInt32(&attempts, 1) < 3 {
+		if attempts.Add(1) < 3 {
 			return nil, errors.New("boom")
 		}
 		return http.Get(okSrv.URL) //nolint:gosec // test only
@@ -141,7 +141,7 @@ func TestDoWithRetryTransportErrors(t *testing.T) {
 		t.Fatalf("DoWithRetry: %v", err)
 	}
 	resp.Body.Close()
-	if got := atomic.LoadInt32(&attempts); got != 3 {
+	if got := attempts.Load(); got != 3 {
 		t.Errorf("attempts = %d, want 3", got)
 	}
 }
@@ -180,18 +180,18 @@ func TestDefaultShouldRetryMatrix(t *testing.T) {
 }
 
 func TestDoWithRetryContextCancelDuringWait(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	policy := retryPolicy(10, 50*time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	_, err := DoWithRetry(ctx, policy, func(ctx context.Context) (*http.Response, error) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		return nil, errors.New("slow")
 	})
 	if err == nil {
 		t.Fatal("expected error after context cancel")
 	}
-	if got := atomic.LoadInt32(&attempts); got > 2 {
+	if got := attempts.Load(); got > 2 {
 		t.Errorf("attempts = %d, context cancel should stop early", got)
 	}
 }

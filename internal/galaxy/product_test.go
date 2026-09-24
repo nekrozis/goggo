@@ -73,11 +73,11 @@ func mustJSON(t *testing.T, v any) string {
 
 // dlcIDs digs the ids= list out of a batch request, in the order it was sent.
 func dlcIDs(uri string) []string {
-	start := strings.Index(uri, "ids=")
-	if start < 0 {
+	_, after, ok := strings.Cut(uri, "ids=")
+	if !ok {
 		return nil
 	}
-	rest := uri[start+len("ids="):]
+	rest := after
 	if end := strings.Index(rest, "&"); end >= 0 {
 		rest = rest[:end]
 	}
@@ -302,7 +302,7 @@ func TestProductBatchesDLCIDs(t *testing.T) {
 func TestProductExpandsNumericDLCIDs(t *testing.T) {
 	const total = maxDLCBatchSize + 1
 	entries := make([]any, 0, total)
-	for i := 0; i < total; i++ {
+	for i := range total {
 		switch i {
 		case 0:
 			entries = append(entries, map[string]any{"id": 1523284508})
@@ -481,7 +481,7 @@ func TestProductRequestShapes(t *testing.T) {
 		}
 		if strings.HasPrefix(uri, "/products/1?") {
 			entries := make([]any, 0, 46)
-			for i := 0; i < 46; i++ {
+			for i := range 46 {
 				entries = append(entries, map[string]any{"id": fmt.Sprintf("d%d", i)})
 			}
 			return mustJSON(t, map[string]any{"id": "1", "dlcs": map[string]any{"products": entries}}), http.StatusOK

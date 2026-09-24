@@ -129,7 +129,7 @@ func TestRenderVerifyUnclassifiedFactIsNotHealthy(t *testing.T) {
 
 	code := fmt.Sprintf("%v", reconcile.StatusUnset)
 	named := false
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if !strings.Contains(line, unclassified.Destination) {
 			continue
 		}

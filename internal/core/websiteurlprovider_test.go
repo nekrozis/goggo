@@ -176,7 +176,7 @@ func TestWebsiteURLProviderConcurrentRefresh(t *testing.T) {
 	const workers = 8
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for i := 0; i < workers; i++ {
+	for range workers {
 		go func() {
 			defer wg.Done()
 			if _, _, err := p.Resolve(context.Background(), model.WebsiteTask{

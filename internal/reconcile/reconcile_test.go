@@ -183,7 +183,7 @@ func TestReconcileExistingFileStates(t *testing.T) {
 	chunkSize := 1000
 	var content []byte
 	var chunks []model.GalaxyDepotItemChunk
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		part := make([]byte, chunkSize)
 		for j := range part {
 			part[j] = byte('a' + i)
@@ -257,7 +257,7 @@ func TestReconcilePartialNonBoundaryAndCorruptBoundary(t *testing.T) {
 	chunkSize := 1000
 	var content []byte
 	var chunks []model.GalaxyDepotItemChunk
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		part := make([]byte, chunkSize)
 		for j := range part {
 			part[j] = byte('a' + i)

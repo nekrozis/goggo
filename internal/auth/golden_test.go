@@ -128,7 +128,7 @@ func TestCredentialsEncodingIsDeterministic(t *testing.T) {
 		"k_token": "token-k",
 	}
 	var baseline []byte
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		enc, err := encodeStore(tree)
 		if err != nil {
 			t.Fatalf("iteration %d: encodeStore: %v", i, err)

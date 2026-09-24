@@ -668,9 +668,9 @@ func TestContinueLoginRejectsForeignClient(t *testing.T) {
 // the transport it was handed, including its retry predicate. A predicate that
 // refuses every retry must yield exactly one hit.
 func TestLoginHonoursCallerTransportPolicy(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 	defer srv.Close()
@@ -694,7 +694,7 @@ func TestLoginHonoursCallerTransportPolicy(t *testing.T) {
 	if _, err := cl.Login(context.Background(), "user@example.com", "secret", LoginOptions{}); err == nil {
 		t.Fatal("Login: want error for HTTP 500")
 	}
-	if got := atomic.LoadInt32(&hits); got != 1 {
+	if got := hits.Load(); got != 1 {
 		t.Errorf("hits = %d, want 1 (the caller's ShouldRetry must be honoured)", got)
 	}
 }

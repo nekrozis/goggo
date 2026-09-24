@@ -110,7 +110,7 @@ func nodeOptionLongs(node commandNode) []string {
 // the check mean "the topic lists this subcommand" — a name as short as "file"
 // also occurs in the surrounding sentences.
 func topicRow(topic string, child commandNode) bool {
-	for _, line := range strings.Split(topic, "\n") {
+	for line := range strings.SplitSeq(topic, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, child.name+" ") && strings.Contains(trimmed, child.summary) {
 			return true
@@ -142,7 +142,7 @@ func optionHelpLines(t *testing.T, id optionID) []string {
 		t.Fatalf("--%s declares no help for its topic to print", spec.long)
 	}
 	lines := []string{spec.summary}
-	for _, line := range strings.Split(spec.detail, "\n") {
+	for line := range strings.SplitSeq(spec.detail, "\n") {
 		if line != "" {
 			lines = append(lines, line)
 		}
@@ -302,7 +302,7 @@ func TestRenderGames(t *testing.T) {
 		"with-updates-old [1]": true,
 		"new-only":             true,
 	}
-	for _, line := range strings.Split(strings.TrimSuffix(coloured, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSuffix(coloured, "\n"), "\n") {
 		if got, want := strings.Contains(line, "\033["), marked[stripANSI(line)]; got != want {
 			t.Errorf("line %q coloured = %v, want %v: colour marks a new game or one with updates", line, got, want)
 		}

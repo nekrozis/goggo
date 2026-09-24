@@ -237,8 +237,7 @@ func TestDependenciesJSONHTTPError(t *testing.T) {
 
 		cl := newTestClient(t, srv, nil)
 		_, err := cl.DependenciesJSON(context.Background())
-		var se *httpx.StatusError
-		if !errors.As(err, &se) {
+		if _, ok := errors.AsType[*httpx.StatusError](err); !ok {
 			t.Fatalf("err = %v, want a status error", err)
 		}
 		if got := len(*seen); got != 1 {
@@ -251,8 +250,7 @@ func TestDependenciesJSONHTTPError(t *testing.T) {
 
 		cl := newTestClient(t, srv, nil)
 		_, err := cl.DependenciesJSON(context.Background())
-		var se *httpx.StatusError
-		if !errors.As(err, &se) {
+		if _, ok := errors.AsType[*httpx.StatusError](err); !ok {
 			t.Fatalf("err = %v, want a status error", err)
 		}
 		if got := len(*seen); got != 2 {

@@ -98,7 +98,7 @@ func buildChunkedItemParts(t *testing.T, parts int, content string) (model.Galax
 	item.Path = "game/file.bin"
 	var total, totalCompressed uint64
 	bodies := map[string][]byte{}
-	for i := 0; i < parts; i++ {
+	for i := range parts {
 		part := content[i*partLen : (i+1)*partLen]
 		compressed := compress(t, part)
 		compressedMD5 := md5OfBytes(compressed)

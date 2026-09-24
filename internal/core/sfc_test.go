@@ -331,10 +331,7 @@ func (r *failingReader) Read(p []byte) (int, error) {
 	if r.served >= r.limit {
 		return 0, errReadFailed
 	}
-	want := r.perRead
-	if want > len(p) {
-		want = len(p)
-	}
+	want := min(r.perRead, len(p))
 	if rest := len(r.body) - r.served; want > rest {
 		want = rest
 	}
@@ -428,7 +425,7 @@ func TestContainerStreamServesRegionsInOneRead(t *testing.T) {
 func TestExtractReadsAContiguousContainerOnce(t *testing.T) {
 	body := bytes.Repeat([]byte("z"), 4096)
 	items := make([]model.GalaxyDepotItem, 0, 128)
-	for i := 0; i < 128; i++ {
+	for i := range 128 {
 		items = append(items, model.GalaxyDepotItem{
 			Path:      fmt.Sprintf("game/f%03d.txt", i),
 			ProductID: "42",

@@ -40,10 +40,10 @@ var forbiddenNames = []string{
 // rename cannot slip through as "a new method that is not on the forbidden
 // list".
 func TestStoreExportSurfaceIsFrozen(t *testing.T) {
-	typ := reflect.TypeOf(&Store{})
+	typ := reflect.TypeFor[*Store]()
 
-	for i := 0; i < typ.NumMethod(); i++ {
-		name := typ.Method(i).Name
+	for method := range typ.Methods() {
+		name := method.Name
 		if !storeSurface[name] {
 			t.Errorf("auth.Store exposes %s, which is not on the frozen surface %v", name, surfaceNames())
 		}

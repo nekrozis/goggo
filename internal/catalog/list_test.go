@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -59,9 +60,7 @@ func (f *fakeFetcher) OwnedGameIDs(context.Context) ([]string, error) {
 // product builds a raw product map; extra merges additional members.
 func product(slug string, id any, extra map[string]any) map[string]any {
 	p := map[string]any{"slug": slug, "id": id}
-	for k, v := range extra {
-		p[k] = v
-	}
+	maps.Copy(p, extra)
 	return p
 }
 

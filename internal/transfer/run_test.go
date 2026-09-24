@@ -420,7 +420,7 @@ func TestRunWorkersClamped(t *testing.T) {
 
 	var tasks []model.FileTask
 	contents := map[string]string{}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		content := fmt.Sprintf("chunk %d content", i)
 		var buf bytes.Buffer
 		zw := zlib.NewWriter(&buf)

@@ -41,7 +41,7 @@ func TestLowSpeedTrickleAborts(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "1000")
 		fl := flusher(t, w)
-		for i := 0; i < 1000; i++ {
+		for range 1000 {
 			if r.Context().Err() != nil {
 				return // the client gave up
 			}
@@ -125,7 +125,7 @@ func TestLowSpeedAbortKeepsReportingItself(t *testing.T) {
 	}
 	// The underlying reader now fails with whatever the close produced; the
 	// wrapper must keep answering with its own error.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := resp.Body.Read(make([]byte, 8)); !errors.Is(err, ErrLowSpeed) {
 			t.Fatalf("read %d = %v, want ErrLowSpeed", i+1, err)
 		}

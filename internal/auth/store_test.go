@@ -4,6 +4,7 @@ import (
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"io/fs"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -49,9 +50,7 @@ func tokenResponse(extra ...map[string]any) map[string]any {
 		"user_id":       "u7",
 	}
 	for _, e := range extra {
-		for k, v := range e {
-			m[k] = v
-		}
+		maps.Copy(m, e)
 	}
 	return m
 }
@@ -589,11 +588,9 @@ func TestStoreConcurrentAccess(t *testing.T) {
 	s.StoreLoginResponse(tokenResponse())
 
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 200; j++ {
+	for range 8 {
+		wg.Go(func() {
+			for range 200 {
 				s.Expired()
 				s.AuthorizationValue()
 				s.ClientID()
@@ -601,12 +598,10 @@ func TestStoreConcurrentAccess(t *testing.T) {
 				s.RedirectURI()
 				s.Empty()
 			}
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for j := 0; j < 200; j++ {
+	wg.Go(func() {
+		for range 200 {
 			s.StoreLoginResponse(map[string]any{
 				"access_token": "tok-new",
 				"expires_in":   float64(3600),
@@ -614,7 +609,7 @@ func TestStoreConcurrentAccess(t *testing.T) {
 			})
 			s.ResetClient()
 		}
-	}()
+	})
 	wg.Wait()
 
 	if got := s.AuthorizationValue(); got != "Bearer tok-new" {

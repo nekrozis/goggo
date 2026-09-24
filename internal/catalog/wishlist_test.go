@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"maps"
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/config"
@@ -34,13 +35,9 @@ func (f *fakeWishlist) WishlistPage(_ context.Context, page int) (webapi.Product
 // "price" object.
 func wishProduct(extra map[string]any, price map[string]any) map[string]any {
 	p := map[string]any{}
-	for k, v := range extra {
-		p[k] = v
-	}
+	maps.Copy(p, extra)
 	priceObj := map[string]any{}
-	for k, v := range price {
-		priceObj[k] = v
-	}
+	maps.Copy(priceObj, price)
 	p["price"] = priceObj
 	return p
 }

@@ -590,14 +590,12 @@ func TestConcurrentSetCookiesAndSave(t *testing.T) {
 	u := mustParse(t, "https://gog.com/")
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 200; i++ {
+	wg.Go(func() {
+		for i := range 200 {
 			c.store.SetCookies(u, []*http.Cookie{hostCookie("SID", fmt.Sprint(i))})
 		}
-	}()
-	for i := 0; i < 20; i++ {
+	})
+	for range 20 {
 		if _, err := c.SaveCookies(); err != nil {
 			t.Fatalf("SaveCookies: %v", err)
 		}

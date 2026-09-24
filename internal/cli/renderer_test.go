@@ -387,7 +387,7 @@ func TestLogSinkNeverEmitsProgress(t *testing.T) {
 	r.now = func() time.Time { return now }
 
 	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskStart})
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		r.OnEvent(transfer.Event{Path: "/a.bin", Current: int64(i), Total: 100, Kind: transfer.EventProgress})
 	}
 	r.OnEvent(transfer.Event{Path: "/a.bin", Kind: transfer.EventTaskFinish})
@@ -410,7 +410,7 @@ func TestLogSinkCadence(t *testing.T) {
 
 	vm := viewModel{active: 1, remaining: 100, etaValid: true, etaSecs: 5}
 	// Nine finishes inside the window: below both thresholds.
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		s.taskFinish(i, "x")
 		s.tick(vm)
 	}
@@ -425,7 +425,7 @@ func TestLogSinkCadence(t *testing.T) {
 	}
 	// Both thresholds reset: nine more finishes stay quiet.
 	out.Reset()
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		s.taskFinish(i, "x")
 		s.tick(vm)
 	}

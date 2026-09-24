@@ -83,7 +83,7 @@ func TestLayoutNoWrapInvariant(t *testing.T) {
 // exceeds it and the overflow is announced.
 func TestLayoutHeightTrim(t *testing.T) {
 	vm := viewModel{active: 50, queued: 100, rate: 1e6, remaining: 5 << 20, etaValid: true, etaSecs: 5}
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		vm.tasks = append(vm.tasks, taskRow{index: i + 1, path: "/f.bin", pct: 0.5, done: 5, total: 10, rate: 1e3})
 	}
 	lines := layoutFrame(vm, 120, 12, nil, 0)

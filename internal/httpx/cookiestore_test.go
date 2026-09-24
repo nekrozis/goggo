@@ -270,11 +270,11 @@ func TestConcurrentSetCookiesKeepsJarAndPersistAligned(t *testing.T) {
 	const writers = 4
 	const perWriter = 100
 	var wg sync.WaitGroup
-	for w := 0; w < writers; w++ {
+	for w := range writers {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; i < perWriter; i++ {
+			for i := range perWriter {
 				s.SetCookies(u, []*http.Cookie{hostCookie("SID", fmt.Sprintf("w%d-%d", w, i))})
 			}
 		}(w)

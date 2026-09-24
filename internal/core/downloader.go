@@ -38,7 +38,18 @@ type Downloader struct {
 	// the one refresh OpenWith attempts, when it fails. It is an observation
 	// only — the store, the token and the run's outcome are untouched by it.
 	apiSessionDiag string
+
+	// probeErr is the login probe's transport failure, nil when the probe
+	// answered. (loggedIn, probeErr) is the tri-state of the website session:
+	// true/false+nil/false+err read as logged in / definitely not / unknown.
+	// Written once during Open, before any command runs, and read after —
+	// the same unlocked lifetime loggedIn has always had.
+	probeErr error
 }
+
+// SessionProbeErr reports why the website session could not be confirmed, or
+// nil when the probe answered (in either direction).
+func (d *Downloader) SessionProbeErr() error { return d.probeErr }
 
 // APISessionDiag reports the stored refresh failure, or "" when no refresh
 // was attempted or it succeeded. A local credential that never needed a

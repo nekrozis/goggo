@@ -1121,3 +1121,82 @@ func TestSessionRetryWaitReachesTheWire(t *testing.T) {
 		t.Errorf("elapsed = %v, want at least the configured 200ms wait (a microsecond reading would elapse ~0)", elapsed)
 	}
 }
+
+// probeFlakyTransport fails the first www.gog.com/account probe and delegates
+// the rest: the seam for the state where the probe cannot answer.
+type probeFlakyTransport struct {
+	base    *gogHostTransport
+	mu      sync.Mutex
+	pending bool
+}
+
+func (t *probeFlakyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.mu.Lock()
+	fail := t.pending && req.URL.Host == "www.gog.com" && req.URL.Path == "/account"
+	if fail {
+		t.pending = false
+	}
+	t.mu.Unlock()
+	if fail {
+		return nil, errors.New("fixture: probe transport down")
+	}
+	return t.base.RoundTrip(req)
+}
+
+func flakyProbeDeps(t *testing.T, srv *httptest.Server) Dependencies {
+	t.Helper()
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse fixture URL: %v", err)
+	}
+	return Dependencies{HTTPTransport: &probeFlakyTransport{base: &gogHostTransport{target: target}, pending: true}}
+}
+
+// TestSessionProbeFailureIsUnconfirmed locks the tri-state: a probe that could
+// not answer must not produce ErrSessionRequired — the credential may be fine
+// and the message that says otherwise sends the user to re-login a live
+// session.
+func TestSessionProbeFailureIsUnconfirmed(t *testing.T) {
+	srv := newOpenTestServer(t)
+	cfg := config.NewConfig(t.TempDir(), t.TempDir())
+	ui := newFakeConsole()
+
+	d, err := OpenWith(context.Background(), cfg, ui, SessionRequest{Required: true},
+		flakyProbeDeps(t, srv.Server))
+	if err == nil {
+		t.Fatal("probe failure must not hand back a run")
+	}
+	if errors.Is(err, ErrSessionRequired) {
+		t.Errorf("err = %v, want the unconfirmed failure, not the missing-session advice", err)
+	}
+	if !errors.Is(err, ErrSessionUnconfirmed) {
+		t.Fatalf("err = %v, want ErrSessionUnconfirmed", err)
+	}
+	if want := "cannot confirm the login session: "; !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("message = %q, want the %q prefix", err.Error(), want)
+	}
+	if d != nil {
+		t.Error("a refused run must not hand back a Downloader")
+	}
+}
+
+// TestProbeErrorClearedByCompletedLogin locks the lifetime: a login that
+// completes through the AllowLogin branch is definite evidence of a session,
+// so the stale probe failure must not survive into the status report.
+func TestProbeErrorClearedByCompletedLogin(t *testing.T) {
+	srv := newOpenTestServer(t)
+	cfg := config.NewConfig(t.TempDir(), t.TempDir())
+	cfg.Email = "user@example.com"
+
+	d, err := OpenWith(context.Background(), cfg, newFakeConsole("pw"),
+		SessionRequest{AllowLogin: true}, flakyProbeDeps(t, srv.Server))
+	if err != nil {
+		t.Fatalf("OpenWith: %v", err)
+	}
+	if !d.LoggedIn() {
+		t.Fatal("LoggedIn = false after a completed login")
+	}
+	if got := d.SessionProbeErr(); got != nil {
+		t.Errorf("SessionProbeErr = %v, want the completed login to clear it", got)
+	}
+}

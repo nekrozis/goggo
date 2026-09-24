@@ -41,6 +41,13 @@ type SessionRequest struct {
 // so every command reports the same sentence instead of inventing its own.
 var ErrSessionRequired = errors.New("not logged in; run `goggo auth login`")
 
+// ErrSessionUnconfirmed is the sibling failure for the state the probe could
+// not answer: the request to the website itself failed, so whether a session
+// exists is unknown. It is not a credential problem and must not borrow
+// ErrSessionRequired's advice — the session may be perfectly good, and the
+// network is what to retry.
+var ErrSessionUnconfirmed = errors.New("cannot confirm the login session")
+
 // OpenWith is the session opener with the outside pieces supplied (see
 // Dependencies). Only the network exit of the transport can differ, which is
 // what makes this seam worth having; a caller with nothing to replace passes
@@ -96,13 +103,19 @@ func OpenWith(ctx context.Context, cfg config.Config, ui Console, req SessionReq
 		if err := d.Login(ctx); err != nil {
 			return nil, err
 		}
+		// A completed login is definite evidence of a session: the stale
+		// probe failure must not survive it.
 		d.loggedIn = true
+		d.probeErr = nil
 	}
 	// A command that needs a session and was not allowed to create one fails
 	// here, once, with the action the user can take. Letting the command fail
 	// on its own would report a protocol error that reads like a network
 	// fault, mixing "no local session" with "the API is broken".
 	if req.Required && !d.loggedIn {
+		if d.probeErr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrSessionUnconfirmed, d.probeErr)
+		}
 		return nil, ErrSessionRequired
 	}
 	return d, nil
@@ -141,12 +154,16 @@ func retryWait(cfg config.Config) time.Duration {
 }
 
 // checkLoggedIn probes the website session and requires an unexpired Galaxy
-// token.
+// token. A probe that could not answer is not an answer: the failure travels
+// as state (probeErr) so the Required gate and the status report can say
+// "unknown" instead of pointing at a credential that may be fine.
 func (d *Downloader) checkLoggedIn(ctx context.Context) bool {
 	ok, err := d.web.IsLoggedIn(ctx)
 	if err != nil {
+		d.probeErr = err
 		return false
 	}
+	d.probeErr = nil
 	return ok && !d.token.Expired()
 }
 

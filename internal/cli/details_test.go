@@ -2,12 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/nekrozis/goggo/internal/blacklist"
 	"github.com/nekrozis/goggo/internal/config"
+	"github.com/nekrozis/goggo/internal/core"
 	"github.com/nekrozis/goggo/internal/gamedetails"
 )
 
@@ -180,4 +185,179 @@ func TestBackupListArityAndHelp(t *testing.T) {
 			t.Errorf("backup list topic missing %s:\n%s", long, topic)
 		}
 	}
+}
+
+// TestRenderGameDetailsTextDownlinkLine locks the record's text face: stdout,
+// non-verbose, after the header block and before the vector sections; the
+// DLC section carries its own line after the identity rows. A healthy tree
+// prints no line at all (the golden above is the byte-identity proof).
+func TestRenderGameDetailsTextDownlinkLine(t *testing.T) {
+	games := []gamedetails.GameDetails{{
+		Gamename: "g", ProductID: "1", Title: "G", Icon: "i", Serials: "KEY\n",
+		Installers: []gamedetails.GameFile{{
+			Gamename: "g", ID: "i1", Name: "Setup", Path: "/setup.exe", Size: "10",
+			Platform: config.PlatformWindows, Language: config.LangEN, Type: config.GFBaseInstaller,
+		}},
+		Downlink: &gamedetails.DownlinkDiag{Attempts: 5, Failures: 3, Usable: 2, FirstError: "boom"},
+		DLCs: []gamedetails.GameDetails{{
+			Gamename: "g_dlc", ProductID: "2",
+			Patches: []gamedetails.GameFile{{
+				Gamename: "g_dlc", ID: "p1", Name: "Patch", Path: "/patch.exe", Size: "10",
+				Platform: config.PlatformWindows, Language: config.LangEN, Type: config.GFDLCPatch,
+			}},
+			Downlink: &gamedetails.DownlinkDiag{Attempts: 2, Failures: 1, Usable: 1, FirstError: "dlc boom"},
+		}},
+	}}
+	var out, errOut bytes.Buffer
+	renderGameDetailsText(&out, &errOut, games, &blacklist.Blacklist{}, false)
+	got := out.String()
+
+	const baseLine = "downlink: 3 of 5 files failed to resolve (first error: boom)\n"
+	if !strings.Contains(got, baseLine) {
+		t.Fatalf("base record line missing:\n%s", got)
+	}
+	if i, j := strings.Index(got, "icon: i\n"), strings.Index(got, baseLine); j <= i {
+		t.Errorf("record line must follow the header block:\n%s", got)
+	}
+	if j := strings.Index(got, "installers: "); j <= strings.Index(got, baseLine) {
+		t.Errorf("record line must precede the vector sections:\n%s", got)
+	}
+	if !strings.Contains(got, "product id: 2\ndownlink: 1 of 2 files failed to resolve (first error: dlc boom)\n") {
+		t.Errorf("DLC record line must follow the identity rows:\n%s", got)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr = %q, want nothing: the record is a fact, not a warning", errOut.String())
+	}
+}
+
+// TestAnyFullFailure pins the exit verdict to the predicate at top level:
+// a full failure fails the command, a partial record and a healthy tree do
+// not, and a kept DLC's partial record alone never does.
+func TestAnyFullFailure(t *testing.T) {
+	full := gamedetails.GameDetails{Downlink: &gamedetails.DownlinkDiag{Attempts: 3, Failures: 3}}
+	partial := gamedetails.GameDetails{Downlink: &gamedetails.DownlinkDiag{Attempts: 5, Failures: 3, Usable: 2}}
+	healthy := gamedetails.GameDetails{}
+	keptDLC := gamedetails.GameDetails{DLCs: []gamedetails.GameDetails{partial}}
+	for _, tc := range []struct {
+		name  string
+		games []gamedetails.GameDetails
+		want  bool
+	}{
+		{"full", []gamedetails.GameDetails{full}, true},
+		{"partial", []gamedetails.GameDetails{partial}, false},
+		{"healthy", []gamedetails.GameDetails{healthy}, false},
+		{"kept dlc partial", []gamedetails.GameDetails{keptDLC}, false},
+		{"mixed", []gamedetails.GameDetails{healthy, full}, true},
+	} {
+		if got := anyFullFailure(tc.games); got != tc.want {
+			t.Errorf("%s: anyFullFailure = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// The downlink verdict at the command level: the diagnosis must reach the
+// output and the exit code must follow it, in that order, on both formats.
+// Unit-level render and predicate tests cannot see the ordering — a verdict
+// checked before the render would print nothing and still exit 1.
+
+// listDownlinkDoc is one product with two installer files, each resolving
+// through its own downlink document.
+const listDownlinkDoc = `{"id":555,"slug":"sentinel_game","title":"Sentinel Game",` +
+	`"images":{"icon":"//images.gog.com/icon.png","logo":"//images.gog.com/logo.jpg"},` +
+	`"downloads":{"installers":[{"name":"pack","version":"1.0","count":2,"total_size":20,` +
+	`"files":[{"id":"good.exe","downlink":"https://api.gog.com/dl/good.exe","size":10},` +
+	`{"id":"bad.exe","downlink":"https://api.gog.com/dl/bad.exe","size":10}],` +
+	`"os":"windows","language":"en"}],"bonus_content":[],"patches":[],"language_packs":[]}}`
+
+// listDownlinkDeps answers the documents one `backup list` run reads; the
+// named downlink documents fail when the case asks for it. The transport is
+// the sentinel's: the fixture only replaces the served documents.
+func listDownlinkDeps(t *testing.T, fail map[string]bool) core.Dependencies {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bad := func(name string) bool { return fail[name] }
+		switch r.URL.Path {
+		case "/www/account":
+			fmt.Fprint(w, "account")
+		case "/www/user/data/games":
+			fmt.Fprint(w, `{"owned":["555"]}`)
+		case "/www/account/getFilteredProducts":
+			fmt.Fprint(w, `{"page":1,"totalPages":1,"products":[{"id":"555","slug":"sentinel_game"}]}`)
+		case "/products/555":
+			fmt.Fprint(w, listDownlinkDoc)
+		case "/dl/good.exe":
+			if bad("good.exe") {
+				http.Error(w, "fixture failure", http.StatusNotFound)
+				return
+			}
+			fmt.Fprint(w, `{"downlink":"https://cdn.gog.com/games/sentinel_game/good.exe"}`)
+		case "/dl/bad.exe":
+			if bad("bad.exe") {
+				http.Error(w, "fixture failure", http.StatusNotFound)
+				return
+			}
+			fmt.Fprint(w, `{"downlink":"https://cdn.gog.com/games/sentinel_game/bad.exe"}`)
+		default:
+			http.Error(w, "fixture failure", http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse fixture URL: %v", err)
+	}
+	return core.Dependencies{HTTPTransport: &sentinelTransport{target: target}}
+}
+
+func TestRunListDetailsDownlinkVerdict(t *testing.T) {
+	t.Run("text", func(t *testing.T) {
+		for _, tc := range []struct {
+			name       string
+			fail       map[string]bool
+			wantExit   int
+			wantLine   string
+			wantAbsent string
+		}{
+			{"healthy", nil, 0, "", "downlink:"},
+			{"partial", map[string]bool{"bad.exe": true}, 0,
+				"downlink: 1 of 2 files failed to resolve", ""},
+			{"full", map[string]bool{"good.exe": true, "bad.exe": true}, 1,
+				"downlink: 2 of 2 files failed to resolve (first error: ", ""},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				sentinelRoots(t, sentinelExpiry(false))
+				var stdout, stderr bytes.Buffer
+				code := runWithDeps([]string{"backup", "list", "sentinel_game"},
+					strings.NewReader(""), &stdout, &stderr, listDownlinkDeps(t, tc.fail))
+				if code != tc.wantExit {
+					t.Errorf("exit = %d, want %d (stderr: %s)", code, tc.wantExit, stderr.String())
+				}
+				if tc.wantLine != "" && !strings.Contains(stdout.String(), tc.wantLine) {
+					t.Errorf("stdout lacks %q:\n%s", tc.wantLine, stdout.String())
+				}
+				if tc.wantAbsent != "" && strings.Contains(stdout.String(), tc.wantAbsent) {
+					t.Errorf("stdout carries %q on a healthy run:\n%s", tc.wantAbsent, stdout.String())
+				}
+			})
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		sentinelRoots(t, sentinelExpiry(false))
+		var stdout, stderr bytes.Buffer
+		code := runWithDeps([]string{"backup", "list", "sentinel_game", "--json"},
+			strings.NewReader(""), &stdout, &stderr,
+			listDownlinkDeps(t, map[string]bool{"good.exe": true, "bad.exe": true}))
+		// The document was fully written AND the command failed: the verdict
+		// followed the render, it did not replace it.
+		if code != 1 {
+			t.Errorf("exit = %d, want 1 (stderr: %s)", code, stderr.String())
+		}
+		for _, want := range []string{`"downlink_diag"`, `"attempts": 2`, `"failures": 2`,
+			`"usable": 0`, `"full_failure": true`} {
+			if !strings.Contains(stdout.String(), want) {
+				t.Errorf("json output lacks %s:\n%s", want, stdout.String())
+			}
+		}
+	})
 }

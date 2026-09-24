@@ -58,6 +58,9 @@ func TestGetDetailsAsJson(t *testing.T) {
 	if _, has := got["languagepacks"]; has {
 		t.Error("empty languagepacks must be absent")
 	}
+	if _, has := got["downlink_diag"]; has {
+		t.Error("a healthy entry must not carry a downlink_diag member")
+	}
 	dlcs, ok := got["dlcs"].([]any)
 	if !ok || len(dlcs) == 0 {
 		t.Fatalf("dlcs = %#v, want a non-empty array", got["dlcs"])
@@ -71,5 +74,37 @@ func TestGetDetailsAsJson(t *testing.T) {
 	}
 	if dlc["gamename"] != "d1" {
 		t.Errorf("dlc gamename = %v", dlc["gamename"])
+	}
+}
+
+// TestGetDetailsAsJsonDownlinkDiag locks the record's JSON face: a member with
+// the five frozen keys when present, the full_failure projection computed by
+// the predicate, and inheritance through the DLC recursion.
+func TestGetDetailsAsJsonDownlinkDiag(t *testing.T) {
+	gd := GameDetails{
+		Gamename: "g", ProductID: "1", Title: "G",
+		Installers: []GameFile{{ID: "i1", Version: "1"}},
+		Downlink:   &DownlinkDiag{Attempts: 5, Failures: 3, Usable: 2, FirstError: "boom"},
+		DLCs: []GameDetails{{Gamename: "d1", Patches: []GameFile{{ID: "p1"}},
+			Downlink: &DownlinkDiag{Attempts: 4, Failures: 4, Usable: 0, FirstError: "dead"}}},
+	}
+	got := gd.GetDetailsAsJson()
+	m, ok := got["downlink_diag"].(map[string]any)
+	if !ok {
+		t.Fatalf("downlink_diag = %#v, want an object", got["downlink_diag"])
+	}
+	want := map[string]any{"attempts": 5, "failures": 3, "usable": 2, "first_error": "boom", "full_failure": false}
+	if len(m) != len(want) {
+		t.Fatalf("downlink_diag has %d keys, want exactly %d: %#v", len(m), len(want), m)
+	}
+	for k, w := range want {
+		if m[k] != w {
+			t.Errorf("downlink_diag[%s] = %#v, want %#v", k, m[k], w)
+		}
+	}
+	dlcs := got["dlcs"].([]any)
+	dm := dlcs[0].(map[string]any)["downlink_diag"].(map[string]any)
+	if dm["full_failure"] != true {
+		t.Errorf("DLC full_failure = %#v, want the predicate's answer through the recursion", dm["full_failure"])
 	}
 }

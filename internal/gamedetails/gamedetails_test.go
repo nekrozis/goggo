@@ -453,3 +453,35 @@ func TestMakeFilepathsRecursiveDestinations(t *testing.T) {
 		t.Errorf("nested dlc extra = %q, want %q", got, want)
 	}
 }
+
+// TestDownlinkDiagSummary locks the one text form shared by the list
+// renderers and the batch notices: counts, then the first error.
+func TestDownlinkDiagSummary(t *testing.T) {
+	d := &DownlinkDiag{Attempts: 5, Failures: 3, Usable: 2, FirstError: "GET x: HTTP 404"}
+	if got, want := d.Summary(), "downlink: 3 of 5 files failed to resolve (first error: GET x: HTTP 404)"; got != want {
+		t.Errorf("Summary() = %q, want %q", got, want)
+	}
+}
+
+// TestDownlinkDiagFullFailureTable pins the predicate against its degenerate
+// readings: an empty record and a nil record are never failures, and a
+// record with any usable file is not a full failure however many failed.
+func TestDownlinkDiagFullFailureTable(t *testing.T) {
+	var nilRec *DownlinkDiag
+	for _, tc := range []struct {
+		name string
+		d    *DownlinkDiag
+		want bool
+	}{
+		{"nil", nilRec, false},
+		{"zero", &DownlinkDiag{}, false},
+		{"all error", &DownlinkDiag{Attempts: 3, Failures: 3}, true},
+		{"error + unusable", &DownlinkDiag{Attempts: 2, Failures: 1}, true},
+		{"partial", &DownlinkDiag{Attempts: 5, Failures: 3, Usable: 2}, false},
+		{"usable only", &DownlinkDiag{Attempts: 2, Usable: 2}, false},
+	} {
+		if got := tc.d.FullFailure(); got != tc.want {
+			t.Errorf("%s: FullFailure() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

@@ -34,6 +34,15 @@ func (gd *GameDetails) GetDetailsAsJson() map[string]any {
 		}
 		out[v.key] = files
 	}
+	if gd.Downlink != nil {
+		out["downlink_diag"] = map[string]any{
+			"attempts":     gd.Downlink.Attempts,
+			"failures":     gd.Downlink.Failures,
+			"usable":       gd.Downlink.Usable,
+			"first_error":  gd.Downlink.FirstError,
+			"full_failure": gd.Downlink.FullFailure(),
+		}
+	}
 	if len(gd.DLCs) > 0 {
 		dlcs := make([]any, 0, len(gd.DLCs))
 		for i := range gd.DLCs {

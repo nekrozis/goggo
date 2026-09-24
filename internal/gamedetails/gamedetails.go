@@ -7,6 +7,7 @@
 package gamedetails
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -75,6 +76,15 @@ type DownlinkDiag struct {
 // carries no errors and is therefore not a failure.
 func (d *DownlinkDiag) FullFailure() bool {
 	return d != nil && d.Attempts > 0 && d.Usable == 0 && d.Failures > 0
+}
+
+// Summary is the one text form of the record: the list renderers and the
+// batch notices both print it verbatim, so the two entry points cannot
+// drift apart. It states the counts and the first error; whether the record
+// is a full failure is the predicate's job, not this sentence's.
+func (d *DownlinkDiag) Summary() string {
+	return fmt.Sprintf("downlink: %d of %d files failed to resolve (first error: %s)",
+		d.Failures, d.Attempts, d.FirstError)
 }
 
 // FilterWithPriorities removes the entries whose platform/language rank worse

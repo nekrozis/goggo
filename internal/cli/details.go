@@ -17,9 +17,26 @@ import (
 // JSON renderer emits the same data as JSON through the one styled writer. Both
 // are display-only: list never writes and never transfers.
 
+// anyFullFailure reports whether any acquired product answered "no files"
+// while every one of its downlink resolutions failed — the state the
+// acquisition contract refuses to let pass as a legitimate empty answer.
+// Top-level entries are sufficient: a kept DLC holds at least one file, and
+// every file came from a usable resolution, so a kept DLC can never be a
+// full failure; a discarded DLC's evidence lives in its parent's record.
+func anyFullFailure(games []gamedetails.GameDetails) bool {
+	for i := range games {
+		if games[i].Downlink.FullFailure() {
+			return true
+		}
+	}
+	return false
+}
+
 // runListDetails acquires and renders one of the two detail formats. A
 // blacklist failure is fatal for the text format (its file rows depend on
-// the filter) and irrelevant for JSON (it filters nothing).
+// the filter) and irrelevant for JSON (it filters nothing). A full downlink
+// failure renders its line and then fails the command: the diagnosis and
+// the exit code arrive together, neither swallowing the other.
 func runListDetails(ctx context.Context, d *core.Downloader, inv invocation, stdout, stderr io.Writer) outcome {
 	games, err := d.ListGameDetails(ctx, inv.args, productRefMode(inv))
 	if err != nil {
@@ -34,6 +51,9 @@ func runListDetails(ctx context.Context, d *core.Downloader, inv invocation, std
 		if err := util.WriteStyledJSON(stdout, list); err != nil {
 			return reportError(stderr, err)
 		}
+		if anyFullFailure(games) {
+			return outcomeOperationFailure
+		}
 		return outcomeOK
 	}
 
@@ -42,6 +62,9 @@ func runListDetails(ctx context.Context, d *core.Downloader, inv invocation, std
 		return reportError(stderr, err)
 	}
 	renderGameDetailsText(stdout, stderr, games, bl, inv.cfg.MsgLevel >= msgLevelVerbose)
+	if anyFullFailure(games) {
+		return outcomeOperationFailure
+	}
 	return outcomeOK
 }
 
@@ -86,6 +109,12 @@ func printGameDetailsText(out, errOut io.Writer, gd *gamedetails.GameDetails, bl
 	if gd.Serials != "" {
 		fmt.Fprintf(out, "serials:\n%s\n", gd.Serials)
 	}
+	// The downlink record is a fact of the answer, not a warning: stdout,
+	// ungated by verbosity. A product whose files all failed to resolve says
+	// so instead of printing a bare header.
+	if gd.Downlink != nil {
+		fmt.Fprintln(out, gd.Downlink.Summary())
+	}
 	// The base vector order, with the trailing-space headers.
 	for _, v := range []struct {
 		header string
@@ -112,6 +141,9 @@ func printGameDetailsText(out, errOut io.Writer, gd *gamedetails.GameDetails, bl
 			if dlc.Serials != "" {
 				// The DLC serials line has no newline after the label.
 				fmt.Fprintf(out, "serials:%s\n", dlc.Serials)
+			}
+			if dlc.Downlink != nil {
+				fmt.Fprintln(out, dlc.Downlink.Summary())
 			}
 			// The DLC vector order: installers, patches, extras,
 			// language packs — WITHOUT section headers.

@@ -58,6 +58,12 @@ type WebsiteDownloadResult struct {
 	// Empty means the run may exit zero: successes and the skips the
 	// worker semantics authorise.
 	Failures []WebsiteTaskFailure
+	// DownlinkFailures names the TOP-LEVEL products whose acquisition
+	// answered "no files" because every one of their downlink resolutions
+	// failed — the empty queue that is an accident, not an answer. Kept DLCs
+	// can never appear here (a kept entry resolved at least one file); a
+	// discarded DLC's evidence lives in its parent's record.
+	DownlinkFailures []string
 	// Skipped lists the files the run did not download because they already
 	// looked current, each with the evidence that authorised the skip. The
 	// batch chain fills it only with remote XML disabled, where "what
@@ -79,12 +85,30 @@ func (r WebsiteDownloadResult) Failed() bool {
 	if len(r.Failures) > 0 {
 		return true
 	}
+	if len(r.DownlinkFailures) > 0 {
+		return true
+	}
 	for _, a := range r.Saved {
 		if a.Action == ArtifactFailed {
 			return true
 		}
 	}
 	return false
+}
+
+// appendDownlinkNotices records every resolution summary the acquisition left
+// behind, recursing into the DLC subtree: "why is there nothing to download"
+// has a DLC's failed files in its answer. The failure verdict is top-level
+// only — a kept DLC resolved at least one file, and a discarded one was
+// absorbed into its parent — so this walk adds no verdict, only notices.
+func appendDownlinkNotices(notices []Notice, gd *gamedetails.GameDetails) []Notice {
+	if gd.Downlink != nil {
+		notices = append(notices, Notice{Text: gd.Gamename + ": " + gd.Downlink.Summary()})
+	}
+	for i := range gd.DLCs {
+		notices = appendDownlinkNotices(notices, &gd.DLCs[i])
+	}
+	return notices
 }
 
 // DownloadWebsite builds and runs the website queue of the named games, with
@@ -111,9 +135,10 @@ func (d *Downloader) DownloadWebsite(ctx context.Context, req WebsiteDownloadReq
 	}
 
 	var (
-		tasks   []model.WebsiteTask
-		notices []Notice
-		saved   []SavedArtifact
+		tasks            []model.WebsiteTask
+		notices          []Notice
+		saved            []SavedArtifact
+		downlinkFailures []string
 	)
 	bl, err := blacklist.LoadBlacklist(d.cfg.BlacklistFilePath)
 	if err != nil {
@@ -128,17 +153,27 @@ func (d *Downloader) DownloadWebsite(ctx context.Context, req WebsiteDownloadReq
 		// artifact is written even when the transfer later fails, and vice
 		// versa.
 		saved = append(saved, d.saveGameArtifacts(ctx, &details[i])...)
+		// The acquisition's downlink record rides out with the run whether or
+		// not the queue grows: every summary the entry (or a kept DLC)
+		// recorded becomes a notice, and a top-level full failure is a
+		// verdict, not just a message.
+		notices = appendDownlinkNotices(notices, &details[i])
+		if details[i].Downlink.FullFailure() {
+			downlinkFailures = append(downlinkFailures, details[i].Gamename)
+		}
 		for _, gf := range details[i].GetGameFileVectorFiltered(mask) {
 			tasks = append(tasks, websiteTaskFor(gf))
 		}
 	}
 
-	res := WebsiteDownloadResult{Tasks: len(tasks), Notices: notices, Saved: saved}
+	res := WebsiteDownloadResult{Tasks: len(tasks), Notices: notices, Saved: saved, DownlinkFailures: downlinkFailures}
 	for _, t := range tasks {
 		res.TotalSize += parseWebsiteSize(t.Size)
 	}
 	if len(tasks) == 0 {
-		// Nothing to fetch is an answer, not a failure: the run is skipped.
+		// Nothing to fetch is an answer, not a failure — but only when the
+		// acquisition recorded no full downlink failure: the res assembled
+		// above already carries the verdict, so this return is honest.
 		return res, nil
 	}
 

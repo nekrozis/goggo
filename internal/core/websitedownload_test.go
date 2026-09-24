@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -640,4 +641,115 @@ func TestBackupDownloadNoRemoteXMLStatusContract(t *testing.T) {
 	if len(res2.Skipped) != 1 || res2.Skipped[0].Evidence != transfer.SkipVerifiedManifest {
 		t.Fatalf("skipped = %+v, want the extras file as manifest-backed", res2.Skipped)
 	}
+}
+
+// --- the acquisition's downlink record on the batch face ---
+
+func hasNoticeWith(res WebsiteDownloadResult, prefix string) bool {
+	for _, n := range res.Notices {
+		if strings.HasPrefix(n.Text, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestDownloadWebsiteDownlinkNotices locks the batch chain's answer to a dead
+// session: every summary the acquisition recorded reaches the notices
+// (recursing into the DLC subtree), the failure verdict comes from top-level
+// full failures only, and the empty-queue early return carries both — the
+// run that downloads nothing because nothing resolved is an accident, not
+// the legitimate "this product has no files" answer.
+func TestDownloadWebsiteDownlinkNotices(t *testing.T) {
+	t.Run("full failure on the early return", func(t *testing.T) {
+		f := oneProductFixture(t)
+		f.setFailure("/dl/base.exe", http.StatusNotFound)
+		f.setFailure("/dl/sound.mp3", http.StatusNotFound)
+		f.setFailure("/dl/dlc.exe", http.StatusNotFound)
+		cfg, _ := websiteConfigIn(t)
+		d := newGameInfoDownloader(t, f, cfg)
+
+		res, err := d.DownloadWebsite(context.Background(),
+			WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
+		if err != nil {
+			t.Fatalf("DownloadWebsite: %v", err)
+		}
+		if res.Tasks != 0 {
+			t.Fatalf("tasks = %d, want the empty queue", res.Tasks)
+		}
+		if len(res.DownlinkFailures) != 1 || res.DownlinkFailures[0] != "base_game" {
+			t.Errorf("DownlinkFailures = %v, want [base_game]", res.DownlinkFailures)
+		}
+		if !res.Failed() {
+			t.Error("a full downlink failure must fail the aggregate verdict")
+		}
+		// The parent's record absorbed the discarded DLC: three attempts,
+		// not two.
+		if !hasNoticeWith(res, "base_game: downlink: 3 of 3 files failed to resolve (first error: ") {
+			t.Errorf("notices = %+v, want the absorbed full-failure summary", res.Notices)
+		}
+	})
+
+	t.Run("partial failure stays a success", func(t *testing.T) {
+		f := oneProductFixture(t, "base.exe", "dlc.exe")
+		f.setFailure("/dl/sound.mp3", http.StatusNotFound)
+		cfg, _ := websiteConfigIn(t)
+		d := newGameInfoDownloader(t, f, cfg)
+
+		res, err := d.DownloadWebsite(context.Background(),
+			WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
+		if err != nil {
+			t.Fatalf("DownloadWebsite: %v", err)
+		}
+		if res.Tasks != 2 {
+			t.Fatalf("tasks = %d, want the two files that resolved", res.Tasks)
+		}
+		if !hasNoticeWith(res, "base_game: downlink: 1 of 2 files failed to resolve (first error: ") {
+			t.Errorf("notices = %+v, want the partial summary", res.Notices)
+		}
+		if len(res.DownlinkFailures) != 0 || res.Failed() {
+			t.Errorf("DownlinkFailures = %v, Failed = %v: a partial record must not fail the run",
+				res.DownlinkFailures, res.Failed())
+		}
+	})
+
+	t.Run("kept DLC record is visible, top-level verdict is not", func(t *testing.T) {
+		f := newGameInfoFixture(t)
+		f.setProduct("100", gameInfoDoc("100", "base_game", "Base Game",
+			windowsInstaller("base.exe"), []string{gameInfoNode("sound.mp3", "", "")},
+			[]string{"200"}, f.URL+"/dlc-expanded"))
+		// The DLC offers two installer files; one resolves, one does not, so
+		// the entry is kept and carries its own record.
+		f.setExpanded(gameInfoDoc("200", "base_game_dlc", "Base Game DLC",
+			append(windowsInstaller("dlc.exe"), windowsInstaller("dlc2.exe")...), nil, nil, ""))
+		f.setOwned("200")
+		f.setList(`{"id":100,"slug":"base_game","title":"Base Game"}`)
+		for _, name := range []string{"base.exe", "sound.mp3", "dlc.exe"} {
+			f.setFile(name, "bytes-of-"+name)
+		}
+		f.setFailure("/dl/dlc2.exe", http.StatusNotFound)
+		cfg, _ := websiteConfigIn(t)
+		d := newGameInfoDownloader(t, f, cfg)
+
+		res, err := d.DownloadWebsite(context.Background(),
+			WebsiteDownloadRequest{Products: []string{"100"}, RefMode: ProductRefExact})
+		if err != nil {
+			t.Fatalf("DownloadWebsite: %v", err)
+		}
+		if res.Tasks != 3 {
+			t.Fatalf("tasks = %d, want base files plus the resolved DLC file", res.Tasks)
+		}
+		if !hasNoticeWith(res, "base_game_dlc: downlink: 1 of 2 files failed to resolve (first error: ") {
+			t.Errorf("notices = %+v, want the kept DLC's own summary", res.Notices)
+		}
+		for _, n := range res.Notices {
+			if strings.HasPrefix(n.Text, "base_game: downlink:") {
+				t.Errorf("the healthy base entry must contribute no summary, got %q", n.Text)
+			}
+		}
+		if len(res.DownlinkFailures) != 0 || res.Failed() {
+			t.Errorf("DownlinkFailures = %v, Failed = %v: a kept DLC's partial record must not fail the run",
+				res.DownlinkFailures, res.Failed())
+		}
+	})
 }

@@ -31,6 +31,16 @@ type sfcInstallFixture struct {
 // install has nothing left to try.
 func newSFCInstallFixture(t *testing.T, containerBody string, serveOwnChunk bool) *sfcInstallFixture {
 	t.Helper()
+	return newSFCInstallFixtureOpt(t, containerBody, serveOwnChunk, true)
+}
+
+// newSFCInstallFixtureOpt adds the missing-container axis: with
+// serveContainerChunk false the container's own chunk cannot be fetched, so
+// the main transfer ends without the file on disk and extraction meets the
+// absent container — the state whose members must reach the direct-download
+// fallback.
+func newSFCInstallFixtureOpt(t *testing.T, containerBody string, serveOwnChunk, serveContainerChunk bool) *sfcInstallFixture {
+	t.Helper()
 	f := newPlanFixture(t)
 
 	own := planChunkPayload(t, "the member's own content")
@@ -60,7 +70,9 @@ func newSFCInstallFixture(t *testing.T, containerBody string, serveOwnChunk bool
 		`{"repository_manifest":"https://content-system.gog.com/dep/repo-manifest"}`)
 	f.set("/dep/repo-manifest", `{"depots":[]}`)
 
-	f.set("/chunks/"+galaxy.HashToGalaxyPath(container.md5), container.compressed)
+	if serveContainerChunk {
+		f.set("/chunks/"+galaxy.HashToGalaxyPath(container.md5), container.compressed)
+	}
 	if serveOwnChunk {
 		f.set("/chunks/"+galaxy.HashToGalaxyPath(own.md5), own.compressed)
 	}
@@ -150,4 +162,45 @@ func sfcChunkJSON(t *testing.T, p chunkPayload) string {
 	t.Helper()
 	return `{"compressedMd5":"` + p.md5 + `","md5":"` + sfcMD5Hex([]byte(p.content)) + `",` +
 		`"compressedSize":` + strconv.Itoa(len(p.compressed)) + `,"size":` + strconv.Itoa(len(p.content)) + `}`
+}
+
+// TestInstallRecoversMembersOfAMissingContainer covers the missing-container
+// entry to the fallback end to end: the container cannot be fetched, the main
+// transfer ends without it, and the install still converges — the member is
+// downloaded through the ordinary transfer, the recovery is reported on the
+// error stream, and the run reaches the orphan check.
+func TestInstallRecoversMembersOfAMissingContainer(t *testing.T) {
+	fi := newSFCInstallFixtureOpt(t, "container bytes that never arrive", true, false)
+	console := newFakeConsole()
+
+	if err := fi.downloader(t, console).Install(context.Background(), NewInstallRequest(fi.cfg, planProductID, "", ProductRefExact)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	assertFileContent(t, fi.installPath+"/"+fi.memberRel, fi.own.content)
+	out, errOut := console.out.String(), console.errOut.String()
+	if !strings.Contains(errOut, "is missing: downloading 1 file(s) directly") {
+		t.Errorf("the recovery decision must be reported on the error stream: %q", errOut)
+	}
+	if strings.Contains(out, "Extracting small files container") {
+		t.Errorf("no extraction line for a container that never existed:\n%s", out)
+	}
+	if !strings.Contains(out, "\t0 orphaned files") {
+		t.Errorf("the install must continue to the orphan check:\n%s", out)
+	}
+}
+
+// TestInstallFailsWhenAMissingContainersMemberCannotBeDownloaded locks the
+// honest failure: the container is gone and the direct download cannot supply
+// the member either, so the install must not report success over the gap.
+func TestInstallFailsWhenAMissingContainersMemberCannotBeDownloaded(t *testing.T) {
+	fi := newSFCInstallFixtureOpt(t, "container bytes that never arrive", false, false)
+	console := newFakeConsole()
+
+	err := fi.downloader(t, console).Install(context.Background(), NewInstallRequest(fi.cfg, planProductID, "", ProductRefExact))
+	if err == nil {
+		t.Fatal("Install reported success over a member that was never written")
+	}
+	if !strings.Contains(err.Error(), filepath.FromSlash(fi.memberRel)) {
+		t.Errorf("error = %v, want it to name the member", err)
+	}
 }

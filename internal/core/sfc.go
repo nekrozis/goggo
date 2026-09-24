@@ -23,8 +23,10 @@ import (
 // A member that declares a hash is verified against the bytes its region holds
 // before anything is written; a mismatch is not written and comes back as a
 // task to download directly, because the manifest's sfcRef cannot describe
-// such a member. A container that is not on disk is passed over silently, but
-// one that IS there and cannot be opened fails the run.
+// such a member. A container that is not on disk sends its members to that
+// same direct-download fallback — they remain independently addressable through
+// their own depot items — while one that IS there and cannot be opened fails
+// the run.
 func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanResult) ([]model.FileTask, error) {
 	var pending []model.FileTask
 	for _, group := range res.Plan.SFC {
@@ -34,6 +36,24 @@ func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanRe
 		container := filepath.Join(res.InstallPath, filepath.FromSlash(group.Container.Path))
 		f, err := os.Open(container)
 		if errors.Is(err, fs.ErrNotExist) {
+			// The container is unavailable; its members are not: they carry
+			// their own depot items, so they take the fallback a refused
+			// member already takes. Membership and destinations come from
+			// the extraction's own grouping, so the product filter cannot
+			// drift. Nothing is deleted — there is nothing to delete.
+			n := 0
+			for _, region := range sfcRegions(group, res.InstallPath) {
+				for _, member := range region.members {
+					pending = append(pending, model.FileTask{
+						Item: member.item, Destination: member.destination})
+					n++
+				}
+			}
+			if n > 0 {
+				fmt.Fprintf(d.ui.ErrOut(),
+					"Small files container %s is missing: downloading %d file(s) directly\n",
+					container, n)
+			}
 			continue
 		}
 		if err != nil {

@@ -129,24 +129,52 @@ func TestExtractHoldsBackAMemberItsRegionDoesNotHold(t *testing.T) {
 	}
 }
 
-// TestExtractSkipsMissingContainer locks the exists check: a container that is
-// not on disk passes over silently.
-func TestExtractSkipsMissingContainer(t *testing.T) {
+// TestExtractMissingContainerRecoversMembers locks the recovery contract that
+// replaced the silent skip:
+//
+//	Old contract: a missing container is silently ignored (no pending, no line).
+//	New contract: a missing container sends its product's members to the
+//	              direct-download fallback, once each, with one notice line.
+//
+// The membership authority is the extraction's own grouping, so the foreign
+// product's member must not join the fallback and no deletion is attempted on
+// a path that does not exist.
+func TestExtractMissingContainerRecoversMembers(t *testing.T) {
 	f := newSFCFixture(t)
 	if err := os.Remove(f.container); err != nil {
 		t.Fatal(err)
 	}
-	d := newOfflineDownloader(t, noopServer(t), planTestConfig(t), newFakeConsole())
+	console := newFakeConsole()
+	d := newOfflineDownloader(t, noopServer(t), planTestConfig(t), console)
 
 	pending, err := d.ExtractSmallFilesContainers(context.Background(), f.res)
 	if err != nil {
 		t.Fatalf("Extract: %v", err)
 	}
-	if len(pending) != 0 {
-		t.Errorf("pending = %+v, want none for a container that is not on disk", pending)
+	want := []string{
+		filepath.Join(f.root, "game", "one.txt"),
+		filepath.Join(f.root, "game", "sub", "two.txt"),
 	}
-	if strings.Contains(consoleText(t, d), "Extracting small files container") {
-		t.Error("a missing container must be skipped without the extraction line")
+	if len(pending) != len(want) {
+		t.Fatalf("pending = %+v, want the two own-product members", pending)
+	}
+	for i, task := range pending {
+		if task.Destination != want[i] {
+			t.Errorf("pending[%d] destination = %q, want %q", i, task.Destination, want[i])
+		}
+		if task.Item.ProductID != "42" {
+			t.Errorf("pending[%d] carries product %q: the foreign member must not join", i, task.Item.ProductID)
+		}
+	}
+	text := console.out.String() + console.errOut.String()
+	if !strings.Contains(text, "Small files container "+f.container+" is missing: downloading 2 file(s) directly") {
+		t.Errorf("recovery notice missing from:\n%s", text)
+	}
+	if strings.Contains(text, "Failed to delete") {
+		t.Errorf("a missing container must not be attempted for deletion:\n%s", text)
+	}
+	if strings.Contains(text, "Extracting small files container") {
+		t.Errorf("the extraction line belongs to unpacked containers only:\n%s", text)
 	}
 }
 

@@ -476,9 +476,11 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // noopServer is a server the extraction never talks to.
 func noopServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
+	t.Cleanup(srv.Close)
+	return srv
 }
 
 // consoleText pulls the output the fake console captured.

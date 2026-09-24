@@ -2,8 +2,6 @@ package gogxml
 
 import (
 	"bytes"
-	"crypto/md5"
-	"encoding/hex"
 	"errors"
 	"math"
 	"os"
@@ -11,12 +9,6 @@ import (
 	"strings"
 	"testing"
 )
-
-// md5Of returns the 32-hex md5 string of data.
-func md5Of(data []byte) string {
-	sum := md5.Sum(data)
-	return hex.EncodeToString(sum[:])
-}
 
 // T-XML-1: TestGogXMLParseAndRoundtrip verifies that valid GOG XML documents
 // are losslessly parsed and can round-trip with formatting whitespace differences ignored.

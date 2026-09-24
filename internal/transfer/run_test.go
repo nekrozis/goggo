@@ -89,12 +89,6 @@ func (c *testCDN) set(path string, body []byte) {
 	c.bodies[path] = body
 }
 
-func (c *testCDN) hits(path string) int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.requests[path]
-}
-
 func (c *testCDN) url(path string) string { return c.URL + path }
 
 // chunked compresses content into a served chunk and returns the depot chunk
@@ -161,7 +155,7 @@ func TestRunDownloadsAndAssembles(t *testing.T) {
 		Item: model.GalaxyDepotItem{
 			Path:                "game/data.bin",
 			Chunks:              []model.GalaxyDepotItemChunk{chunked(t, cdn, "hello "), chunked(t, cdn, "world")},
-			TotalCompressedSize: uint64(len(cdn.bodies["/c/"+mustChunkMD5(t, cdn, "hello ")]) + len(cdn.bodies["/c/"+mustChunkMD5(t, cdn, "world")])),
+			TotalCompressedSize: uint64(len(cdn.bodies["/c/"+mustChunkMD5(t, "hello ")]) + len(cdn.bodies["/c/"+mustChunkMD5(t, "world")])),
 		},
 		Destination: dest,
 	}
@@ -501,7 +495,7 @@ func singleTaskFrom(task model.FileTask) []model.FileTask {
 }
 
 // mustChunkMD5 recomputes a served chunk's digest for the total-size fixture.
-func mustChunkMD5(t *testing.T, cdn *testCDN, content string) string {
+func mustChunkMD5(t *testing.T, content string) string {
 	t.Helper()
 	var buf bytes.Buffer
 	zw := zlib.NewWriter(&buf)

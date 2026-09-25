@@ -81,8 +81,7 @@ func TestRecoveryFailureIsSessionRejectedWithoutRetry(t *testing.T) {
 	refreshErr := errors.New("refresh: HTTP 400")
 	cl := recoveryClient(t, script, func(context.Context) error { return refreshErr })
 	err := fetch(cl)
-	var rej *SessionRejectedError
-	if !errors.As(err, &rej) {
+	if _, ok := errors.AsType[*SessionRejectedError](err); !ok {
 		t.Fatalf("error %v, want *SessionRejectedError", err)
 	}
 	if !errors.Is(err, refreshErr) {
@@ -101,8 +100,7 @@ func TestSecondRejectionTerminatesRecovery(t *testing.T) {
 	calls := 0
 	cl := recoveryClient(t, script, func(context.Context) error { calls++; return nil })
 	err := fetch(cl)
-	var rej *SessionRejectedError
-	if !errors.As(err, &rej) {
+	if _, ok := errors.AsType[*SessionRejectedError](err); !ok {
 		t.Fatalf("error %v, want *SessionRejectedError", err)
 	}
 	var se *httpx.StatusError
@@ -122,8 +120,7 @@ func TestNilReauthorizerKeepsStatusError(t *testing.T) {
 	if !errors.As(err, &se) || se.Code != 401 {
 		t.Fatalf("error %v, want raw *httpx.StatusError 401", err)
 	}
-	var rej *SessionRejectedError
-	if errors.As(err, &rej) {
+	if _, ok := errors.AsType[*SessionRejectedError](err); ok {
 		t.Error("disabled recovery must not produce SessionRejectedError")
 	}
 }

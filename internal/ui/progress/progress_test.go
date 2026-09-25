@@ -133,3 +133,31 @@ func TestDrawWritesWithoutNewline(t *testing.T) {
 		t.Error("Draw must not append a newline")
 	}
 }
+
+// TestUnicodePartialIndexStaysInRange sweeps widths and fractions and
+// asserts the rendered bar only ever contains glyphs the table can
+// produce. The motivating case is arm64: the backend fuses the fraction
+// subtraction into the preceding multiply, so 0.12 at width 75 (whose
+// exact product rounds up to 9.0) yields a hair-negative difference that
+// floors to -1 and panics barChars[-1] without the clamp. amd64 cannot
+// reproduce the fusion, so the sweep pins the invariant on every
+// platform and the macOS arm64 CI leg proves the fused path.
+func TestUnicodePartialIndexStaysInRange(t *testing.T) {
+	bar := NewBar(true, false)
+	const allowed = "\u258F\u258E\u258D\u258C\u258B\u258A\u2589\u2588\u2595 "
+	for length := range 81 {
+		for i := range 101 {
+			fraction := float64(i) / 100.0
+			for _, r := range bar.Create(length, fraction) {
+				if !strings.ContainsRune(allowed, r) {
+					t.Fatalf("Create(%d, %v) emitted table-external glyph %q", length, fraction, r)
+				}
+			}
+		}
+	}
+	// The exact arm64 trigger, pinned by name: no panic, borders intact.
+	s := bar.Create(75, 0.12)
+	if !strings.HasPrefix(s, "\u2595") || !strings.HasSuffix(s, "\u258F") {
+		t.Errorf("Create(75, 0.12) = %q, want the unicode borders", s)
+	}
+}

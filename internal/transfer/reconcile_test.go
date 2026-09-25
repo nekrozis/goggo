@@ -150,7 +150,7 @@ func TestRunSkipsCompleteFile(t *testing.T) {
 		t.Errorf("chunk hits = %d, want 0 (nothing to transfer)", got)
 	}
 	var sawOK, sawFinish bool
-	for _, ev := range obs.events {
+	for _, ev := range obs.Events() {
 		if ev.Kind == EventMessageSuccess && strings.Contains(ev.Text, ": OK") {
 			sawOK = true
 		}
@@ -159,7 +159,7 @@ func TestRunSkipsCompleteFile(t *testing.T) {
 		}
 	}
 	if !sawOK || !sawFinish {
-		t.Errorf("events = %+v, want the OK success message and TaskFinish", obs.events)
+		t.Errorf("events = %+v, want the OK success message and TaskFinish", obs.Events())
 	}
 	data, err := os.ReadFile(dest)
 	if err != nil {
@@ -323,13 +323,13 @@ func TestRunUncompressedMD5MismatchFailsWithoutAppend(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	var sawVerifyFailure bool
-	for _, ev := range obs.events {
+	for _, ev := range obs.Events() {
 		if ev.Kind == EventMessageError && strings.Contains(ev.Text, "uncompressed content verification failed") {
 			sawVerifyFailure = true
 		}
 	}
 	if !sawVerifyFailure {
-		t.Errorf("events = %+v, want the uncompressed verification failure", obs.events)
+		t.Errorf("events = %+v, want the uncompressed verification failure", obs.Events())
 	}
 	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
 		t.Error("destination exists after the failed chunk, want no append")
@@ -385,7 +385,7 @@ func TestRunResumeEmitsExplicitMarker(t *testing.T) {
 	}
 
 	var markers int
-	for _, ev := range obs.events {
+	for _, ev := range obs.Events() {
 		if ev.Kind == EventMessageInfo && IsResumeMessage(ev.Text) {
 			markers++
 			if !strings.Contains(ev.Text, ": "+dest) {

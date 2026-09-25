@@ -346,7 +346,7 @@ func TestProgressPublishesWhileTheChunkIsStillArriving(t *testing.T) {
 	}
 	// The display path still learns the task's progress from the events: the
 	// sampler is not the display's feed.
-	for _, ev := range obs.events {
+	for _, ev := range obs.Events() {
 		if ev.Kind != EventProgress {
 			continue
 		}

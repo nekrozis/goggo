@@ -352,14 +352,17 @@ func TestCacheHomeSemantics(t *testing.T) {
 	}
 }
 
-// TestConfigHomeUsesPlatformRoots locks the platform split: on Windows
-// and macOS the configuration root comes from the standard library, which is
-// what lets the CLI start when HOME is not set.
+// TestConfigHomeUsesPlatformRoots locks the platform split: on Windows and
+// macOS the configuration root comes from the standard library. Only the
+// Windows root is independent of HOME — os.UserConfigDir on macOS resolves
+// under ~/Library, so HOME stays set there.
 func TestConfigHomeUsesPlatformRoots(t *testing.T) {
 	if !usesStdlibRoots() {
 		t.Skip("XDG branch is covered by TestConfigHomeSemantics")
 	}
-	clearEnv(t, "HOME") // the point of the platform split: no HOME required
+	if runtime.GOOS != "darwin" {
+		clearEnv(t, "HOME") // the Windows point: no HOME required
+	}
 	clearEnv(t, "XDG_CONFIG_HOME")
 
 	want, err := os.UserConfigDir()
@@ -382,7 +385,9 @@ func TestCacheHomeUsesPlatformRoots(t *testing.T) {
 	if !usesStdlibRoots() {
 		t.Skip("XDG branch is covered by TestCacheHomeSemantics")
 	}
-	clearEnv(t, "HOME")
+	if runtime.GOOS != "darwin" {
+		clearEnv(t, "HOME") // Windows only: the macOS cache root lives under HOME
+	}
 	clearEnv(t, "XDG_CACHE_HOME")
 
 	want, err := os.UserCacheDir()

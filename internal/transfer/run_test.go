@@ -41,14 +41,26 @@ func assertFileContent(t *testing.T, path, want string) {
 	}
 }
 
-// recordingObserver collects the events a run emitted. Run's deliverer
-// goroutine is the only sender and Run returns after it finishes, so reading
-// the slice after Run needs no lock.
+// recordingObserver collects the events a run emitted. A progress test reads
+// the slice while the run is still in flight, so the slice is guarded and
+// exposed only through a locked snapshot.
 type recordingObserver struct {
+	mu     sync.Mutex
 	events []Event
 }
 
-func (o *recordingObserver) OnEvent(ev Event) { o.events = append(o.events, ev) }
+func (o *recordingObserver) OnEvent(ev Event) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.events = append(o.events, ev)
+}
+
+// Events returns a snapshot of everything emitted so far.
+func (o *recordingObserver) Events() []Event {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]Event(nil), o.events...)
+}
 
 // testCDN serves the compressed chunk bytes and counts the hits per path.
 type testCDN struct {
@@ -140,8 +152,8 @@ func TestRunEmptyTasks(t *testing.T) {
 	if err := Run(context.Background(), nil, Options{}, deps); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if len(obs.events) != 0 {
-		t.Errorf("events = %+v, want none", obs.events)
+	if len(obs.Events()) != 0 {
+		t.Errorf("events = %+v, want none", obs.Events())
 	}
 }
 
@@ -173,7 +185,7 @@ func TestRunDownloadsAndAssembles(t *testing.T) {
 	}
 
 	var kinds []EventKind
-	for _, ev := range obs.events {
+	for _, ev := range obs.Events() {
 		if ev.Path == dest {
 			kinds = append(kinds, ev.Kind)
 		}
@@ -227,7 +239,7 @@ func TestRunRetriesOnHashMismatch(t *testing.T) {
 	assertFileContent(t, dest, "good content")
 
 	var retried bool
-	for _, ev := range obs.events {
+	for _, ev := range obs.Events() {
 		// The tokens, not the sentence: the retry word, the attempt out of the
 		// configured total, and the file the announcement names.
 		if ev.Kind != EventMessageInfo {
@@ -239,7 +251,7 @@ func TestRunRetriesOnHashMismatch(t *testing.T) {
 		}
 	}
 	if !retried {
-		t.Errorf("events = %+v, want a retry announcement", obs.events)
+		t.Errorf("events = %+v, want a retry announcement", obs.Events())
 	}
 }
 
@@ -274,13 +286,13 @@ func TestRunTaskFailureDoesNotStopOthers(t *testing.T) {
 	assertFileContent(t, healthy.Destination, "good")
 
 	var sawError bool
-	for _, ev := range obs.events {
+	for _, ev := range obs.Events() {
 		if ev.Kind == EventMessageError && strings.Contains(ev.Text, "404") {
 			sawError = true
 		}
 	}
 	if !sawError {
-		t.Errorf("events = %+v, want the failing task's error event", obs.events)
+		t.Errorf("events = %+v, want the failing task's error event", obs.Events())
 	}
 }
 
@@ -311,13 +323,13 @@ func TestRun416IsNotRetried(t *testing.T) {
 		t.Fatalf("Run = %v, want nil", err)
 	}
 	var sawError bool
-	for _, ev := range obs.events {
+	for _, ev := range obs.Events() {
 		if ev.Kind == EventMessageError {
 			sawError = true
 		}
 	}
 	if !sawError {
-		t.Errorf("events = %+v, want the task's error event", obs.events)
+		t.Errorf("events = %+v, want the task's error event", obs.Events())
 	}
 	mu.Lock()
 	defer mu.Unlock()

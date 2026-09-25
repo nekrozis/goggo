@@ -169,7 +169,7 @@ func hasMessage(messages []string, tokens ...string) bool {
 
 func (e *websiteEnv) messageTexts() []string {
 	var out []string
-	for _, ev := range e.obs.events {
+	for _, ev := range e.obs.Events() {
 		if ev.Kind == EventMessageInfo || ev.Kind == EventMessageWarning ||
 			ev.Kind == EventMessageError || ev.Kind == EventMessageSuccess {
 			out = append(out, ev.Text)
@@ -185,8 +185,8 @@ func TestRunWebsiteEmptyTasks(t *testing.T) {
 	if err := RunWebsite(context.Background(), nil, Options{}, env.deps); err != nil {
 		t.Fatalf("RunWebsite: %v", err)
 	}
-	if len(env.obs.events) != 0 {
-		t.Errorf("events = %+v, want none", env.obs.events)
+	if len(env.obs.Events()) != 0 {
+		t.Errorf("events = %+v, want none", env.obs.Events())
 	}
 }
 
@@ -477,13 +477,13 @@ func TestRunWebsiteRetryAndCleanupMatrix(t *testing.T) {
 		// The failed attempt leaves as the "Download complete (<err>): <name>"
 		// warning, not as an error.
 		var sawFailure bool
-		for _, ev := range env.obs.events {
+		for _, ev := range env.obs.Events() {
 			if ev.Kind == EventMessageWarning && strings.Contains(ev.Text, "Download complete (") {
 				sawFailure = true
 			}
 		}
 		if !sawFailure {
-			t.Errorf("events = %+v, want the download-complete warning", env.obs.events)
+			t.Errorf("events = %+v, want the download-complete warning", env.obs.Events())
 		}
 	})
 

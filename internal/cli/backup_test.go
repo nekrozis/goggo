@@ -160,6 +160,10 @@ func TestBackupDownloadNeedsAGame(t *testing.T) {
 // TestBackupDownloadExecutionEdgeCases exercises unknown file selectors
 // and mixed valid/unknown selectors against the simulated environment.
 func TestBackupDownloadExecutionEdgeCases(t *testing.T) {
+	// The selectors are only reached past the session gate, so the run needs
+	// a seeded local session: without isolation this test silently rode the
+	// developer's real credentials on one machine and failed everywhere else.
+	sentinelRoots(t, sentinelExpiry(false))
 	f := newSentinelFixture(t)
 	target, err := url.Parse(f.URL)
 	if err != nil {

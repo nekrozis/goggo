@@ -1,9 +1,8 @@
-// Command goggo is a GOG downloader: it logs in to the GOG website, keeps the
-// session in a cookie file and a Galaxy token file, and lists or downloads the
-// account's games.
+// Command goggo is a GOG downloader CLI for account game access and local
+// installation management.
 //
-// The front end lives in internal/cli; this file is only the process entry
-// point.
+// The front end lives in internal/cli; this file only provides the process
+// entry point and forwards command-line arguments and standard IO.
 package main
 
 import (

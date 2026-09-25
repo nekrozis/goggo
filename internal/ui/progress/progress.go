@@ -97,16 +97,10 @@ func (b *Bar) Create(length int, fraction float64) string {
 	// eighths when the cursor is inside the bar.
 	barPart := fraction * float64(length)
 	whole := int(math.Floor(barPart))
-	partialIndex := int(math.Floor((barPart - float64(whole)) * 8))
 	// The expression should produce [0,8) under exact arithmetic. Floating-
 	// point rounding and fused operations may move a boundary value outside
 	// that range, so clamp before indexing the grading table.
-	if partialIndex < 0 {
-		partialIndex = 0
-	}
-	if partialIndex > 7 {
-		partialIndex = 7
-	}
+	partialIndex := max(0, min(int(math.Floor((barPart-float64(whole))*8)), 7))
 
 	leftBorder := simpleLeftBorder
 	rightBorder := simpleRightBorder

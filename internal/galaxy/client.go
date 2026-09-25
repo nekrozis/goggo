@@ -39,16 +39,36 @@ func defaultEndpoints() endpoints {
 // seam: the header value, never the token behind it.
 type AuthorizationSource interface{ AuthorizationValue() string }
 
-// Client drives the Galaxy content API over an httpx transport.
-type Client struct {
-	authz AuthorizationSource
-	hx    *httpx.Client
-	ep    endpoints
+// Reauthorizer attempts to recover a rejected API session. Refresh+Save is
+// today's only implementation; the client never inspects how recovery works,
+// so a future recovery mechanism plugs in without touching this package.
+type Reauthorizer func(ctx context.Context) error
+
+// SessionRejectedError reports an API session the server refused even after
+// recovery was attempted. Error() carries the actionable wording the user
+// needs; the underlying cause (a refresh failure or the second 401) stays
+// reachable through Unwrap for debugging and tests.
+type SessionRejectedError struct{ Err error }
+
+func (e *SessionRejectedError) Error() string {
+	return "GOG API rejected the session (HTTP 401). Run 'goggo auth login' to authenticate again."
 }
 
-// New builds a Client on a caller-provided transport and credential source.
-// Both arguments are required; a nil one is an error.
-func New(hx *httpx.Client, authz AuthorizationSource) (*Client, error) {
+func (e *SessionRejectedError) Unwrap() error { return e.Err }
+
+// Client drives the Galaxy content API over an httpx transport.
+type Client struct {
+	authz  AuthorizationSource
+	reauth Reauthorizer
+	hx     *httpx.Client
+	ep     endpoints
+}
+
+// New builds a Client on a caller-provided transport, credential source and
+// session recovery. The first two are required; a nil one is an error. A nil
+// reauthorizer disables recovery: a 401 then surfaces as the transport's
+// status error, exactly as before recovery existed.
+func New(hx *httpx.Client, authz AuthorizationSource, reauth Reauthorizer) (*Client, error) {
 	if authz == nil {
 		return nil, errors.New("galaxy: nil galaxy config")
 	}
@@ -56,9 +76,10 @@ func New(hx *httpx.Client, authz AuthorizationSource) (*Client, error) {
 		return nil, errors.New("galaxy: nil http client")
 	}
 	return &Client{
-		ep:    defaultEndpoints(),
-		authz: authz,
-		hx:    hx,
+		ep:     defaultEndpoints(),
+		authz:  authz,
+		reauth: reauth,
+		hx:     hx,
 	}, nil
 }
 
@@ -75,7 +96,35 @@ func (c *Client) authorization() string {
 }
 
 // getResponseBytes fetches target and returns the raw response body.
+//
+// A 401 triggers at most one recovery: the reauthorizer runs once, the
+// request is retried once, and a second rejection ends the exchange. The
+// once-only guard is deliberate — recovery that itself fails to clear the
+// rejection must not loop.
 func (c *Client) getResponseBytes(ctx context.Context, target string) ([]byte, error) {
+	body, err := c.fetchOnce(ctx, target)
+	if err == nil || c.reauth == nil || !isUnauthorized(err) {
+		return body, err
+	}
+	if rerr := c.reauth(ctx); rerr != nil {
+		return nil, &SessionRejectedError{Err: rerr}
+	}
+	body, err = c.fetchOnce(ctx, target)
+	if err != nil && isUnauthorized(err) {
+		return nil, &SessionRejectedError{Err: err}
+	}
+	return body, err
+}
+
+// isUnauthorized reports a 401 answer from the transport. Only this status
+// means "the session was refused"; every other failure keeps its own shape.
+func isUnauthorized(err error) bool {
+	var se *httpx.StatusError
+	return errors.As(err, &se) && se.Code == http.StatusUnauthorized
+}
+
+// fetchOnce performs a single authenticated GET.
+func (c *Client) fetchOnce(ctx context.Context, target string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, httpx.SanitizeError(err)

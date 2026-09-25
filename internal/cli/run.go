@@ -251,8 +251,10 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 
 	// Downloader::init: a usable access token is checked
 	// before any command runs, and a failure stops the run.
-	// Commands declaring sessionNone (such as cmdGame) do not require an active
-	// access token to inspect public products.
+	// Commands declaring sessionNone (such as cmdGame) do not require an
+	// active login: product metadata is public; authentication may be
+	// required for some expanded API responses, and the galaxy client's
+	// 401 recovery covers that case without a session gate.
 	if inv.session != sessionNone {
 		if err := d.Init(ctx); err != nil {
 			return reportError(stderr, err)

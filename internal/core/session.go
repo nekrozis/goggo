@@ -72,7 +72,17 @@ func OpenWith(ctx context.Context, cfg config.Config, ui Console, req SessionReq
 	if err != nil {
 		return nil, err
 	}
-	gx, err := galaxy.New(hx, store)
+	// Recovery for a rejected API session: refresh the token and persist it,
+	// regardless of what the local expiry says — the server has just told us
+	// the credential it was handed is unusable. The galaxy client calls this
+	// at most once per request.
+	reauth := func(ctx context.Context) error {
+		if err := store.Refresh(ctx, auth.NewClient(hx)); err != nil {
+			return err
+		}
+		return store.Save()
+	}
+	gx, err := galaxy.New(hx, store, reauth)
 	if err != nil {
 		return nil, err
 	}

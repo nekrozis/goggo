@@ -27,7 +27,7 @@ func newGamedetailsResolver(t *testing.T, refreshes *atomic.Int32) *gamedetailsR
 	if err != nil {
 		t.Fatalf("auth.Open: %v", err)
 	}
-	gx, err := galaxy.New(hx, store)
+	gx, err := galaxy.New(hx, store, nil)
 	if err != nil {
 		t.Fatalf("galaxy.New: %v", err)
 	}

@@ -43,7 +43,7 @@ func newTestClient(t *testing.T, srv *httptest.Server, token map[string]any) *Cl
 	if token != nil {
 		store.StoreLoginResponse(token)
 	}
-	cl, err := New(hx, store)
+	cl, err := New(hx, store, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -59,10 +59,10 @@ func TestNewRejectsNilArguments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
-	if _, err := New(nil, newEmptyStore(t)); err == nil {
+	if _, err := New(nil, newEmptyStore(t), nil); err == nil {
 		t.Error("a nil http client must be an error")
 	}
-	if _, err := New(hx, nil); err == nil {
+	if _, err := New(hx, nil, nil); err == nil {
 		t.Error("a nil credential source must be an error")
 	}
 }
@@ -129,7 +129,7 @@ func TestGetResponseHonoursTransportPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("httpx.New: %v", err)
 	}
-	cl, err := New(hx, newEmptyStore(t))
+	cl, err := New(hx, newEmptyStore(t), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

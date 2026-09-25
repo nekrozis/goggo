@@ -78,7 +78,7 @@ func newProviderWithPolicy(t *testing.T, remoteXML bool, refreshes *atomic.Int32
 	if err != nil {
 		t.Fatalf("auth.Open: %v", err)
 	}
-	gx, err := galaxy.New(hx, store)
+	gx, err := galaxy.New(hx, store, nil)
 	if err != nil {
 		t.Fatalf("galaxy.New: %v", err)
 	}

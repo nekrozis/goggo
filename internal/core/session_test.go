@@ -181,7 +181,7 @@ func newOfflineDownloaderWith(t *testing.T, srv *httptest.Server, cfg config.Con
 	if err != nil {
 		t.Fatalf("webapi.New: %v", err)
 	}
-	gx, err := galaxy.New(hx, store)
+	gx, err := galaxy.New(hx, store, nil)
 	if err != nil {
 		t.Fatalf("galaxy.New: %v", err)
 	}

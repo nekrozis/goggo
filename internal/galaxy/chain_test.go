@@ -179,7 +179,7 @@ func newChainFixture(t *testing.T, opts ...func(*chainFixture)) *chainFixture {
 		t.Fatalf("auth.Open: %v", err)
 	}
 	store.StoreLoginResponse(map[string]any{"access_token": chainToken, "expires_in": 3600})
-	f.client, err = galaxy.New(hx, store)
+	f.client, err = galaxy.New(hx, store, nil)
 	if err != nil {
 		t.Fatalf("galaxy.New: %v", err)
 	}

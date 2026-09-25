@@ -195,7 +195,7 @@ func TestAuthStatusReportsSessionsSeparately(t *testing.T) {
 		}
 	})
 
-	t.Run("live credential: logged in, API unknown", func(t *testing.T) {
+	t.Run("live credential: logged in, API not checked", func(t *testing.T) {
 		sentinelRoots(t, sentinelExpiry(false))
 		f := newSentinelFixture(t)
 		var stdout, stderr bytes.Buffer
@@ -203,7 +203,7 @@ func TestAuthStatusReportsSessionsSeparately(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr.String())
 		}
-		want := "Login status: Logged in\nAPI session: unknown\n"
+		want := "Login status: Logged in\nAPI session: not checked\n"
 		if stdout.String() != want {
 			t.Errorf("stdout = %q, want %q", stdout.String(), want)
 		}

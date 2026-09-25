@@ -176,9 +176,11 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		if d.LoggedIn() {
 			// The two sessions are separate facts. This command never asks
 			// the API anything, so a live local credential is reported as
-			// unproven rather than as usable: no active probe, no inference.
+			// unverified rather than as usable: this command does not probe
+			// the API session, and a missing verification is reported as
+			// "not checked" — the absence of a check, never an anomaly.
 			fmt.Fprintln(stdout, "Login status: Logged in")
-			fmt.Fprintln(stdout, "API session: unknown")
+			fmt.Fprintln(stdout, "API session: not checked")
 			return outcomeOK
 		}
 		// The probe's own three answers, read once so the two lines below

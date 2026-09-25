@@ -104,6 +104,12 @@ func OpenWith(ctx context.Context, cfg config.Config, ui Console, req SessionReq
 			// flow below still decides the run, and a command that answers
 			// without a session (the status report) must be able to say WHY
 			// the session could not be renewed instead of dropping the reason.
+			//
+			// Invariant: this is the only write, and a failed refresh leaves
+			// the token expired, so a session carrying a diagnostic can never
+			// satisfy checkLoggedIn. The status report therefore needs no
+			// degraded branch on the logged-in side — the combination is
+			// excluded here, at the source, not at the renderer.
 			d.apiSessionDiag = err.Error()
 		}
 	}

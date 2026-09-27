@@ -129,4 +129,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         # No checkout in this job: gh cannot infer the repository from a
         # working tree, so it is named explicitly.
-        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "goggo ${GITHUB_REF_NAME}"
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "goggo ${GITHUB_REF_NAME}" \
+            --notes "$(printf 'goggo %s.\n\nRun goggo help for the full command list.' "$GITHUB_REF_NAME")"

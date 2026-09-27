@@ -1,33 +1,9 @@
 # goggo
 
-A command-line GOG downloader and installation manager written in Go.
+A command-line client for working with GOG games, written in Go.
 
-goggo downloads offline game files from a GOG account and manages local
-installations using GOG metadata and manifests.
-
-## About
-
-goggo is a standalone Go implementation for working with GOG game
-downloads and local installations.
-
-It supports account queries, offline backups, manifest-based installation
-and verification, and inspection of GOG metadata from the website and
-Galaxy APIs.
-
-## Installation
-
-Download the archive for your platform from the releases page and place
-the `goggo` binary somewhere in your `PATH`.
-
-### Build from source
-
-Requirements:
-
-- Go 1.27 or later
-
-Build:
-
-    go build .
+goggo provides account browsing, offline downloads, local installation and
+verification, orphan file management, and checksum tools.
 
 ## Quick start
 
@@ -43,62 +19,66 @@ Inspect a game:
 
     goggo game terraria
 
-Install or update a local installation:
+Install or update a game:
 
     goggo install terraria
 
-Use `goggo <command> --help` for command-specific options.
+Check an installed game:
+
+    goggo verify terraria
+
+Run `goggo <command> --help` for command-specific options.
+
+## Common tasks
+
+List available offline files:
+
+    goggo backup list terraria
+
+Download offline files:
+
+    goggo backup download terraria
+
+Find unrecognized files in an installation:
+
+    goggo orphans check terraria
+
+Create a checksum file:
+
+    goggo manifest create <file>
+
+Inspect a checksum file:
+
+    goggo manifest inspect <file>
+
+Check a file against its checksum file:
+
+    goggo manifest verify <file>
+
+Inspect Galaxy builds, manifests, or CDN endpoints:
+
+    goggo galaxy builds terraria
+    goggo galaxy manifest terraria
+    goggo galaxy cdns terraria
 
 ## Authentication
 
-goggo stores authentication data in the user's configuration directory.
+goggo auth login starts the GOG authentication flow.
 
-Authentication data is kept locally and is not uploaded by goggo.
+Authentication data is stored locally in the user's configuration
+directory and is not uploaded by goggo.
 
-Check authentication state:
+Check the current authentication state with:
 
     goggo auth status
 
-Remove stored authentication data:
+Clear locally stored authentication data with:
 
     goggo auth clear
-
-`auth login` starts the GOG authentication flow.
-
-## Commands
-
-| Command  | Description                                  |
-|----------|----------------------------------------------|
-| auth     | Manage authentication                        |
-| list     | Browse account content                       |
-| game     | Show game information                        |
-| galaxy   | View GOG Galaxy information                  |
-| install  | Install or update a game                     |
-| verify   | Check an installed game                      |
-| orphans  | Find unrecognized files in an installation    |
-| backup   | Manage offline game files                    |
-| manifest | Work with GOG checksum files                 |
-
-## Development
-
-Build:
-
-    go build ./...
-
-Test:
-
-    go test ./...
 
 ## License
 
 BSD-3-Clause. See LICENSE for details.
-
-Dependencies:
-
-- Go standard library
-- golang.org/x/net (BSD-3-Clause)
-- golang.org/x/sys (BSD-3-Clause)
-- golang.org/x/term (BSD-3-Clause)
 
 goggo is an independent project and is not affiliated with or endorsed
 by GOG Ltd.

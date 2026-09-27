@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/nekrozis/goggo/internal/manifest/gogxml"
+	"github.com/nekrozis/goggo/internal/util"
 )
 
 // openKind classifies an open/stat failure under the frozen error taxonomy:
@@ -47,9 +47,7 @@ func jsonVerifyStatus(s gogxml.VerifyStatus) string {
 }
 
 func writeJSONError(w io.Writer, targetFile, manifestFile, errorKind, message string) {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(manifestErrorJSON{
+	_ = util.WriteStyledJSON(w, manifestErrorJSON{
 		TargetFile:   targetFile,
 		ManifestFile: manifestFile,
 		Status:       "ERROR",
@@ -92,9 +90,7 @@ func runManifestInspect(ui *console, inv invocation) outcome {
 	}
 
 	if inv.json {
-		enc := json.NewEncoder(ui.Out())
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(manifest)
+		_ = util.WriteStyledJSON(ui.Out(), manifest)
 		return outcomeOK
 	}
 
@@ -266,9 +262,7 @@ func runManifestVerify(ui *console, inv invocation) outcome {
 			writeJSONError(ui.Out(), target, resolvedXML, "SIZE_MISMATCH",
 				fmt.Sprintf("file is %d bytes, manifest declares %d", report.ActualSize, report.ExpectedSize))
 		default:
-			enc := json.NewEncoder(ui.Out())
-			enc.SetIndent("", "  ")
-			_ = enc.Encode(verifyResultJSON{
+			_ = util.WriteStyledJSON(ui.Out(), verifyResultJSON{
 				VerifyReport: report,
 				Status:       jsonVerifyStatus(report.Status),
 			})

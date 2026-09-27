@@ -2,7 +2,7 @@ package cli
 
 import (
 	"bytes"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -611,7 +611,7 @@ func TestManifestIOErrorClassification(t *testing.T) {
 			t.Errorf("%s: exit = %d, want 2 (out=%s)", c.name, code, out)
 		}
 		var doc map[string]any
-		if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		if err := jsonv2.Unmarshal([]byte(out), &doc); err != nil {
 			t.Errorf("%s: not JSON: %s", c.name, out)
 			continue
 		}

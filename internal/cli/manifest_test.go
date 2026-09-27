@@ -2,7 +2,7 @@ package cli
 
 import (
 	"bytes"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,7 +157,7 @@ func TestManifestCLIInspectVerifyCreateE2E(t *testing.T) {
 		t.Fatalf("inspect --json: exit %d", code)
 	}
 	var doc map[string]any
-	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+	if err := jsonv2.Unmarshal([]byte(out), &doc); err != nil {
 		t.Fatalf("inspect --json not JSON: %v\n%s", err, out)
 	}
 	if doc["file"] != "game.bin" || doc["chunks"].(float64) != 3 {
@@ -176,7 +176,7 @@ func TestManifestCLIInspectVerifyCreateE2E(t *testing.T) {
 		t.Fatalf("verify: exit %d err=%q", code, errOut)
 	}
 	var report map[string]any
-	if err := json.Unmarshal([]byte(out), &report); err != nil {
+	if err := jsonv2.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("verify --json not JSON: %v", err)
 	}
 	if report["status"] != "OK" || report["corrupt_chunks"].(float64) != 0 {
@@ -200,7 +200,7 @@ func TestManifestCLIInspectVerifyCreateE2E(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("corrupt verify: exit %d, want 1 (err=%q)", code, errOut)
 	}
-	if err := json.Unmarshal([]byte(out), &report); err != nil {
+	if err := jsonv2.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("corrupt --json not JSON: %v", err)
 	}
 	if report["status"] != "CORRUPT" || report["corrupt_chunks"].(float64) != 1 {
@@ -229,7 +229,7 @@ func TestManifestCLIInspectVerifyCreateE2E(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("size mismatch: exit %d, want 1", code)
 	}
-	if err := json.Unmarshal([]byte(out), &report); err != nil {
+	if err := jsonv2.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("size mismatch --json not JSON: %v", err)
 	}
 	if report["status"] != "ERROR" || report["error_kind"] != "SIZE_MISMATCH" {
@@ -250,7 +250,7 @@ func TestManifestCLIInspectVerifyCreateE2E(t *testing.T) {
 		t.Fatalf("semantic error: exit %d, want 2 (out=%q)", code, out)
 	}
 	var errDoc map[string]any
-	if err := json.Unmarshal([]byte(out), &errDoc); err != nil {
+	if err := jsonv2.Unmarshal([]byte(out), &errDoc); err != nil {
 		t.Fatalf("semantic error --json not JSON: %s", out)
 	}
 	if errDoc["error_kind"] != "MANIFEST_SEMANTIC_ERROR" {

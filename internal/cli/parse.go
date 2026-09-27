@@ -157,7 +157,7 @@ var optionTable = append([]optionSpec{
 	{id: optVersion, long: "version", summary: "Show version"},
 	{
 		id: optVerbose, long: "verbose", aliases: []string{"v"},
-		summary: "Verbose output (per-file records, skipped files)",
+		summary: "Verbose output",
 		detail: "Adds the per-file records the default output aggregates:\n" +
 			"skipped files, container members and orphan paths.",
 		parse: func(inv *invocation, _ string) error { inv.cfg.MsgLevel = msgLevelVerbose; return nil },

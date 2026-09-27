@@ -48,7 +48,7 @@ func rootUsage() string {
 	b.WriteString(commandLines(commandNode{name: "version", summary: "Show version"}))
 	b.WriteString("\nShared options:\n")
 	b.WriteString(optionLines(sharedOptions))
-	fmt.Fprintf(&b, "\nRun '%s <command> -h' for the options of one command.\n", config.ProgramName)
+	fmt.Fprintf(&b, "\nRun '%s <command> -h' for command-specific options.\n", config.ProgramName)
 	return b.String()
 }
 

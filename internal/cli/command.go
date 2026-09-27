@@ -195,6 +195,11 @@ var orphanNotes = []string{
 	"files belonging to other variants may be reported as orphaned.",
 }
 
+// orphanCheckNotes adds the guarantee the listing command makes and the
+// removing command does not.
+var orphanCheckNotes = append(append([]string{}, orphanNotes...),
+	"check is read-only: it lists files, it never deletes.")
+
 // The installation-locating options, shared by every command that has to
 // resolve an install path.
 //
@@ -323,19 +328,19 @@ var manifestCreateOptions = []optionID{optChunkSize, optOutputFile, optXMLDirect
 var commandTree = []commandNode{
 	{
 		name:    "auth",
-		summary: "Authentication",
+		summary: "Manage authentication",
 		children: []commandNode{
 			{name: "login", summary: "Log in", id: cmdAuthLogin,
 				session: sessionExplicitLogin, options: joinOptions([]optionID{optBrowser, optEmail}, networkOptions)},
 			{name: "clear", summary: "Clear local login state", id: cmdAuthClear,
 				session: sessionNone},
-			{name: "status", summary: "Report the authentication state", id: cmdAuthStatus,
+			{name: "status", summary: "Report authentication state", id: cmdAuthStatus,
 				session: sessionNone, options: networkOptions},
 		},
 	},
 	{
 		name:    "list",
-		summary: "List account content",
+		summary: "Browse account content",
 		children: []commandNode{
 			{name: "games", summary: "List owned games", id: cmdListGames,
 				session: sessionRequired, options: joinOptions([]optionID{optJSON}, listGamesOptions, networkOptions)},
@@ -354,7 +359,7 @@ var commandTree = []commandNode{
 	},
 	{
 		name:    "galaxy",
-		summary: "Inspect GOG Galaxy resources",
+		summary: "View GOG Galaxy information",
 		children: []commandNode{
 			{name: "builds", summary: "List a product's builds", id: cmdGalaxyBuilds,
 				session: sessionRequired, options: joinOptions([]optionID{optSort, optJSON}, productRefOptions, networkOptions)},
@@ -366,7 +371,7 @@ var commandTree = []commandNode{
 	},
 	{
 		name:    "install",
-		summary: "Make the local installation match the manifest",
+		summary: "Install or update a game",
 		id:      cmdInstall,
 		session: sessionImplicitLogin,
 		options: joinOptions(installTargetOptions, productRefOptions, networkOptions, transferUIOptions, []optionID{
@@ -378,7 +383,7 @@ var commandTree = []commandNode{
 		children: []commandNode{
 			{
 				name:    "options",
-				summary: "List available installation options",
+				summary: "Show available installation options",
 				id:      cmdInstallOptions,
 				session: sessionRequired,
 				options: joinOptions([]optionID{optPlatform, optLanguage, optArch, optJSON}, productRefOptions, networkOptions),
@@ -387,7 +392,7 @@ var commandTree = []commandNode{
 	},
 	{
 		name:    "verify",
-		summary: "Report whether the local files match the manifest",
+		summary: "Check an installed game",
 		id:      cmdVerify,
 		session: sessionRequired,
 		options: joinOptions(installTargetOptions, productRefOptions, verifyOptions, networkOptions, transferUIOptions),
@@ -401,11 +406,11 @@ var commandTree = []commandNode{
 	},
 	{
 		name:    "orphans",
-		summary: "Files in the installation that no manifest accounts for",
+		summary: "Find unrecognized files in an installation",
 		children: []commandNode{
-			{name: "check", summary: "List them (read-only)", id: cmdOrphansCheck,
+			{name: "check", summary: "List them", id: cmdOrphansCheck,
 				session: sessionRequired,
-				options: joinOptions(installTargetOptions, productRefOptions, orphansOptions, networkOptions, transferUIOptions), notes: orphanNotes},
+				options: joinOptions(installTargetOptions, productRefOptions, orphansOptions, networkOptions, transferUIOptions), notes: orphanCheckNotes},
 			{name: "remove", summary: "Delete them", id: cmdOrphansRemove,
 				session: sessionImplicitLogin,
 				options: joinOptions(installTargetOptions, productRefOptions, orphansOptions, []optionID{optYes}, networkOptions, transferUIOptions), notes: orphanNotes},
@@ -413,11 +418,11 @@ var commandTree = []commandNode{
 	},
 	{
 		name:    "backup",
-		summary: "Manage offline backup files",
+		summary: "Manage offline game files",
 		children: []commandNode{
 			{
 				name:    "list",
-				summary: "Show each game's offline backup files",
+				summary: "Show available offline files",
 				id:      cmdBackupList,
 				session: sessionRequired,
 				options: joinOptions(detailsOptions, []optionID{optJSON}, networkOptions),
@@ -425,7 +430,7 @@ var commandTree = []commandNode{
 			},
 			{
 				name:    "download",
-				summary: "Download offline backup files (installers, patches, extras, language packs)",
+				summary: "Download offline files",
 				id:      cmdBackupDownload,
 				session: sessionImplicitLogin,
 				options: joinOptions([]optionID{optDirectory, optNoSubdirectories, optOutputFile, optInfoThreads, optType},
@@ -448,25 +453,26 @@ var commandTree = []commandNode{
 	},
 	{
 		name:    "manifest",
-		summary: "Inspect, verify and create GOG XML checksum manifests",
+		summary: "Work with GOG checksum files",
 		children: []commandNode{
 			{
 				name:    "inspect",
-				summary: "Inspect a GOG XML checksum manifest (read-only)",
+				summary: "Inspect a checksum file",
 				id:      cmdManifestInspect,
 				session: sessionNone,
 				options: manifestInspectOptions,
+				notes:   []string{"Read-only: the checksum file is never modified."},
 			},
 			{
 				name:    "verify",
-				summary: "Verify file integrity against its GOG XML checksum manifest",
+				summary: "Check file integrity against a checksum file",
 				id:      cmdManifestVerify,
 				session: sessionNone,
 				options: manifestVerifyOptions,
 			},
 			{
 				name:    "create",
-				summary: "Generate a GOG XML checksum manifest for a file",
+				summary: "Create a checksum file",
 				id:      cmdManifestCreate,
 				session: sessionNone,
 				options: manifestCreateOptions,

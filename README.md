@@ -67,17 +67,17 @@ Remove stored authentication data:
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| auth | Manage authentication state |
-| list | List owned games, tags, and wishlist entries |
-| game | Show product information |
-| galaxy | Inspect Galaxy builds, manifests, and CDN information |
-| backup | List and download offline backup files |
-| install | Install or update files according to a manifest |
-| verify | Verify installed files against a manifest |
-| orphans | Find or remove files not referenced by manifests |
-| manifest | Inspect and manage XML checksum manifests |
+| Command  | Description                                  |
+|----------|----------------------------------------------|
+| auth     | Manage authentication                        |
+| list     | Browse account content                       |
+| game     | Show game information                        |
+| galaxy   | View GOG Galaxy information                  |
+| install  | Install or update a game                     |
+| verify   | Check an installed game                      |
+| orphans  | Find unrecognized files in an installation    |
+| backup   | Manage offline game files                    |
+| manifest | Work with GOG checksum files                 |
 
 ## Development
 

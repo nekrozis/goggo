@@ -41,16 +41,17 @@ const (
 	DefaultRedirectURI  = "https://embed.gog.com/on_login_success?origin=client"
 )
 
-// ProgramName is this implementation's identity: the binary name, the CLI name and
-// the User-Agent product token. Version is this implementation's own version, and
-// UpstreamCompatibilityVersion is the LGOGDownloader release whose behaviour this
-// program follows — a compatibility baseline, not this program's identity, so the
-// CLI never presents it as our version.
-const (
-	ProgramName                  = "goggo"
-	Version                      = "0.1.0"
-	UpstreamName                 = "LGOGDownloader"
-	UpstreamCompatibilityVersion = "3.18"
+// ProgramName is this implementation's identity: the binary name, the CLI name
+// and the User-Agent product token.
+const ProgramName = "goggo"
+
+// Version is this program's own version. Release builds stamp it with -X from
+// the tag; development builds keep the default below. BuildCommit names the
+// commit a release binary was built from and is empty in development builds.
+// The User-Agent carries Version only, never BuildCommit.
+var (
+	Version     = "0.1.0"
+	BuildCommit = ""
 
 	// VersionString is what the CLI prints as this program's own version.
 	VersionString = ProgramName + " " + Version

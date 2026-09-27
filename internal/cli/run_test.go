@@ -172,20 +172,18 @@ func TestRunHelpAndVersion(t *testing.T) {
 		}
 	}
 
-	// --version carries the full identity: our version plus the compatibility
-	// baseline it tracks. These two lines are a contract pin — a script reads
-	// them — so the config layer's identity constants are pinned here through
-	// the output the CLI actually prints.
+	// --version carries the full identity: our own version, one line. These
+	// are a contract pin — a script reads them — so the config layer's
+	// identity values are pinned here through the output the CLI actually
+	// prints.
 	for _, arg := range []string{"--version", "version"} {
 		code, out, _ := run(t, "", arg)
 		if code != 0 {
 			t.Errorf("%s exit = %d, want 0", arg, code)
 		}
 		lines := strings.Split(strings.TrimSpace(out), "\n")
-		wantVersion := config.VersionString
-		wantCompat := config.UpstreamName + " compatibility: " + config.UpstreamCompatibilityVersion
-		if len(lines) != 2 || lines[0] != wantVersion || lines[1] != wantCompat {
-			t.Errorf("%s output = %q, want %q + %q", arg, out, wantVersion, wantCompat)
+		if len(lines) != 1 || lines[0] != config.VersionString {
+			t.Errorf("%s output = %q, want the single version line %q", arg, out, config.VersionString)
 		}
 	}
 

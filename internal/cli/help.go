@@ -8,11 +8,15 @@ import (
 	"github.com/nekrozis/goggo/internal/config"
 )
 
-// renderVersion prints the program's identity, then the compatibility baseline
-// of the release it tracks: that is metadata, never presented as our version.
+// renderVersion prints the program's identity: its name and version, plus the
+// commit a release build was stamped with (development builds print neither
+// stamp nor baseline).
 func renderVersion(w io.Writer) {
-	fmt.Fprintln(w, config.VersionString)
-	fmt.Fprintf(w, "%s compatibility: %s\n", config.UpstreamName, config.UpstreamCompatibilityVersion)
+	line := config.VersionString
+	if config.BuildCommit != "" {
+		line += " (commit " + config.BuildCommit + ")"
+	}
+	fmt.Fprintln(w, line)
 }
 
 // usage writes the help for a topic path (empty for the CLI itself).

@@ -280,26 +280,34 @@ func TestDepotItemsContainerShape(t *testing.T) {
 	}
 }
 
-// TestFilteredDepotItemsLanguage locks the rule that an empty or missing language
-// list selects NOTHING: the flag starts false and is only set on a match.
+// TestFilteredDepotItemsLanguage locks the language rule: a depot is selected by
+// a wildcard it declares, or by any of its languages being one of the requested
+// tokens once normalized. An empty or missing language list selects NOTHING, and
+// so does an empty request — only the wildcard answers it.
 func TestFilteredDepotItemsLanguage(t *testing.T) {
 	cases := []struct {
 		name      string
 		depot     string
+		languages []string
 		wantItems int
 	}{
-		{"regex hit", `{"languages":["en-US"],"manifest":"abcdef"}`, 1},
-		{"star hit", `{"languages":["*"],"manifest":"abcdef"}`, 1},
-		{"regex miss", `{"languages":["de"],"manifest":"abcdef"}`, 0},
-		{"empty list", `{"languages":[],"manifest":"abcdef"}`, 0},
-		{"missing list", `{"manifest":"abcdef"}`, 0},
+		{"exact hit", `{"languages":["en-US"],"manifest":"abcdef"}`, []string{"en-US"}, 1},
+		{"normalized hit", `{"languages":["zh-Hant"],"manifest":"abcdef"}`, []string{"ZH_hant"}, 1},
+		{"one of several declared", `{"languages":["de-DE","en-US"],"manifest":"abcdef"}`, []string{"en-US"}, 1},
+		{"union of two tokens", `{"languages":["en-GB"],"manifest":"abcdef"}`, []string{"en-US", "en-GB"}, 1},
+		{"star hit", `{"languages":["*"],"manifest":"abcdef"}`, []string{"en-US"}, 1},
+		{"star hit without tokens", `{"languages":["*"],"manifest":"abcdef"}`, nil, 1},
+		{"token miss", `{"languages":["de-DE"],"manifest":"abcdef"}`, []string{"en-US"}, 0},
+		{"no tokens on a specific depot", `{"languages":["en-US"],"manifest":"abcdef"}`, nil, 0},
+		{"empty list", `{"languages":[],"manifest":"abcdef"}`, []string{"en-US"}, 0},
+		{"missing list", `{"manifest":"abcdef"}`, []string{"en-US"}, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			srv, calls := depotServer(t, oneChunkManifest)
 			cl := newTestClient(t, srv, nil)
 			items, err := cl.FilteredDepotItems(context.Background(),
-				depotObject(t, c.depot), "en|eng|english|en[_-]US", "64", DepotOptions{})
+				depotObject(t, c.depot), c.languages, "64", DepotOptions{})
 			if err != nil {
 				t.Fatalf("FilteredDepotItems: %v", err)
 			}
@@ -339,7 +347,7 @@ func TestFilteredDepotItemsArch(t *testing.T) {
 			srv, _ := depotServer(t, oneChunkManifest)
 			cl := newTestClient(t, srv, nil)
 			items, err := cl.FilteredDepotItems(context.Background(),
-				depotObject(t, c.depot), "en", "64", DepotOptions{})
+				depotObject(t, c.depot), []string{"en"}, "64", DepotOptions{})
 			if c.wantErr {
 				if err == nil {
 					t.Fatal("a broken osBitness must be reported")
@@ -371,7 +379,7 @@ func TestFilteredDepotItemsStampsProductID(t *testing.T) {
 			srv, _ := depotServer(t, oneChunkManifest)
 			cl := newTestClient(t, srv, nil)
 			items, err := cl.FilteredDepotItems(context.Background(),
-				depotObject(t, c.depot), "en", "64", DepotOptions{})
+				depotObject(t, c.depot), []string{"en"}, "64", DepotOptions{})
 			if err != nil {
 				t.Fatalf("FilteredDepotItems: %v", err)
 			}
@@ -382,21 +390,6 @@ func TestFilteredDepotItemsStampsProductID(t *testing.T) {
 				t.Errorf("ProductID = %q, want %q", items[0].ProductID, c.wantProcID)
 			}
 		})
-	}
-}
-
-// TestFilteredDepotItemsInvalidRegex: a pattern that does not compile is reported
-// before anything is fetched.
-func TestFilteredDepotItemsInvalidRegex(t *testing.T) {
-	srv, calls := depotServer(t, oneChunkManifest)
-	cl := newTestClient(t, srv, nil)
-	_, err := cl.FilteredDepotItems(context.Background(),
-		depotObject(t, `{"languages":["en"],"manifest":"abcdef"}`), "(", "64", DepotOptions{})
-	if err == nil {
-		t.Fatal("an invalid regexp must be reported")
-	}
-	if *calls != 0 {
-		t.Errorf("requests = %d, want 0: the pattern is compiled before any fetch", *calls)
 	}
 }
 

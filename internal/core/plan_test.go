@@ -211,7 +211,8 @@ func planTestConfig(t *testing.T) config.Config {
 	// not carry it, so the test supplies the value Parse would.
 	cfg.Directories.GalaxyInstallSubdir = "%install_dir%"
 	cfg.DownloadConfig.GalaxyPlatform = config.PlatformWindows
-	cfg.DownloadConfig.GalaxyLanguage = config.LangEN
+	// No language is written: an absent --language is the empty raw value, and
+	// the plan resolves the default request against the build.
 	cfg.DownloadConfig.GalaxyArch = config.ArchX64
 	cfg.DownloadConfig.GalaxyDependencies = true
 	cfg.GalaxyBuildSortingOrder = "none"
@@ -1012,31 +1013,69 @@ func TestBuildPlan_EmptyMD5ItemSkipped(t *testing.T) {
 }
 
 func TestZeroMatchGuard(t *testing.T) {
-	t.Run("nonexistent language rejected and produces zero tasks", func(t *testing.T) {
-		// Case B and H: Requesting zh-Hans when game only has en-US
+	t.Run("explicit language the build does not offer is refused", func(t *testing.T) {
+		// The build ships en-US only. zh-Hans is not a language it declares, so
+		// an explicit request for it is refused as a bad argument — the front
+		// end reports it as a usage failure — rather than reported as an
+		// install failure the user could not act on.
 		f := newPlanFixture(t)
 		f.setDefaultBodies()
 
 		cfg := planTestConfig(t)
-		cfg.DownloadConfig.GalaxyLanguage = config.LangCN
 		cfg.DownloadConfig.GalaxyLanguageRaw = "zh-Hans"
 		d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
 
 		req := NewInstallRequest(cfg, planProductID, "", ProductRefExact)
 		res, err := d.BuildPlan(context.Background(), req)
 		if err == nil {
-			t.Fatal("BuildPlan must fail for nonexistent language")
+			t.Fatal("BuildPlan must fail for a language the build does not offer")
+		}
+		if !errors.Is(err, ErrLanguageNotOffered) {
+			t.Errorf("err = %v, want ErrLanguageNotOffered", err)
+		}
+		// The message must name the request and list what the build does offer,
+		// so the user can act without a second command.
+		for _, want := range []string{"zh-Hans", "en-US", "Use 'goggo install options"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("err = %v, want it to mention %q", err, want)
+			}
+		}
+		if len(res.Plan.Tasks) != 0 {
+			t.Errorf("zero-match must produce 0 tasks, got %d", len(res.Plan.Tasks))
+		}
+	})
+
+	t.Run("default request a build cannot satisfy is an install failure", func(t *testing.T) {
+		// No --language: the request came from the program, not the user, so a
+		// build without English is an ordinary "no compatible content" failure
+		// and not a usage error.
+		f := newPlanFixture(t)
+		f.setDefaultBodies()
+
+		v2New := galaxy.HashToGalaxyPath(planBuildHashNew)
+		f.set("/content-system/v2/meta/"+v2New,
+			`{"baseProductId":"`+planProductID+`","installDirectory":"GermanOnly","version":2,`+
+				`"products":[{"name":"German Only"}],`+
+				`"depots":[`+
+				`{"productId":"`+planProductID+`","languages":["de-DE"],"osBitness":["64"],"manifest":"`+planDepotHashLang+`"}]}`)
+
+		cfg := planTestConfig(t)
+		d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+
+		req := NewInstallRequest(cfg, planProductID, "", ProductRefExact)
+		res, err := d.BuildPlan(context.Background(), req)
+		if err == nil {
+			t.Fatal("BuildPlan must fail when no content answers the default request")
 		}
 		if !errors.Is(err, ErrNoMatchingContent) {
 			t.Errorf("err = %v, want ErrNoMatchingContent", err)
 		}
-		if !strings.Contains(err.Error(), "language=zh-Hans") {
-			t.Errorf("err = %v, want it to report language=zh-Hans", err)
+		if errors.Is(err, ErrLanguageNotOffered) {
+			t.Errorf("err = %v, must not be classified as a bad argument", err)
 		}
-		if !strings.Contains(err.Error(), "Use 'goggo install options") {
-			t.Errorf("err = %v, want actionable guidance to install options", err)
+		if !strings.Contains(err.Error(), "language=en") {
+			t.Errorf("err = %v, want it to report the default request", err)
 		}
-		// Case H: planning failure produces zero executable tasks
 		if len(res.Plan.Tasks) != 0 {
 			t.Errorf("zero-match must produce 0 tasks, got %d", len(res.Plan.Tasks))
 		}

@@ -71,8 +71,8 @@ func OptionNameString(value uint32, options []config.Option) string {
 // OptionByID returns the entry whose ID equals value exactly.
 //
 // A composite mask matches nothing, so the caller falls back to its own default.
-// This is how the Galaxy language expression and the Galaxy architecture code
-// are looked up.
+// This is how the Galaxy architecture code is looked up: a value the table
+// carries no single entry for must not be read as one.
 func OptionByID(value uint32, options []config.Option) (config.Option, bool) {
 	for _, o := range options {
 		if o.ID == value {

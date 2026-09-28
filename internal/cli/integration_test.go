@@ -256,11 +256,11 @@ func TestEndToEndBackupMutualExclusion(t *testing.T) {
 	}
 }
 
-// TestEndToEndZeroMatchGuard verifies zero-match guard execution:
-// install <game> with an incompatible language (zh-Hans on a product with only en/fr)
-// is intercepted at the plan stage, exits with code 1, and no transfer work is observable
-// or produces artifacts after the zero-match guard.
-func TestEndToEndZeroMatchGuard(t *testing.T) {
+// TestEndToEndLanguageRefusal verifies the language refusal end to end:
+// install <game> with a language the build does not offer (zh-Hans on a product
+// with only en/fr) is intercepted at the plan stage, exits with the usage code,
+// and leaves no transfer work and no artifact behind.
+func TestEndToEndLanguageRefusal(t *testing.T) {
 	deps := newInstallOptionsFixture(t)
 	installDir := t.TempDir()
 
@@ -274,13 +274,13 @@ func TestEndToEndZeroMatchGuard(t *testing.T) {
 		"1207658991",
 	}, strings.NewReader(""), &stdout, &stderr, deps)
 
-	if code != 1 {
-		t.Fatalf("zero-match install exit = %d, want 1. stdout: %s, stderr: %s", code, stdout.String(), stderr.String())
+	if code != 2 {
+		t.Fatalf("refused install exit = %d, want 2. stdout: %s, stderr: %s", code, stdout.String(), stderr.String())
 	}
 
-	// Verify error message indicates no compatible content
-	if !strings.Contains(stderr.String(), "no compatible content found") {
-		t.Errorf("expected 'no compatible content found' in stderr, got: %s", stderr.String())
+	// Verify the message names the request and what the build does offer.
+	if !strings.Contains(stderr.String(), "is not one of this build's languages") {
+		t.Errorf("expected the refusal message in stderr, got: %s", stderr.String())
 	}
 
 	// Verify Transfer is NEVER entered:
@@ -318,7 +318,6 @@ func TestEndToEndNativePathBoundaries(t *testing.T) {
 	}
 	cfg.Directories.Directory = `C:\Games`
 	cfg.DownloadConfig.GalaxyPlatform = config.PlatformWindows
-	cfg.DownloadConfig.GalaxyLanguage = config.LangEN
 	cfg.DownloadConfig.GalaxyArch = config.ArchX64
 
 	// 1. Galaxy Install planning execution through production BuildPlan

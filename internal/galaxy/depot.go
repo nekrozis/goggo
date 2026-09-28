@@ -7,7 +7,6 @@ import (
 	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 
 	"github.com/nekrozis/goggo/internal/config"
@@ -145,32 +144,34 @@ func (c *Client) DepotItems(ctx context.Context, hash string, opts DepotOptions)
 // FilteredDepotItems expands the depot entry of a manifest into items, keeping
 // only the entries the language and the architecture select.
 //
-// The language test: an entry matches when the depot lists "*" or a language the
-// anchored, case-insensitive regex finds, so an empty or missing "languages"
-// list selects nothing. The architecture test: a missing or null "osBitness"
-// means the entry is not architecture-specific and is selected, otherwise the
-// list must contain "*" or the requested arch.
+// The language test: an entry matches when the depot lists "*" — always, since
+// such a depot declares itself language-agnostic — or when any language it
+// lists is one of languages. A language the build does not name can therefore
+// never match, and several tokens at once select their union. An empty or
+// missing "languages" list selects nothing. The architecture test: a missing or
+// null "osBitness" means the entry is not architecture-specific and is
+// selected, otherwise the list must contain "*" or the requested arch.
 //
-// languageRegex and arch are chosen by the caller, from config.Languages[].Regexp
-// and config.GalaxyArchs[].Code.
-func (c *Client) FilteredDepotItems(ctx context.Context, depotJSON map[string]any, languageRegex, arch string, opts DepotOptions) ([]model.GalaxyDepotItem, error) {
-	languageRE, err := regexp.Compile("(?i)^(" + languageRegex + ")$")
-	if err != nil {
-		// Compiled before anything is fetched, so a bad pattern costs no request.
-		return nil, fmt.Errorf("galaxy: depot language regexp %q: %w", languageRegex, err)
+// languages and arch are chosen by the caller: the tokens are the build's own
+// depot languages, already resolved to the ones the request selects (see
+// core's language resolution), and arch comes from config.GalaxyArchs[].Code.
+func (c *Client) FilteredDepotItems(ctx context.Context, depotJSON map[string]any, languages []string, arch string, opts DepotOptions) ([]model.GalaxyDepotItem, error) {
+	selected := make(map[string]bool, len(languages))
+	for _, l := range languages {
+		selected[util.NormalizeLanguage(l)] = true
 	}
 
-	languages, err := arrayField(depotJSON, "languages")
+	depotLanguages, err := arrayField(depotJSON, "languages")
 	if err != nil {
 		return nil, fmt.Errorf("galaxy: depot languages: %w", err)
 	}
 	selectedLanguage := false
-	for i, raw := range languages {
+	for i, raw := range depotLanguages {
 		name, err := mapString(raw)
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: depot languages[%d]: %w", i, err)
 		}
-		if name == "*" || languageRE.MatchString(name) {
+		if name == "*" || selected[util.NormalizeLanguage(name)] {
 			selectedLanguage = true
 			break
 		}

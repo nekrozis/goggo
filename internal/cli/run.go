@@ -59,6 +59,8 @@ func stopOutcome(reason stopReason) outcome {
 		return outcomeOK
 	case stopCanceled:
 		return outcomeInterrupted
+	case stopUsageFailure:
+		return outcomeUsageFailure
 	default:
 		return outcomeOperationFailure
 	}
@@ -504,8 +506,9 @@ func (c *console) runInstall(ctx context.Context, d *core.Downloader, req core.I
 	c.endInstallScope()
 
 	// The failure detail goes to stderr after the frame is gone; cancellation
-	// already announced itself through the terminal state.
-	if installErr != nil && result == stopFailed {
+	// already announced itself through the terminal state, and a usage refusal
+	// has nothing to add. Neither may swallow the diagnostic.
+	if installErr != nil && (result == stopFailed || result == stopUsageFailure) {
 		fmt.Fprintf(c.errOut, "Error: %v\n", installErr)
 	}
 	return result
@@ -513,10 +516,15 @@ func (c *console) runInstall(ctx context.Context, d *core.Downloader, req core.I
 
 // classifyInstallResult maps an Install outcome onto the run's terminal
 // state. Cancellation is recognized from the error chain or the context —
-// both are the same "the run was interrupted" fact.
+// both are the same "the run was interrupted" fact. An argument core refused
+// after the build was known is a usage failure, the same class the parser
+// produces, so it must not reach the exit code as a failed install.
 func classifyInstallResult(err error, ctx context.Context) stopReason {
 	if err == nil {
 		return stopCompleted
+	}
+	if isUsageError(err) {
+		return stopUsageFailure
 	}
 	if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 		return stopCanceled

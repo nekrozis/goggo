@@ -2,26 +2,28 @@ package core
 
 import (
 	"github.com/nekrozis/goggo/internal/config"
-	"github.com/nekrozis/goggo/internal/util"
 )
 
-// defaultLanguageRegex is the expression the Galaxy depot filter falls back to
-// when the selected language flag matches no table entry.
-const defaultLanguageRegex = "en|eng|english|en[_-]US"
-
 // InstallRequest is one Galaxy install request, resolved from the options into
-// values: a raw command-line string never travels further than the parser.
+// values: a raw command-line string never travels further than the parser —
+// except Language, which the plan has to resolve against the build it fetches.
 //
 // It carries the install subdirectory TEMPLATE rather than a resolved
 // directory. %install_dir% comes from the build manifest, which is fetched
 // during the install itself, so the template is resolved there; keeping the two
 // apart is what makes the request describable before any request is made.
 type InstallRequest struct {
-	ProductID      string
-	BuildID        string
-	Platform       string
-	Language       string
-	LanguageRegex  string
+	ProductID string
+	BuildID   string
+	Platform  string
+
+	// Language is the --language value exactly as typed. The empty string is
+	// the flag's absence and nothing else — the option requires a value — and
+	// the plan then resolves the default request instead. Which languages the
+	// build can satisfy is only known once its manifest is fetched, so the
+	// resolution happens there, not here.
+	Language string
+
 	SubdirTemplate string
 
 	Arch                uint32
@@ -36,17 +38,16 @@ type InstallRequest struct {
 // NewInstallRequest resolves the effective configuration into a request.
 //
 // Every value comes from cfg, where the option defaults have already been
-// applied, and none of them is a command-line string: the front end parses the
-// options, it does not decide what the English language expression or the
-// "windows" platform segment are.
+// applied, and none of them is a command-line string except Language: the front
+// end parses the options, it does not decide what the "windows" platform
+// segment is, nor which language the build actually offers.
 func NewInstallRequest(cfg config.Config, productID, buildID string, refMode ProductRefMode) InstallRequest {
 	download := cfg.DownloadConfig
 	return InstallRequest{
 		ProductID:      productID,
 		BuildID:        buildID,
 		Platform:       platformName(download.GalaxyPlatform),
-		Language:       effectiveLanguage(download),
-		LanguageRegex:  languageRegex(download.GalaxyLanguage),
+		Language:       download.GalaxyLanguageRaw,
 		SubdirTemplate: cfg.Directories.GalaxyInstallSubdir,
 
 		Arch:                download.GalaxyArch,
@@ -54,31 +55,4 @@ func NewInstallRequest(cfg config.Config, productID, buildID string, refMode Pro
 
 		RefMode: refMode,
 	}
-}
-
-// effectiveLanguage returns the raw language string from CLI if available,
-// falling back to the option code.
-func effectiveLanguage(download config.DownloadConfig) string {
-	if download.GalaxyLanguageRaw != "" {
-		return download.GalaxyLanguageRaw
-	}
-	return languageCode(download.GalaxyLanguage)
-}
-
-// languageCode returns the short language code for the selected flag.
-func languageCode(flag uint32) string {
-	if o, ok := util.OptionByID(flag, config.Languages); ok {
-		return o.Code
-	}
-	return "en"
-}
-
-// languageRegex maps a Galaxy language flag onto the expression the depot
-// filter uses. A flag that matches no entry — which is what an unrecognised
-// --galaxy-language leaves behind — falls back to the English expression.
-func languageRegex(flag uint32) string {
-	if o, ok := util.OptionByID(flag, config.Languages); ok {
-		return o.Regexp
-	}
-	return defaultLanguageRegex
 }

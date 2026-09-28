@@ -21,7 +21,6 @@ import (
 const (
 	defaultGalaxyBuildSort     = "score"
 	defaultGalaxyPlatform      = "w"
-	defaultGalaxyLanguage      = "en"
 	defaultGalaxyArch          = "x64"
 	defaultGalaxyCDNPriority   = "edgecast,akamai_edgecast_proxy,fastly"
 	defaultGalaxyInstallSubdir = "%install_dir%"

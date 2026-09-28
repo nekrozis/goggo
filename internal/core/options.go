@@ -25,14 +25,6 @@ type InstallOptionsResult struct {
 	Entries   []InstallOptionEntry `json:"options"`
 }
 
-type depotCandidate struct {
-	manifestHash string
-	languages    []string
-	osBitness    []string
-	index        int
-	size         int64
-}
-
 // InstallOptions resolves the game reference and discovers all compatible installation
 // options for the effective build on the specified platform.
 //
@@ -65,56 +57,9 @@ func (d *Downloader) InstallOptions(ctx context.Context, ref string, mode Produc
 		baseProductID = id
 	}
 
-	rawDepots, err := manifestArray(eb.Manifest, "depots")
+	candidates, err := depotCandidates(eb.Manifest, baseProductID)
 	if err != nil {
 		return InstallOptionsResult{}, err
-	}
-
-	var candidates []depotCandidate
-	for i, raw := range rawDepots {
-		depot, err := mapObject(raw)
-		if err != nil {
-			continue
-		}
-		if isGogDepot(depot) {
-			continue
-		}
-		if !isBaseDepot(depot, baseProductID) {
-			continue
-		}
-		manifestHash, _ := scalarString(depot["manifest"])
-		if manifestHash == "" {
-			continue
-		}
-
-		var langs []string
-		rawLangs, _ := manifestArray(depot, "languages")
-		for _, rl := range rawLangs {
-			if s, err := scalarString(rl); err == nil && s != "" {
-				langs = append(langs, s)
-			}
-		}
-
-		var bitness []string
-		rawBitness, _ := manifestArray(depot, "osBitness")
-		for _, rb := range rawBitness {
-			if s, err := scalarString(rb); err == nil && s != "" {
-				bitness = append(bitness, s)
-			}
-		}
-
-		var depotSize int64
-		if sz, err := intValue(depot["size"]); err == nil && sz > 0 {
-			depotSize = sz
-		}
-
-		candidates = append(candidates, depotCandidate{
-			index:        i,
-			manifestHash: manifestHash,
-			languages:    langs,
-			osBitness:    bitness,
-			size:         depotSize,
-		})
 	}
 
 	if len(candidates) == 0 {

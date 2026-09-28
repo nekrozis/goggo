@@ -14,7 +14,6 @@ func installTestConfig(t *testing.T) config.Config {
 	cfg := config.NewConfig(dir, dir)
 	cfg.Directories.GalaxyInstallSubdir = "%install_dir%"
 	cfg.DownloadConfig.GalaxyPlatform = config.PlatformWindows
-	cfg.DownloadConfig.GalaxyLanguage = config.LangEN
 	cfg.DownloadConfig.GalaxyArch = config.ArchX64
 	cfg.DownloadConfig.GalaxyDependencies = true
 	return cfg
@@ -66,35 +65,22 @@ func TestNewInstallRequestPlatform(t *testing.T) {
 	}
 }
 
-// TestNewInstallRequestLanguage locks the flag-to-expression mapping and its
-// fallback: an unmatched value leaves no entry behind and the English
-// expression is kept.
-func TestNewInstallRequestLanguage(t *testing.T) {
-	cases := []struct {
-		name string
-		flag uint32
-		want string
-	}{
-		{name: "english", flag: config.LangEN, want: "en|eng|english|en[_-]US"},
-		{name: "german", flag: config.LangDE, want: "de|deu|ger|german|de[_-]DE"},
-		{name: "french", flag: config.LangFR, want: "fr|fra|fre|french|fr[_-]FR"},
-		{name: "unmatched falls back to english", flag: 0, want: defaultLanguageRegex},
-		{
-			// A composite flag equals no single entry, so the lookup misses and
-			// the fallback applies.
-			name: "composite flag matches no entry",
-			flag: config.LangEN | config.LangDE,
-			want: defaultLanguageRegex,
-		},
+// TestNewInstallRequestLanguageCarriesTheRawValue locks that the request
+// carries --language exactly as typed. Which languages the build offers is not
+// known until its manifest is fetched, so the resolution belongs to the plan and
+// the request must not pre-empt it — and the empty string must survive as the
+// flag's absence, which is what selects the default request later.
+func TestNewInstallRequestLanguageCarriesTheRawValue(t *testing.T) {
+	if got := NewInstallRequest(installTestConfig(t), "1", "", ProductRefExact).Language; got != "" {
+		t.Errorf("language = %q, want empty when the flag was absent", got)
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			cfg := installTestConfig(t)
-			cfg.DownloadConfig.GalaxyLanguage = c.flag
-			if got := NewInstallRequest(cfg, "1", "", ProductRefExact).LanguageRegex; got != c.want {
-				t.Errorf("language regex = %q, want %q", got, c.want)
-			}
-		})
+
+	for _, value := range []string{"zh-Hant", "en", "klingon"} {
+		cfg := installTestConfig(t)
+		cfg.DownloadConfig.GalaxyLanguageRaw = value
+		if got := NewInstallRequest(cfg, "1", "", ProductRefExact).Language; got != value {
+			t.Errorf("language = %q, want %q", got, value)
+		}
 	}
 }
 

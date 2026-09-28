@@ -18,6 +18,10 @@ type DirectoryConfig struct {
 // platform/language fields and the priority lists use the bit flags and
 // Option tables from options.go.
 type DownloadConfig struct {
+	// GalaxyLanguageRaw is the --language value as typed, "" when the flag was
+	// absent. It stays a string: whether the selected build offers that
+	// language is only known once the build manifest is fetched, so the
+	// resolution belongs to the plan, not to the parser.
 	GalaxyLanguageRaw   string
 	PlatformPriority    []uint32
 	LanguagePriority    []uint32
@@ -28,7 +32,6 @@ type DownloadConfig struct {
 	InstallerLanguage   uint32
 	Include             uint32
 	GalaxyPlatform      uint32
-	GalaxyLanguage      uint32
 	GalaxyArch          uint32
 	SaveChangelogs      bool
 	IgnoreDLCCount      bool

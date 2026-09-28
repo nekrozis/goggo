@@ -262,10 +262,13 @@ var optionTable = append([]optionSpec{
 	{
 		id: optLanguage, long: "language", value: valueRequired, arg: "<language>",
 		summary: "Language of the build that is installed (default: en)",
+		detail: "The accepted values are the languages the selected build actually\n" +
+			"declares; `install options` lists them. A value that matches several\n" +
+			"of them installs all of them.",
 		parse: func(inv *invocation, v string) error {
-			// An unmatched value leaves 0, which the Galaxy layer reads as
-			// English.
-			inv.cfg.DownloadConfig.GalaxyLanguage = util.OptionValue(v, config.Languages, true)
+			// Not validated here: whether the build offers this value is only
+			// known once its manifest is fetched, and the plan refuses it
+			// there. The value travels exactly as typed.
 			inv.cfg.DownloadConfig.GalaxyLanguageRaw = v
 			return nil
 		},
@@ -752,9 +755,17 @@ func usagef(format string, args ...any) error {
 }
 
 // isUsageError reports whether err is a usage failure.
+//
+// The class is not the parser's alone: a value the parser cannot judge without
+// the network — an explicit --language whose resolution needs the build's own
+// depot languages — comes back from core and is still the user's argument that
+// was wrong, not the command that failed.
 func isUsageError(err error) bool {
 	var u *usageError
-	return errors.As(err, &u)
+	if errors.As(err, &u) {
+		return true
+	}
+	return errors.Is(err, core.ErrLanguageNotOffered)
 }
 
 // parseArgs parses a command line into an invocation.
@@ -1267,7 +1278,6 @@ func optionName(id optionID) string {
 func applyParseDefaults(cfg *config.Config) {
 	cfg.GalaxyBuildSortingOrder = defaultGalaxyBuildSort
 	cfg.DownloadConfig.GalaxyPlatform = util.OptionValue(defaultGalaxyPlatform, config.Platforms, true)
-	cfg.DownloadConfig.GalaxyLanguage = util.OptionValue(defaultGalaxyLanguage, config.Languages, true)
 	cfg.DownloadConfig.GalaxyArch = util.OptionValue(defaultGalaxyArch, config.GalaxyArchs, false)
 	cfg.DownloadConfig.GalaxyCDNPriority = util.Split(defaultGalaxyCDNPriority, ",")
 	// The installer platform/language the website conversion gates on. Each is

@@ -87,10 +87,11 @@ func TestParsePlatformAndLanguage(t *testing.T) {
 			t.Errorf("--arch %s: refusal must be a usage error, got %v", bad, err)
 		}
 	}
-	// A language with no match leaves 0, which the Galaxy layer reads as
-	// English.
-	if got := parseOpts(t, "install", "123", "--language", "nonsense").cfg.DownloadConfig.GalaxyLanguage; got != 0 {
-		t.Errorf("unmatched language = %#x, want 0 (English)", got)
+	// A language is not judged here: whether the build offers it is only known
+	// once its manifest is fetched, so the value travels exactly as typed and
+	// the plan refuses an unknown one there.
+	if got := parseOpts(t, "install", "123", "--language", "nonsense").cfg.DownloadConfig.GalaxyLanguageRaw; got != "nonsense" {
+		t.Errorf("language raw = %q, want the value as typed", got)
 	}
 	_, err := parseArgs([]string{"install", "123", "--platform", "nonsense"}, testDefaults())
 	if err == nil {

@@ -263,7 +263,7 @@ func TestChainProductDownload(t *testing.T) {
 
 	// 2 + 3. Build manifest, then depot selection (the depot manifest follows).
 	depot := f.firstDepotEntry(t)
-	depotItems, err := f.client.FilteredDepotItems(ctx, depot, "en", "64", galaxy.DepotOptions{})
+	depotItems, err := f.client.FilteredDepotItems(ctx, depot, []string{"en"}, "64", galaxy.DepotOptions{})
 	if err != nil {
 		t.Fatalf("FilteredDepotItems: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestChainDependencyDownload(t *testing.T) {
 	ctx := context.Background()
 
 	depot := f.firstDepotEntry(t)
-	depotItems, err := f.client.FilteredDepotItems(ctx, depot, "en", "64", galaxy.DepotOptions{IsDependency: true})
+	depotItems, err := f.client.FilteredDepotItems(ctx, depot, []string{"en"}, "64", galaxy.DepotOptions{IsDependency: true})
 	if err != nil {
 		t.Fatalf("FilteredDepotItems: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestChainFilterStopsTheChain(t *testing.T) {
 	ctx := context.Background()
 
 	depot := f.firstDepotEntry(t)
-	depotItems, err := f.client.FilteredDepotItems(ctx, depot, "en", "64", galaxy.DepotOptions{})
+	depotItems, err := f.client.FilteredDepotItems(ctx, depot, []string{"en"}, "64", galaxy.DepotOptions{})
 	if err != nil {
 		t.Fatalf("FilteredDepotItems: %v", err)
 	}

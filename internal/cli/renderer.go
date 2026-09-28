@@ -33,6 +33,9 @@ const (
 	stopCompleted stopReason = iota
 	stopCanceled
 	stopFailed
+	// stopUsageFailure is a refused argument: the run never started, so its
+	// closing line says that rather than reporting a failure to do work.
+	stopUsageFailure
 )
 
 // finalLines are the terminal's closing state for each reason. A canceled run
@@ -55,6 +58,11 @@ func finalLines(reason stopReason, st runStats, subject string) []string {
 		return lines
 	case stopCanceled:
 		return []string{"Interrupted. Partial files kept for resume."}
+	case stopUsageFailure:
+		if subject == "" {
+			subject = "Installation"
+		}
+		return []string{subject + " not started."}
 	default:
 		if subject == "" {
 			subject = "Installation"

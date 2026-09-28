@@ -162,7 +162,15 @@ func TestInstallOptionsCLIJSON(t *testing.T) {
 	}
 }
 
-func TestInstallZeroMatchCLI(t *testing.T) {
+// TestInstallRefusesALanguageTheBuildDoesNotOffer locks the whole contract for an
+// explicit --language the build cannot satisfy: the install is refused before
+// anything is written, the message names the request and lists what the build
+// does offer, and the exit code is the usage one — the argument was wrong, the
+// command was not.
+//
+// The listing the message points at is the same set the resolution reads, so the
+// user's next step is the value they should have passed.
+func TestInstallRefusesALanguageTheBuildDoesNotOffer(t *testing.T) {
 	deps := newInstallOptionsFixture(t)
 	installDir := t.TempDir()
 
@@ -176,14 +184,17 @@ func TestInstallZeroMatchCLI(t *testing.T) {
 		"1207658991",
 	}, strings.NewReader(""), &out, &errOut, deps)
 
-	if code != 1 {
-		t.Fatalf("install 0-match exit = %d, want 1. stdout: %s, stderr: %s", code, out.String(), errOut.String())
+	if code != 2 {
+		t.Fatalf("install bad-language exit = %d, want 2. stdout: %s, stderr: %s", code, out.String(), errOut.String())
 	}
-	if !strings.Contains(errOut.String(), "no compatible content found matching platform=windows, language=zh-Hans, arch=x64") {
-		t.Errorf("stderr missing expected error message, got:\n%s", errOut.String())
-	}
-	if !strings.Contains(errOut.String(), "Use 'goggo install options 1207658991' to view available combinations") {
-		t.Errorf("stderr missing guidance hint, got:\n%s", errOut.String())
+	for _, want := range []string{
+		`language "zh-Hans" is not one of this build's languages`,
+		"Available languages: en-US, fr-FR",
+		"Use 'goggo install options 1207658991' to view available combinations",
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("stderr missing %q, got:\n%s", want, errOut.String())
+		}
 	}
 
 	// Case H: Verify filesystem isolation — install directory remains completely unmodified.

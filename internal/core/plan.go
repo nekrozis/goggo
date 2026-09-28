@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -205,10 +204,19 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 	installPath := filepath.Join(d.cfg.Directories.Directory, installDirectory)
 	res.InstallPath = installPath
 
+	// The language the plan selects by, resolved against this build's own depot
+	// languages: what `install options` lists is exactly what --language may
+	// name, and a request matching several languages selects all of them.
+	languageTokens, languageNotice, err := requestLanguage(manifest, req)
+	if err != nil {
+		return res, err
+	}
+	res.addMessage(languageNotice)
+
 	// The depot items. Unowned DLC products drop out inside, before anything
 	// is queued, so the transfer never meets a licence failure; one summary
 	// line reports what was dropped.
-	planItems, droppedProducts, err := d.resolveDepotItems(ctx, manifest, req)
+	planItems, droppedProducts, err := d.resolveDepotItems(ctx, manifest, req, languageTokens)
 	if err != nil {
 		return res, err
 	}
@@ -307,10 +315,12 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 					if err != nil {
 						return nil, err
 					}
-					// The old build resolves through the same entitlement
-					// boundary, so an unowned DLC depot never counts as a file
-					// the installation had and never becomes a deletion.
-					oldItems, _, err := d.resolveDepotItems(ctx, oldManifest, req)
+					// The old build is filtered by the SAME language selection
+					// as the new one, so a language it lacked never produces
+					// deletions and union drift between the two builds cannot
+					// invent them. Its own entitlement boundary applies too, so
+					// an unowned DLC depot never counts as an installed file.
+					oldItems, _, err := d.resolveDepotItems(ctx, oldManifest, req, languageTokens)
 					if err != nil {
 						return nil, err
 					}
@@ -560,8 +570,12 @@ func manifestArray(manifest map[string]any, key string) ([]any, error) {
 // stamps product ids, renames small-files containers and deduplicates by path.
 // It returns the items and the DLC product ids dropped for lack of
 // entitlement, for the caller to report in one line.
-func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]any, req InstallRequest) ([]model.GalaxyDepotItem, []string, error) {
-	items, err := d.expandDepotItems(ctx, manifest, req)
+//
+// tokens is the language selection the caller resolved against this manifest
+// (see requestLanguage): the caller owns that decision because it also owns the
+// notice a multi-language request produces.
+func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]any, req InstallRequest, tokens []string) ([]model.GalaxyDepotItem, []string, error) {
+	items, err := d.expandDepotItems(ctx, manifest, req, tokens)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -620,7 +634,7 @@ func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]
 // expandDepotItems expands every depot, drops DLC entries when the include mask
 // does not ask for them and adds the selected dependencies: the half of
 // resolveDepotItems that runs before the entitlement boundary.
-func (d *Downloader) expandDepotItems(ctx context.Context, manifest map[string]any, req InstallRequest) ([]model.GalaxyDepotItem, error) {
+func (d *Downloader) expandDepotItems(ctx context.Context, manifest map[string]any, req InstallRequest, tokens []string) ([]model.GalaxyDepotItem, error) {
 	baseProductID, err := baseProductIDOf(manifest, req)
 	if err != nil {
 		return nil, err
@@ -635,37 +649,10 @@ func (d *Downloader) expandDepotItems(ctx context.Context, manifest map[string]a
 		Platform:       d.cfg.DownloadConfig.GalaxyPlatform,
 	}
 
-	// Valid Primary Content Predicate:
-	// A primary depot must belong to the base product and not be a GOG support metadata depot (isGogDepot).
-	// If the manifest carries any base content depots with specific languages,
-	// at least one language-specific base depot matching req.LanguageRegex must be selected.
-	// If all base depots are language-agnostic ("*"), a non-support wildcard depot is accepted.
-	hasLanguageSpecificBaseDepot := false
-	for _, raw := range depots {
-		depot, err := mapObject(raw)
-		if err != nil {
-			continue
-		}
-		if !isBaseDepot(depot, baseProductID) || isGogDepot(depot) {
-			continue
-		}
-		langs, _ := manifestArray(depot, "languages")
-		for _, l := range langs {
-			name, _ := scalarString(l)
-			if name != "" && name != "*" {
-				hasLanguageSpecificBaseDepot = true
-				break
-			}
-		}
-		if hasLanguageSpecificBaseDepot {
-			break
-		}
-	}
-
-	langRE, err := regexp.Compile("(?i)^(" + req.LanguageRegex + ")$")
-	if err != nil {
-		return nil, fmt.Errorf("galaxy: depot language regexp %q: %w", req.LanguageRegex, err)
-	}
+	// The wildcard is the one selection that is not a language token: it is what
+	// a build that declares no specific language at all resolves to, and the
+	// only selection a language-agnostic depot may answer.
+	wildcardLanguage := len(tokens) == 1 && tokens[0] == "*"
 
 	var items []model.GalaxyDepotItem
 	matchedPrimaryDepots := 0
@@ -676,7 +663,7 @@ func (d *Downloader) expandDepotItems(ctx context.Context, manifest map[string]a
 		if err != nil {
 			return nil, fmt.Errorf("galaxy: manifest depots[%d]: %w", i, err)
 		}
-		vec, err := d.galaxy.FilteredDepotItems(ctx, depot, req.LanguageRegex, archCode(req.Arch), depotOpts)
+		vec, err := d.galaxy.FilteredDepotItems(ctx, depot, tokens, archCode(req.Arch), depotOpts)
 		if err != nil {
 			return nil, err
 		}
@@ -684,26 +671,13 @@ func (d *Downloader) expandDepotItems(ctx context.Context, manifest map[string]a
 			continue
 		}
 
-		if isBaseDepot(depot, baseProductID) && !isGogDepot(depot) {
-			qualifies := true
-			if hasLanguageSpecificBaseDepot {
-				langs, _ := manifestArray(depot, "languages")
-				hasSpecificLangMatch := false
-				for _, l := range langs {
-					name, _ := scalarString(l)
-					if name != "" && name != "*" && langRE.MatchString(name) {
-						hasSpecificLangMatch = true
-						break
-					}
-				}
-				if !hasSpecificLangMatch {
-					qualifies = false
-				}
-			}
-			if qualifies {
-				matchedPrimaryDepots++
-				matchedPrimaryFiles += len(vec)
-			}
+		// Valid primary content predicate: a depot that answers the request
+		// itself. Without it, a wildcard depot would satisfy every request and
+		// the no-match guard below could never fire.
+		if isBaseDepot(depot, baseProductID) && !isGogDepot(depot) &&
+			answersLanguage(depot, tokens, wildcardLanguage) {
+			matchedPrimaryDepots++
+			matchedPrimaryFiles += len(vec)
 		}
 
 		items = append(items, vec...)
@@ -760,7 +734,7 @@ func (d *Downloader) expandDepotItems(ctx context.Context, manifest map[string]a
 					if !containsString(wanted, depID) {
 						continue
 					}
-					vec, err := d.galaxy.FilteredDepotItems(ctx, depot, req.LanguageRegex, archCode(req.Arch), galaxy.DepotOptions{
+					vec, err := d.galaxy.FilteredDepotItems(ctx, depot, tokens, archCode(req.Arch), galaxy.DepotOptions{
 						IsDependency:   true,
 						LowercasePaths: d.cfg.DownloadConfig.GalaxyLowercasePath,
 						Platform:       d.cfg.DownloadConfig.GalaxyPlatform,
@@ -775,11 +749,37 @@ func (d *Downloader) expandDepotItems(ctx context.Context, manifest map[string]a
 	}
 
 	if matchedPrimaryDepots == 0 || matchedPrimaryFiles == 0 {
-		return nil, fmt.Errorf("%w matching platform=%s, language=%s, arch=%s\nUse 'goggo install options %s' to view available combinations",
-			ErrNoMatchingContent, req.Platform, req.Language, archName(req.Arch), req.ProductID)
+		return nil, noMatchingContent(req, requestedLanguage(req))
 	}
 
 	return items, nil
+}
+
+// answersLanguage reports whether a base depot answers the resolved language:
+// it declares one of the selected tokens, or — when the build offers no
+// specific language at all — it is a wildcard depot.
+func answersLanguage(depot map[string]any, tokens []string, wildcard bool) bool {
+	langs, _ := manifestArray(depot, "languages")
+	for _, l := range langs {
+		name, _ := scalarString(l)
+		switch {
+		case name == "":
+		case wildcard:
+			if name == "*" {
+				return true
+			}
+		case name == "*":
+			// A language-agnostic depot carries shared content, not the
+			// requested language, so it never answers a specific request.
+		default:
+			for _, t := range tokens {
+				if util.NormalizeLanguage(name) == util.NormalizeLanguage(t) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // baseProductIDOf resolves the manifest's base product id, falling back to the

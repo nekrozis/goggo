@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nekrozis/goggo/internal/core"
 	"github.com/nekrozis/goggo/internal/transfer"
 	"github.com/nekrozis/goggo/internal/ui/progress"
 )
@@ -310,6 +311,14 @@ func TestFinalLines(t *testing.T) {
 	if got := finalLines(stopFailed, runStats{completed: 3}, ""); len(got) != 1 {
 		t.Errorf("failed = %q, want one state line", got)
 	}
+	// A refused argument never began work, so its line must not claim a failure
+	// to do any — and it carries the subject like the failure wording does.
+	if got := finalLines(stopUsageFailure, runStats{completed: 3}, ""); len(got) != 1 || !strings.Contains(got[0], "not started") {
+		t.Errorf("usage refusal = %q, want a state line saying the run never began", got)
+	}
+	if got := finalLines(stopUsageFailure, runStats{}, "Download"); len(got) != 1 || !strings.Contains(got[0], "Download") {
+		t.Errorf("usage refusal = %q, want the caller's subject", got)
+	}
 }
 
 // TestExitCodeAuthority locks the single exit-code authority: every outcome maps
@@ -331,9 +340,10 @@ func TestExitCodeAuthority(t *testing.T) {
 	}
 	// The install lifecycle reaches the same authority through stopOutcome.
 	for reason, want := range map[stopReason]outcome{
-		stopCompleted: outcomeOK,
-		stopCanceled:  outcomeInterrupted,
-		stopFailed:    outcomeOperationFailure,
+		stopCompleted:    outcomeOK,
+		stopCanceled:     outcomeInterrupted,
+		stopFailed:       outcomeOperationFailure,
+		stopUsageFailure: outcomeUsageFailure,
 	} {
 		if got := stopOutcome(reason); got != want {
 			t.Errorf("stopOutcome(%d) = %d, want %d", reason, got, want)
@@ -345,6 +355,15 @@ func TestExitCodeAuthority(t *testing.T) {
 	}
 	if outcomeForError(errors.New("boom")) != outcomeOperationFailure {
 		t.Error("plain errors must map to the operational failure code")
+	}
+	// An argument core refuses once the build is known is the same class: the
+	// front end cannot judge it at parse time, but it is still the argument
+	// that was wrong.
+	if outcomeForError(core.ErrLanguageNotOffered) != outcomeUsageFailure {
+		t.Error("a refused --language must map to the usage exit code")
+	}
+	if !isUsageError(&core.LanguageError{Requested: "klingon"}) {
+		t.Error("the wrapped language error must classify as a usage error")
 	}
 }
 
@@ -366,6 +385,9 @@ func TestClassifyInstallResult(t *testing.T) {
 	}
 	if got := classifyInstallResult(errors.New("boom"), context.Background()); got != stopFailed {
 		t.Errorf("plain error = %d, want failed", got)
+	}
+	if got := classifyInstallResult(core.ErrLanguageNotOffered, context.Background()); got != stopUsageFailure {
+		t.Errorf("refused argument = %d, want the usage refusal", got)
 	}
 }
 

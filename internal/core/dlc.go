@@ -130,9 +130,7 @@ func (s dlcSelection) keeps(productID string) bool {
 func (s dlcSelection) selecting() bool { return s.only != nil }
 
 // dlcProblem is one refused selector with the input position it came from, so
-// the collected report keeps the order the user typed. The string comes first
-// because its pointer word is followed by the non-pointer length: keeping it
-// first keeps the struct's GC-scanned prefix at its shortest.
+// the collected report keeps the order the user typed.
 type dlcProblem struct {
 	text string
 	at   int
@@ -142,17 +140,16 @@ type dlcProblem struct {
 //
 // A selector matches by exact product id, or by the full DLC title normalized
 // (case-insensitive, surrounding space trimmed). Nothing else: a substring match
-// would make ordinary words ambiguous, and guessing would install something the
-// user did not ask for. Two DLCs sharing a title are ambiguous by definition.
+// would make ordinary words ambiguous. Two DLCs sharing a title are ambiguous by
+// definition.
 //
-// Include and exclude are not symmetric, because the intent is not. A --dlc is a
-// promise — install this — so an unowned one is refused rather than silently
-// skipped, which would report success for a DLC that is not there. An
-// --exclude-dlc naming an unowned DLC is already satisfied by the entitlement
-// filter, so it is a no-op.
+// A --dlc is a promise — install this — so an unowned one is refused rather than
+// silently skipped, which would report success for a DLC that is not there. An
+// --exclude-dlc naming an unowned DLC is satisfied by the entitlement filter, so
+// it is a no-op.
 //
 // Every problem is collected and reported together, in selector input order: the
-// run has not started, so the user can fix all of them in one edit.
+// run has not started, so one edit can fix them all.
 func (d *Downloader) resolveDLCSelection(ctx context.Context, manifest map[string]any, baseProductID, productID string, selectors []config.DLCSelector) (dlcSelection, error) {
 	if len(selectors) == 0 {
 		return dlcSelection{}, nil

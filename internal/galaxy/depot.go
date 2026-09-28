@@ -145,16 +145,16 @@ func (c *Client) DepotItems(ctx context.Context, hash string, opts DepotOptions)
 // only the entries the language and the architecture select.
 //
 // The language test: an entry matches when the depot lists "*" — always, since
-// such a depot declares itself language-agnostic — or when any language it
-// lists is one of languages. A language the build does not name can therefore
-// never match, and several tokens at once select their union. An empty or
-// missing "languages" list selects nothing. The architecture test: a missing or
-// null "osBitness" means the entry is not architecture-specific and is
-// selected, otherwise the list must contain "*" or the requested arch.
+// such a depot declares itself language-agnostic — or when any language it lists
+// is one of languages, which several tokens at once select as their union. An
+// empty or missing "languages" list selects nothing.
 //
-// languages and arch are chosen by the caller: the tokens are the build's own
-// depot languages, already resolved to the ones the request selects (see
-// core's language resolution), and arch comes from config.GalaxyArchs[].Code.
+// The architecture test: a missing or null "osBitness" means the entry is not
+// architecture-specific and is selected, otherwise the list must contain "*" or
+// the requested arch.
+//
+// languages is the build's own tokens, already resolved to the ones the request
+// selects; arch comes from config.GalaxyArchs[].Code.
 func (c *Client) FilteredDepotItems(ctx context.Context, depotJSON map[string]any, languages []string, arch string, opts DepotOptions) ([]model.GalaxyDepotItem, error) {
 	selected := make(map[string]bool, len(languages))
 	for _, l := range languages {

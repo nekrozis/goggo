@@ -20,9 +20,8 @@ func NormalizeLanguage(s string) string {
 // rather than a delimiter-bounded one on purpose: a manifest that declares
 // "eng" or "english" must still answer the default request "en".
 //
-// It is the whole matching rule for a language request. The wildcard is not a
-// language and is handled by the caller, which knows whether the build offers
-// any specific token at all.
+// It is the whole matching rule for a language request; the wildcard is not a
+// language and is handled by the caller.
 func LanguageFamilyMatch(request, candidate string) bool {
 	r := NormalizeLanguage(request)
 	if r == "" {

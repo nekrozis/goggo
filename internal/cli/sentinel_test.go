@@ -28,10 +28,8 @@ import (
 // built from a request URL.
 //
 // Every case asserts both halves at once: that the run really failed (exit
-// code, the expected text, and the requests the fixture really served), and
-// that neither stream carried the sentinel. The expected text names the
-// sanitised URL where the class reports one, so a diagnostic that was emptied
-// instead of redacted fails too.
+// code, the expected text, and the requests the fixture really served), and that
+// neither stream carried the sentinel.
 const sentinel = "SENTINEL-SECRET-8f3a1c"
 
 // sentinelProductDoc is one product with one windows installer. Its file

@@ -2,26 +2,17 @@
 // content-system/CDN: build listing → build manifest → depot selection → depot
 // manifest → chunk hash → secure link → URL template → chunk download.
 //
-// It is a black-box test on purpose. The client is built through the public API
-// and only the transport is doubled, so the URLs under test are the ones the
-// package itself builds — endpoints, hosts and all. The alternative (reaching
-// into the unexported endpoint block, as the unit tests do) would bypass exactly
-// the wiring this test exists to check.
+// It is a black-box test: the client is built through the public API and only
+// the transport is doubled, so the URLs under test are the ones the package
+// itself builds — endpoints, hosts and all.
 //
 // Every path the CDN must answer is derived from the fixture's own bytes and
-// hashes rather than written down: the chunk's md5 comes from one byte slice,
-// HashToGalaxyPath turns hashes into paths, and both the handlers and the
-// expected request sequence use the result. A mistake in the hash rule or in the
-// chain therefore fails the test instead of matching a hand-written string.
+// hashes rather than written down, so a mistake in the hash rule or in the chain
+// fails the test instead of matching a hand-written string.
 //
-// What this does NOT cover is deliberate: choosing a build (sorting, build ids),
-// the DLC include filter, retries, resume, the small-files container and the
-// downloader state machine are all out of scope here. The fixture picks items[0]
-// and requires generation 2 as a stand-in for that selection logic.
-//
-// Decompression is out of scope as well: the chunk's uncompressed md5
-// and size are structural placeholders, while the chain that is verified is
-// compressedMd5 → galaxy path → manifest → download.
+// Choosing a build, the DLC include filter, retries, resume, the small-files
+// container, the downloader state machine and decompression are out of scope: the
+// fixture picks items[0] and its chunk hashes are structural placeholders.
 package galaxy_test
 
 import (

@@ -189,16 +189,11 @@ func TestParseUnknownAndRemovedOptions(t *testing.T) {
 
 // TestCredentialOptionsAreNeverAdvertised locks the refusal end to end at the
 // parser boundary: the four ways of handing a secret to a command line are not
-// part of this CLI, and the refusal must not pretend otherwise.
+// part of this CLI, and the refusal must not pretend otherwise — no migration
+// hint, because a capability that never existed was not removed.
 //
-// These options were never part of this CLI, so a migration hint would tell a
-// user that a capability was removed when it was never there. That is why the
-// hint table must stay clear of them, and why this test asserts the absence of a
-// hint rather than merely the failure.
-//
-// The value must not come back either: the refusal names the option, never what
-// was offered as its value — a credential must not reach stderr, a log or an
-// audit file.
+// The refusal names the option, never the value offered for it: a credential
+// must not reach stderr, a log or an audit file.
 func TestCredentialOptionsAreNeverAdvertised(t *testing.T) {
 	const secret = "hunter2"
 

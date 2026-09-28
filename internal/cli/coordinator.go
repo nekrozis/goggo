@@ -12,19 +12,13 @@ import (
 // through one of its three transactions — Frame, Diagnostic, Stop — so the
 // cursor always has exactly one owner.
 //
-// That holds only because the console routes ALL of its output through it for
-// the install's lifetime (console.Out/ErrOut hand back coordinator writers);
-// login prompts and non-install commands run outside that lifetime and write
-// directly, so no third path can interleave a write between erase and redraw.
-//
-// Each transaction ends at a known cursor state: the frame is on screen and the
-// cursor sits just below it, so the row arithmetic never depends on where an
-// earlier write left the cursor. Layout guarantees the frame never wraps
-// (layout.go), which is what makes the erase's row count trustworthy.
+// Each transaction ends at a known cursor state: the frame is on screen with
+// the cursor just below it, so the row arithmetic never depends on where an
+// earlier write left the cursor. Layout guarantees the frame never wraps, which
+// is what makes the erase's row count trustworthy.
 //
 // A prompt takes the terminal over through suspend/resume: the frame comes down
-// and stays down, so the cursor stops moving under the user's input and the
-// answer is not painted over.
+// and stays down, so the cursor stops moving under the user's input.
 type terminalCoordinator struct {
 	out     io.Writer
 	errOut  io.Writer

@@ -80,20 +80,15 @@ func isCredentialParam(key string) bool {
 //
 // The URL is replaced IN PLACE rather than by building a new error, because a
 // rebuilt error would either lose the wrapper above it or duplicate it. Editing
-// the field keeps every property callers depend on: errors.Is still reaches
-// context.Canceled and context.DeadlineExceeded through Err, errors.As still
-// finds the *url.Error, and Timeout and Unwrap still answer. It also makes the
-// function idempotent — a second call finds the URL already clean and returns
-// err untouched — and a *StatusError, which NewStatusError has already
-// sanitised, is not a *url.Error at all, so it passes through unwrapped.
+// the field keeps every property callers depend on — errors.Is, errors.As,
+// Timeout and Unwrap all still answer — and makes the function idempotent. A
+// *StatusError, which NewStatusError has already sanitised, is not a *url.Error
+// at all, so it passes through unwrapped.
 //
-// One consequence of editing in place is worth stating: an error that has
-// ALREADY been wrapped cannot be repaired. fmt.Errorf formats its message when
-// it wraps, so a wrapper built around a raw *url.Error keeps the raw URL in its
-// text no matter what happens to the inner value afterwards. That is why this
-// is a BOUNDARY and not a cleanup: every site applies it to the error it just
-// received from the transport, before anything wraps it. Sanitising later is not
-// a substitute — see TestSanitizeErrorCannotRepairAnAlreadyWrappedError.
+// One consequence is worth stating: an error that has ALREADY been wrapped
+// cannot be repaired, because fmt.Errorf formats its message when it wraps. That
+// is why this is a BOUNDARY and not a cleanup: every site applies it to the error
+// it just received from the transport, before anything wraps it.
 func SanitizeError(err error) error {
 	if err == nil {
 		return nil

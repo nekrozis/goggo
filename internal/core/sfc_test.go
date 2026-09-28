@@ -132,13 +132,10 @@ func TestExtractHoldsBackAMemberItsRegionDoesNotHold(t *testing.T) {
 // TestExtractMissingContainerRecoversMembers locks the recovery contract that
 // replaced the silent skip:
 //
-//	Old contract: a missing container is silently ignored (no pending, no line).
-//	New contract: a missing container sends its product's members to the
-//	              direct-download fallback, once each, with one notice line.
-//
-// The membership authority is the extraction's own grouping, so the foreign
-// product's member must not join the fallback and no deletion is attempted on
-// a path that does not exist.
+// A missing container sends its product's members to the direct-download
+// fallback, once each, with one notice line. The membership authority is the
+// extraction's own grouping, so the foreign product's member must not join the
+// fallback and no deletion is attempted on a path that does not exist.
 func TestExtractMissingContainerRecoversMembers(t *testing.T) {
 	f := newSFCFixture(t)
 	if err := os.Remove(f.container); err != nil {

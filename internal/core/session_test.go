@@ -428,12 +428,9 @@ const headlessMessage = "no credentials available in a non-interactive session; 
 // challenge reaches the console — which is what selects the wording the CLI
 // prints.
 //
-// Coverage boundary: the double hands httpx a
-// caller-provided HTTPClient, and httpx deliberately refuses cookie persistence
-// in that configuration, so the flow ends by reporting exactly that error.
-// Everything this step guarantees happens before it — the final assertion pins
-// the distinction, because reaching the cookie error means the login itself
-// completed (token exchange + account probe).
+// Coverage boundary: the double hands httpx a caller-provided HTTPClient, and
+// httpx refuses cookie persistence in that configuration, so the flow ends by
+// reporting exactly that error — reaching it means the login itself completed.
 func TestLoginStreamsAndStatus(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -604,9 +601,8 @@ func TestEnsureDirectories(t *testing.T) {
 // here depends on how the file is laid out.
 //
 // Coverage boundary: the sequence runs through the store Open builds plus
-// Downloader.Init rather than through Open, because Open builds its transport
-// from the configuration and therefore cannot be pointed at a test server. Open's
-// own glue is not exercised here.
+// Downloader.Init rather than through Open, which builds its transport from the
+// configuration and cannot be pointed at a test server.
 func TestInitRefreshesAndSavesExpiredToken(t *testing.T) {
 	var tokenRequests int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

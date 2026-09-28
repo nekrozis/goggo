@@ -76,8 +76,8 @@ func TestResolveLanguageTokens(t *testing.T) {
 				if err == nil {
 					t.Fatalf("resolveLanguageTokens(%q) succeeded, want an error", c.requested)
 				}
-				if !errors.Is(err, ErrLanguageNotOffered) {
-					t.Errorf("err = %v, want ErrLanguageNotOffered", err)
+				if _, ok := errors.AsType[*UsageError](err); !ok {
+					t.Errorf("err = %v, want a usage-class refusal", err)
 				}
 				return
 			}

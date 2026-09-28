@@ -379,6 +379,8 @@ var commandTree = []commandNode{
 			optCDNPriority,
 			optNoDependencies,
 			optCheckFreeSpace,
+			optDLC,
+			optExcludeDLC,
 		}),
 		children: []commandNode{
 			{

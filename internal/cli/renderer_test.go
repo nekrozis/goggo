@@ -359,11 +359,11 @@ func TestExitCodeAuthority(t *testing.T) {
 	// An argument core refuses once the build is known is the same class: the
 	// front end cannot judge it at parse time, but it is still the argument
 	// that was wrong.
-	if outcomeForError(core.ErrLanguageNotOffered) != outcomeUsageFailure {
+	if outcomeForError(core.Usagef("refused")) != outcomeUsageFailure {
 		t.Error("a refused --language must map to the usage exit code")
 	}
-	if !isUsageError(&core.LanguageError{Requested: "klingon"}) {
-		t.Error("the wrapped language error must classify as a usage error")
+	if !isUsageError(core.Usagef("refused")) {
+		t.Error("the core usage error must classify as a usage error")
 	}
 }
 
@@ -386,7 +386,7 @@ func TestClassifyInstallResult(t *testing.T) {
 	if got := classifyInstallResult(errors.New("boom"), context.Background()); got != stopFailed {
 		t.Errorf("plain error = %d, want failed", got)
 	}
-	if got := classifyInstallResult(core.ErrLanguageNotOffered, context.Background()); got != stopUsageFailure {
+	if got := classifyInstallResult(core.Usagef("refused"), context.Background()); got != stopUsageFailure {
 		t.Errorf("refused argument = %d, want the usage refusal", got)
 	}
 }

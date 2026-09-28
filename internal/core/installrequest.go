@@ -26,6 +26,17 @@ type InstallRequest struct {
 
 	SubdirTemplate string
 
+	// DLCSelectors are the --dlc / --exclude-dlc values in the order they were
+	// typed. Empty means no selection, which is the documented default: every
+	// DLC the account owns is installed. Which DLCs a build carries, and which
+	// of those the account owns, is only known once its manifest is fetched, so
+	// the resolution happens there with the language's.
+	//
+	// It is a slice, so its pointer word is followed by the non-pointer length
+	// and capacity: it comes after every string to keep the struct's
+	// GC-scanned prefix at its shortest.
+	DLCSelectors []config.DLCSelector
+
 	Arch                uint32
 	IncludeDependencies bool
 
@@ -48,6 +59,7 @@ func NewInstallRequest(cfg config.Config, productID, buildID string, refMode Pro
 		BuildID:        buildID,
 		Platform:       platformName(download.GalaxyPlatform),
 		Language:       download.GalaxyLanguageRaw,
+		DLCSelectors:   download.DLCSelectors,
 		SubdirTemplate: cfg.Directories.GalaxyInstallSubdir,
 
 		Arch:                download.GalaxyArch,

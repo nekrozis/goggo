@@ -1,7 +1,6 @@
 package core
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -14,37 +13,23 @@ import (
 // English content reports that instead of silently installing another language.
 const defaultLanguageRequest = "en"
 
-// ErrLanguageNotOffered reports a --language value the selected build cannot
-// satisfy. It is the one argument failure the front end cannot judge while
-// parsing — the build is not known yet — so it travels back to the CLI to be
-// reported as a usage error rather than as a failed command.
-var ErrLanguageNotOffered = errors.New("language not offered by the build")
-
-// LanguageError names the request and the tokens the build does offer, so the
-// message can be acted on without a second command.
-type LanguageError struct {
-	Requested string
-	ProductID string
-	// Offered is a slice, so its pointer word is followed by the non-pointer
-	// length and capacity: it comes last to keep the struct's GC-scanned
-	// prefix at its shortest.
-	Offered []string
-}
-
-func (e *LanguageError) Error() string {
+// languageRefused is the usage-class refusal of a request the build cannot
+// satisfy. It names the request, what the build does offer, and the command that
+// lists it, so the next step needs no second guess — and it is only ever used
+// for a value the user typed: the default request that no build can satisfy is
+// a content failure, not a bad argument.
+func languageRefused(requested string, offered []string, productID string) error {
 	list := "(none)"
-	if len(e.Offered) > 0 {
-		list = strings.Join(e.Offered, ", ")
+	if len(offered) > 0 {
+		list = strings.Join(offered, ", ")
 	}
 	msg := fmt.Sprintf("language %q is not one of this build's languages\nAvailable languages: %s",
-		e.Requested, list)
-	if e.ProductID != "" {
-		msg += fmt.Sprintf("\nUse 'goggo install options %s' to view available combinations", e.ProductID)
+		requested, list)
+	if productID != "" {
+		msg += fmt.Sprintf("\nUse 'goggo install options %s' to view available combinations", productID)
 	}
-	return msg
+	return Usagef("%s", msg)
 }
-
-func (e *LanguageError) Unwrap() error { return ErrLanguageNotOffered }
 
 // requestedLanguage is the language the run asks for: the --language value, or
 // the default request when the flag was absent. A "present but empty" value is
@@ -104,7 +89,7 @@ func resolveLanguageTokens(candidates []depotCandidate, requested, productID str
 		}
 	}
 	if len(matched) == 0 {
-		return nil, &LanguageError{Requested: requested, Offered: offered, ProductID: productID}
+		return nil, languageRefused(requested, offered, productID)
 	}
 	sort.Strings(matched)
 	return matched, nil

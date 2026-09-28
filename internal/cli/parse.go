@@ -51,6 +51,8 @@ const (
 	optCDNPriority
 	optNoDependencies
 	optCheckFreeSpace
+	optDLC
+	optExcludeDLC
 
 	// Listing filters.
 	optTag
@@ -354,6 +356,32 @@ var optionTable = append([]optionSpec{
 		summary: "Check for free space before installing",
 		parse: func(inv *invocation, _ string) error {
 			inv.cfg.DownloadConfig.FreeSpaceCheck = true
+			return nil
+		},
+	},
+
+	{
+		id: optDLC, long: "dlc", value: valueRequired, arg: "<id|title>",
+		summary: "Install only these DLCs (repeatable)",
+		detail: "A DLC product id or its full title; `install options` lists both.\n" +
+			"Repeat the flag to select several. With none given, every DLC the\n" +
+			"account owns is installed.",
+		parse: func(inv *invocation, v string) error {
+			// Stored unresolved: whether the build carries this DLC — and
+			// whether the account owns it — is only known once the build
+			// manifest is fetched, so the plan resolves and refuses it there.
+			inv.cfg.DownloadConfig.DLCSelectors = append(
+				inv.cfg.DownloadConfig.DLCSelectors, config.DLCSelector{Value: v})
+			return nil
+		},
+	},
+	{
+		id: optExcludeDLC, long: "exclude-dlc", value: valueRequired, arg: "<id|title>",
+		summary: "Do not install these DLCs (repeatable)",
+		detail:  "The same values as --dlc, in the opposite direction.",
+		parse: func(inv *invocation, v string) error {
+			inv.cfg.DownloadConfig.DLCSelectors = append(
+				inv.cfg.DownloadConfig.DLCSelectors, config.DLCSelector{Value: v, Exclude: true})
 			return nil
 		},
 	},
@@ -757,15 +785,15 @@ func usagef(format string, args ...any) error {
 // isUsageError reports whether err is a usage failure.
 //
 // The class is not the parser's alone: a value the parser cannot judge without
-// the network — an explicit --language whose resolution needs the build's own
-// depot languages — comes back from core and is still the user's argument that
-// was wrong, not the command that failed.
+// the network — an explicit --language, or a DLC selector — comes back from core
+// and is still the user's argument that was wrong, not the command that failed.
 func isUsageError(err error) bool {
 	var u *usageError
 	if errors.As(err, &u) {
 		return true
 	}
-	return errors.Is(err, core.ErrLanguageNotOffered)
+	_, ok := errors.AsType[*core.UsageError](err)
+	return ok
 }
 
 // parseArgs parses a command line into an invocation.

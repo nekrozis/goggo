@@ -14,6 +14,16 @@ type DirectoryConfig struct {
 	SubDirectories      bool
 }
 
+// DLCSelector is one --dlc or --exclude-dlc value, kept in the order it was
+// typed so a report can name the problems in that order.
+//
+// Value is either a DLC product id or a full DLC title; which one it is can only
+// be decided against a selected build, so the parser stores it unresolved.
+type DLCSelector struct {
+	Value   string
+	Exclude bool
+}
+
 // DownloadConfig holds the download-selection options. The installer
 // platform/language fields and the priority lists use the bit flags and
 // Option tables from options.go.
@@ -27,6 +37,7 @@ type DownloadConfig struct {
 	LanguagePriority    []uint32
 	GalaxyCDNPriority   []string
 	Tags                []string
+	DLCSelectors        []DLCSelector
 	ChunkSize           int64 // in bytes
 	InstallerPlatform   uint32
 	InstallerLanguage   uint32

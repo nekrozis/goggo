@@ -1030,8 +1030,8 @@ func TestZeroMatchGuard(t *testing.T) {
 		if err == nil {
 			t.Fatal("BuildPlan must fail for a language the build does not offer")
 		}
-		if !errors.Is(err, ErrLanguageNotOffered) {
-			t.Errorf("err = %v, want ErrLanguageNotOffered", err)
+		if _, ok := errors.AsType[*UsageError](err); !ok {
+			t.Errorf("err = %v, want a usage-class refusal", err)
 		}
 		// The message must name the request and list what the build does offer,
 		// so the user can act without a second command.
@@ -1070,7 +1070,7 @@ func TestZeroMatchGuard(t *testing.T) {
 		if !errors.Is(err, ErrNoMatchingContent) {
 			t.Errorf("err = %v, want ErrNoMatchingContent", err)
 		}
-		if errors.Is(err, ErrLanguageNotOffered) {
+		if _, ok := errors.AsType[*UsageError](err); ok {
 			t.Errorf("err = %v, must not be classified as a bad argument", err)
 		}
 		if !strings.Contains(err.Error(), "language=en") {

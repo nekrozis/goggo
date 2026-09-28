@@ -213,10 +213,22 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 	}
 	res.addMessage(languageNotice)
 
+	// The DLC selection. Resolved against this build, so a selector naming a
+	// product the build does not carry — or one the account does not own — is
+	// refused here, before anything is queued and before anything is written.
+	baseProductID, err := baseProductIDOf(manifest, req)
+	if err != nil {
+		return res, err
+	}
+	dlcSel, err := d.resolveDLCSelection(ctx, manifest, baseProductID, req.ProductID, req.DLCSelectors)
+	if err != nil {
+		return res, err
+	}
+
 	// The depot items. Unowned DLC products drop out inside, before anything
 	// is queued, so the transfer never meets a licence failure; one summary
 	// line reports what was dropped.
-	planItems, droppedProducts, err := d.resolveDepotItems(ctx, manifest, req, languageTokens)
+	planItems, droppedProducts, err := d.resolveDepotItems(ctx, manifest, req, languageTokens, dlcSel)
 	if err != nil {
 		return res, err
 	}
@@ -316,11 +328,12 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 						return nil, err
 					}
 					// The old build is filtered by the SAME language selection
-					// as the new one, so a language it lacked never produces
-					// deletions and union drift between the two builds cannot
-					// invent them. Its own entitlement boundary applies too, so
-					// an unowned DLC depot never counts as an installed file.
-					oldItems, _, err := d.resolveDepotItems(ctx, oldManifest, req, languageTokens)
+					// and DLC selection as the new one, so a language or a DLC
+					// the old build lacked never produces deletions and drift
+					// between the two builds cannot invent them. Its own
+					// entitlement boundary applies too, so an unowned DLC depot
+					// never counts as an installed file.
+					oldItems, _, err := d.resolveDepotItems(ctx, oldManifest, req, languageTokens, dlcSel)
 					if err != nil {
 						return nil, err
 					}
@@ -566,15 +579,15 @@ func manifestArray(manifest map[string]any, key string) ([]any, error) {
 	return v, nil
 }
 
-// resolveDepotItems expands every depot, applies the entitlement boundary,
-// stamps product ids, renames small-files containers and deduplicates by path.
-// It returns the items and the DLC product ids dropped for lack of
-// entitlement, for the caller to report in one line.
+// resolveDepotItems expands every depot, applies the DLC selection and the
+// entitlement boundary, stamps product ids, renames small-files containers and
+// deduplicates by path. It returns the items and the DLC product ids dropped for
+// lack of entitlement, for the caller to report in one line.
 //
-// tokens is the language selection the caller resolved against this manifest
-// (see requestLanguage): the caller owns that decision because it also owns the
-// notice a multi-language request produces.
-func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]any, req InstallRequest, tokens []string) ([]model.GalaxyDepotItem, []string, error) {
+// tokens and sel are what the caller resolved against this manifest (see
+// requestLanguage and resolveDLCSelection): the caller owns those decisions
+// because it also owns the notices and refusals they produce.
+func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]any, req InstallRequest, tokens []string, sel dlcSelection) ([]model.GalaxyDepotItem, []string, error) {
 	items, err := d.expandDepotItems(ctx, manifest, req, tokens)
 	if err != nil {
 		return nil, nil, err
@@ -584,6 +597,12 @@ func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]
 	if err != nil {
 		return nil, nil, err
 	}
+	// The DLC selection runs before the entitlement filter and before the path
+	// dedup below, for the same reason the entitlement filter does: an excluded
+	// DLC that re-declares a base file must not be the entry the dedup keeps, or
+	// the base file would vanish along with the DLC that was refused.
+	items = applyDLCSelection(items, baseProductID, sel)
+
 	// The entitlement filter runs before the dedup below: an unowned DLC that
 	// re-declares a base file must not be the entry the dedup keeps, or the
 	// base file would vanish along with the product that lost it.
@@ -793,6 +812,26 @@ func baseProductIDOf(manifest map[string]any, req InstallRequest) (string, error
 		id = req.ProductID
 	}
 	return id, nil
+}
+
+// applyDLCSelection drops the DLC items the selection does not keep, so the rest
+// of the plan only ever sees the DLC products the run asked for.
+//
+// The base product is not a DLC, and a dependency item carries its own
+// repository's product id but is not something a user selects: both pass
+// through untouched.
+func applyDLCSelection(items []model.GalaxyDepotItem, baseProductID string, sel dlcSelection) []model.GalaxyDepotItem {
+	if !sel.selecting() && len(sel.notThese) == 0 {
+		return items
+	}
+	kept := make([]model.GalaxyDepotItem, 0, len(items))
+	for _, it := range items {
+		if it.ProductID != baseProductID && !it.IsDependency && !sel.keeps(it.ProductID) {
+			continue
+		}
+		kept = append(kept, it)
+	}
+	return kept
 }
 
 // filterEntitled drops the items of products this account does not own, so the

@@ -18,11 +18,28 @@ type InstallOptionEntry struct {
 	Files    int    `json:"files"`
 }
 
+// DLCOption is one DLC of the selected build as the listing presents it: the
+// product id --dlc accepts, the title the product document carries, and whether
+// the account owns it.
+//
+// The product id is the fact the selection works from; a title is only how a
+// user names it, so an unreadable product document leaves the title empty
+// rather than dropping the DLC from the listing.
+type DLCOption struct {
+	ProductID string `json:"product_id"`
+	Title     string `json:"title"`
+	Owned     bool   `json:"owned"`
+}
+
 // InstallOptionsResult is the aggregated result of an install options inquiry.
 type InstallOptionsResult struct {
 	GameTitle string               `json:"game_title"`
 	BuildID   string               `json:"build_id"`
 	Entries   []InstallOptionEntry `json:"options"`
+	// DLCs are the DLC products the selected build carries. The listing and the
+	// plan's selectors read the same discovery, so a product id shown here is
+	// exactly one --dlc accepts.
+	DLCs []DLCOption `json:"dlcs"`
 }
 
 // InstallOptions resolves the game reference and discovers all compatible installation
@@ -57,6 +74,13 @@ func (d *Downloader) InstallOptions(ctx context.Context, ref string, mode Produc
 		baseProductID = id
 	}
 
+	// The DLC section is reported even when no base tuple matches: it answers a
+	// question about the build, not about this platform's content.
+	dlcs, err := d.dlcListing(ctx, eb.Manifest, baseProductID)
+	if err != nil {
+		return InstallOptionsResult{}, err
+	}
+
 	candidates, err := depotCandidates(eb.Manifest, baseProductID)
 	if err != nil {
 		return InstallOptionsResult{}, err
@@ -67,6 +91,7 @@ func (d *Downloader) InstallOptions(ctx context.Context, ref string, mode Produc
 			GameTitle: eb.GameTitle,
 			BuildID:   eb.BuildID,
 			Entries:   nil,
+			DLCs:      dlcs,
 		}, nil
 	}
 
@@ -242,5 +267,6 @@ func (d *Downloader) InstallOptions(ctx context.Context, ref string, mode Produc
 		GameTitle: eb.GameTitle,
 		BuildID:   eb.BuildID,
 		Entries:   entries,
+		DLCs:      dlcs,
 	}, nil
 }

@@ -127,11 +127,9 @@ func TestConfirm(t *testing.T) {
 }
 
 // TestOrphansRemoveHelpStatesBothRolesOfYes ties the documentation to the
-// behaviour the tests above lock: --yes both skips the question and
-// is what makes a run without a terminal possible. The help said so before the
-// code did, so a topic that loses either half is a contract change — and both
-// halves are the option's own help text, so the assertion reads it rather than
-// restating it.
+// behaviour the tests above lock: --yes both skips the question and is what makes
+// a run without a terminal possible. The assertion reads the option's own help
+// text rather than restating it, so losing either half fails here.
 func TestOrphansRemoveHelpStatesBothRolesOfYes(t *testing.T) {
 	code, out, _ := run(t, "", "orphans", "remove", "-h")
 	if code != 0 {
@@ -232,9 +230,8 @@ func TestRemoveOrphansWithYesDoesNotAsk(t *testing.T) {
 // decides, and only a clear yes deletes. The list of files that must survive a
 // "no" is the same list that would have gone — nothing else is touched either way.
 //
-// The vocabulary of answers — which spellings mean yes, what an empty line or
-// EOF means — is TestConfirm's single home; this test is about the transaction
-// the answer authorizes, so it drives one yes and one no through it.
+// The vocabulary of answers lives in TestConfirm; this test drives one yes and
+// one no through the transaction they authorize.
 func TestRemoveOrphansAsksWithoutYes(t *testing.T) {
 	cases := []struct {
 		name       string

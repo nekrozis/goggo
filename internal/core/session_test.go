@@ -1048,7 +1048,7 @@ func TestRetryWaitIsMilliseconds(t *testing.T) {
 // OpenWith makes) must sleep the configured wait between website retries. The
 // account endpoints go through getResponse -> GetBytesWithRetry, so a server
 // that fails once and then answers makes one retry happen; with --wait 200 the
-// elapsed time is ~200ms, while the old microsecond reading elapsed ~0.
+// elapsed time is ~200ms.
 func TestSessionRetryWaitReachesTheWire(t *testing.T) {
 	// The construction point itself: the policy core hands to httpx. Core owns
 	// the mapping from cfg.Wait; the attempt formula (min(retries,3)+1) belongs

@@ -12,11 +12,9 @@ import (
 // dlcProducts collects the DLC products the selected build carries: every depot
 // whose productId differs from the base product's, sorted and deduplicated.
 //
-// It is the one discovery path. The install-options listing, the selectors and
-// the plan's own DLC handling all read it, so a product the listing shows is
+// It is the one discovery path, so a product the install-options listing shows is
 // exactly one --dlc accepts. It reads the depots rather than the product
-// document's `dlcs` field, which is editorial and has been measured to disagree
-// with what a build actually ships.
+// document's `dlcs` field, which is editorial and unreliable.
 func dlcProducts(manifest map[string]any, baseProductID string) ([]string, error) {
 	depots, err := manifestArray(manifest, "depots")
 	if err != nil {

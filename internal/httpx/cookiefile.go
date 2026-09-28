@@ -18,12 +18,11 @@ import (
 // semantics; on Windows no claim of equivalent ACL behaviour is made.
 const cookieFileMode = 0o600
 
-// The on-disk envelope of the cookie file. It is a NON-PLAINTEXT,
-// NON-ENCRYPTED format: the payload is obfuscated with a fixed keystream that
-// anyone holding this source can recover. It provides no cryptographic
-// confidentiality and is not meant to resist malware, EDR or anyone analysing
-// the machine; its only effect is that the file is no longer text, so a plain
-// grep, a text index or an accidental upload does not pick up a session cookie.
+// The on-disk envelope of the cookie file. It is a NON-PLAINTEXT, NON-ENCRYPTED
+// format: the payload is obfuscated with a fixed keystream that anyone holding
+// this source can recover. It provides no cryptographic confidentiality; its only
+// effect is that the file is no longer text, so a plain grep, a text index or an
+// accidental upload does not pick up a session cookie.
 //
 // The framing itself lives in secretfile, which knows nothing about cookies;
 // this file supplies the magic, the version and the key.

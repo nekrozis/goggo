@@ -234,8 +234,7 @@ func credentials(cfg config.Config, ui Console, interactive bool) (email, passwo
 // terminal there is nobody to prompt, so the cookie file and the token file it
 // would have used are printed to stdout and the login gives up. An empty
 // credential pair is never posted, so the branch always ends in an explicit
-// failure; the message is the same whether or not the two files exist, because
-// both cases leave the caller with the same job — supply credentials.
+// failure naming the caller's one job — supply credentials.
 //
 // Only an explicit login request reaches this branch: an implicit login is
 // allowed solely when a terminal can answer it (see SessionRequest.AllowLogin).

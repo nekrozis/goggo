@@ -441,10 +441,18 @@ func TestRunWebsiteResume(t *testing.T) {
 // on disk, so sharing one would couple them.
 func TestRunWebsiteRetryAndCleanupMatrix(t *testing.T) {
 	t.Run("transport failure keeps the partial file", func(t *testing.T) {
-		// A raw TCP server writes a partial body and closes the connection: the
-		// client's read fails mid-transfer, which is the PARTIAL_FILE class
-		// whose partial file is kept for a later resume. (httptest's hijacked
-		// connections proved unreliable at producing that read failure here.)
+		// A raw TCP server answers with a body shorter than its own
+		// Content-Length and then half-closes for writing: the client reads those
+		// bytes and then fails, which is the PARTIAL_FILE class whose partial file
+		// is kept for a later resume. (httptest's hijacked connections proved
+		// unreliable at producing that read failure here.)
+		//
+		// The request is consumed before the response, and the socket is only
+		// half-closed. A close with the request still unread is answered with RST
+		// by some stacks, and a reset discards a body the client has not read yet,
+		// leaving an empty file for the empty-file rule to remove — the outcome
+		// would then turn on the kernel's timing instead of on the cleanup.
+		const partialBody = "partial"
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
@@ -457,8 +465,20 @@ func TestRunWebsiteRetryAndCleanupMatrix(t *testing.T) {
 					return
 				}
 				go func(c net.Conn) {
-					c.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\npartial"))
-					c.Close()
+					tcp, ok := c.(*net.TCPConn)
+					if !ok {
+						_ = c.Close()
+						return
+					}
+					buf := make([]byte, 4096)
+					_, _ = tcp.Read(buf)
+					_, _ = tcp.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n" + partialBody))
+					// The read side stays open until the client has seen the
+					// failure and closed, so nothing here resets the connection
+					// before the bytes above have been read.
+					_ = tcp.CloseWrite()
+					_, _ = tcp.Read(buf)
+					_ = tcp.Close()
 				}(conn)
 			}
 		}()
@@ -471,8 +491,15 @@ func TestRunWebsiteRetryAndCleanupMatrix(t *testing.T) {
 		}, Options{Workers: 1, Retries: 1}, env.deps); err != nil {
 			t.Fatalf("RunWebsite = %v, want nil: task failures are events", err)
 		}
-		if fi, err := os.Stat(dest); err != nil || fi.Size() == 0 {
-			t.Errorf("partial file = %v, want it kept for a later resume", err)
+		// Retries 1 is two attempts, and a transport failure keeps what each one
+		// wrote, so the file holds both writes.
+		const attempts = 2
+		fi, err := os.Stat(dest)
+		if err != nil {
+			t.Fatalf("partial file = %v, want it kept for a later resume", err)
+		}
+		if want := int64(len(partialBody) * attempts); fi.Size() != want {
+			t.Errorf("partial file = %d bytes, want %d: every attempt's bytes are kept", fi.Size(), want)
 		}
 		// The failed attempt leaves as the "Download complete (<err>): <name>"
 		// warning, not as an error.

@@ -130,12 +130,12 @@ jobs:
         # No checkout in this job: gh cannot infer the repository from a
         # working tree, so it is named explicitly.
         #
-        # The notes are the generated change list with a short standing
-        # preamble in front of it, so a release page says what changed without
-        # anyone curating it per tag.
+        # The notes are a placeholder on purpose. GitHub's generated notes list
+        # only changes that arrived through a pull request, so with work landed
+        # on main directly they omit the release's actual content; the real
+        # notes are curated after publishing with `gh release edit`.
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "goggo ${GITHUB_REF_NAME}" \
-            --generate-notes \
-            --notes "Run 'goggo help' for the full command list."
+            --notes "goggo ${GITHUB_REF_NAME} (release notes are curated after publishing)"

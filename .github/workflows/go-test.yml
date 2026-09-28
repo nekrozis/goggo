@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # A branch can be gated on demand without opening a pull request. The
+  # ref chosen at dispatch time supplies the checkout and the concurrency
+  # group, so a dispatch on a feature branch tests that branch.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}

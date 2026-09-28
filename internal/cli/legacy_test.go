@@ -24,12 +24,8 @@ const legacyStoreName = "galaxy_tokens.json"
 // session finds no credential, so no request carries an Authorization header and
 // no command reports success.
 //
-// Two details of the assertion are deliberate. It looks at the store that is
-// read rather than at the cookie jar — a session with no credential is logged out
-// whatever cookies exist, and keeping the two apart stops a later change to
-// cookie storage from having to reinterpret this evidence. And the planted token
-// is well-formed and unexpired, so a pass cannot come from "the token happened to
-// be bad".
+// The planted token is well-formed and unexpired, so a pass cannot come from
+// "the token happened to be bad".
 func TestALegacyTokenFileLeavesTheSessionLoggedOut(t *testing.T) {
 	const sentinel = "LEGACY-SENTINEL-7d2b"
 

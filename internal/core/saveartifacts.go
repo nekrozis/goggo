@@ -12,8 +12,7 @@ import (
 )
 
 // This file is the save-* write side: the artifacts of one download run. The
-// three writer contracts are separate functions with separate semantics, never
-// one generic write-if-needed:
+// writer contracts are separate functions, never one generic write-if-needed:
 //
 //	serials existing file ⇒ skip (never overwritten)
 //	changelog equal content ⇒ skip; different ⇒ overwrite

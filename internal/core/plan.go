@@ -584,9 +584,7 @@ func manifestArray(manifest map[string]any, key string) ([]any, error) {
 // deduplicates by path. It returns the items and the DLC product ids dropped for
 // lack of entitlement, for the caller to report in one line.
 //
-// tokens and sel are what the caller resolved against this manifest (see
-// requestLanguage and resolveDLCSelection): the caller owns those decisions
-// because it also owns the notices and refusals they produce.
+// tokens and sel are resolved by the caller against this manifest.
 func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]any, req InstallRequest, tokens []string, sel dlcSelection) ([]model.GalaxyDepotItem, []string, error) {
 	items, err := d.expandDepotItems(ctx, manifest, req, tokens)
 	if err != nil {
@@ -837,18 +835,13 @@ func applyDLCSelection(items []model.GalaxyDepotItem, baseProductID string, sel 
 // filterEntitled drops the items of products this account does not own, so the
 // plan never carries content that can never be fetched.
 //
-// The manifest lists the depots of the whole product, including DLC products
-// the account has no licence for; their secure link answers 403. That answer is
-// the boundary this enforces. The base product is probed together with the DLC
-// products: a base 403 is fatal — the account cannot install what it does not
-// own — while a DLC 403 drops that product's items and is reported by the
-// caller in one line.
+// The manifest lists the depots of the whole product, including DLC products the
+// account has no licence for; their secure link answers 403. The base product is
+// probed with them: a base 403 is fatal, while a DLC 403 drops that product's
+// items and is reported by the caller in one line.
 //
 // Dependency items are exempt: they carry the dependency product's id but are
 // fetched through the dependency endpoint, which is not an entitlement call.
-//
-// It returns the kept items and the product ids it dropped, in first-seen
-// order, which is stable because the items arrive path-ordered.
 func (d *Downloader) filterEntitled(ctx context.Context, items []model.GalaxyDepotItem, baseProductID string) ([]model.GalaxyDepotItem, []string, error) {
 	seen := make(map[string]bool)
 	var products []string

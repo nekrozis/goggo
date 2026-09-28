@@ -67,15 +67,12 @@ func offeredLanguages(candidates []depotCandidate) []string {
 //
 // The candidate set is what the build's base depots declare, so what
 // `install options` lists is exactly what a request may name. A request matches
-// by normalized exact token or by language family (util.LanguageFamilyMatch),
-// and every match is selected: "en" on a build offering en-US and en-GB selects
-// both, and "zh" on one offering zh-Hans and zh-Hant selects both. Nothing is
-// ever guessed — a request that matches nothing is an error naming the tokens
-// the build does offer.
+// by normalized exact token or by language family (util.LanguageFamilyMatch), and
+// every match is selected: "en" on a build offering en-US and en-GB selects both.
+// A request that matches nothing is an error naming the tokens the build offers.
 //
 // A build whose base depots declare no specific token at all is
-// language-agnostic. The request then resolves to the wildcard, which is the
-// only thing that selects its content.
+// language-agnostic: the request resolves to the wildcard.
 func resolveLanguageTokens(candidates []depotCandidate, requested, productID string) ([]string, error) {
 	offered := offeredLanguages(candidates)
 	if len(offered) == 0 {

@@ -236,10 +236,8 @@ func (d *Downloader) showBuildsFor(ctx context.Context, productID, buildID strin
 //	nothing to name  + an empty Notice + an error   — the command could not finish
 //
 // The split matters because a Notice is not a failure: a caller that only shows
-// something treats "there is nothing to show" as its answer. A reference that
-// matched several products and could not be chosen is not that — the objects
-// exist and the selection failed — so it travels as an error and every caller
-// reports a failed run.
+// something treats "there is nothing to show" as its answer, while a reference
+// that matched several products and could not be chosen travels as an error.
 func (d *Downloader) selectProductID(ctx context.Context, ref string, mode ProductRefMode) (string, Notice, error) {
 	if numericIDRE.MatchString(ref) {
 		return ref, Notice{}, nil
@@ -297,15 +295,9 @@ func noProductMessage(ref string, mode ProductRefMode) string {
 
 // gameListOptions assembles the product query for a reference lookup.
 //
-// It duplicates the assembly in internal/cli/list.go on purpose: the listing
-// command still lives there, and the two copies converge when it moves into
-// this package. Keeping them separate keeps this step from changing listing
-// behaviour.
-//
 // The reference is a product the user named, so it outranks the configured
-// filter list, which is the listing filter's own precedence. Only the expression
-// form is handed to the listing filter; the exact form is compared against the
-// slugs the listing returns.
+// filter list. Only the expression form is handed to the listing filter; the
+// exact form is compared against the slugs the listing returns.
 func (d *Downloader) gameListOptions(ref string, mode ProductRefMode) catalog.ListOptions {
 	opts := d.accountListOptions()
 	opts.FilterListPath = ""

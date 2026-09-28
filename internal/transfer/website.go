@@ -100,9 +100,9 @@ type WebsiteDeps struct {
 	CreateXML bool
 }
 
-// RunWebsite executes the website download path as upstream writes it: the
-// single-file downloads with their version checks, the rename of the old file,
-// resume handling, the failure-cleanup matrix and the SSL retry class.
+// RunWebsite executes the website download path: the single-file downloads with
+// their version checks, the rename of the old file, resume handling, the
+// failure-cleanup matrix and the SSL retry class.
 //
 // Failure semantics are the website worker's own: per-item problems —
 // blacklisted files, missing directories, unusable downlink documents, renames

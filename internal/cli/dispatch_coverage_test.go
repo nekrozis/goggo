@@ -14,16 +14,10 @@ import (
 	"github.com/nekrozis/goggo/internal/core"
 )
 
-// This file is the dispatch coverage guard. `auth login` completed its login,
-// stored the credentials and then reported "auth login has no handler" — the
-// post-session switch had no case for it and every command id that reaches the
-// switch had to be listed there by hand.
-//
-// The guard is behavioural, not a hand-kept list: it drives EVERY leaf of the
-// command tree through the real dispatcher against a local server and fails if
-// any of them ends in the no-handler default. A new command therefore cannot
-// ship without a handler — the omission fails here instead of in the user's
-// terminal.
+// This file is the dispatch coverage guard: it drives EVERY leaf of the command
+// tree through the real dispatcher against a local server and fails if any of
+// them ends in the no-handler default. A new command therefore cannot ship
+// without a handler — the omission fails here instead of in the user's terminal.
 
 // dispatchFixture answers the requests a session needs: the login endpoints,
 // the account probe, the token exchange. Anything else is answered with a

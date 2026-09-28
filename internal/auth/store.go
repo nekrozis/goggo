@@ -22,18 +22,13 @@ const defaultExpiresIn int64 = 3600
 
 // Store is the credential seam: it owns the Galaxy session's token tree and the
 // operations that act on it. Nothing outside this file reads the tree, and no
-// exported method hands out a credential — a caller can obtain the value it
-// needs for one purpose (an Authorization header, an expiry answer) and nothing
-// else.
+// exported method hands out a credential — only purpose-specific operations
+// (an Authorization header, an expiry answer), never a raw-secret accessor:
+// there is no AccessToken(), GetJSON(), String() or Format(), because each is a
+// way for a credential to reach a message, a log or a struct field without
+// anyone deciding that it should.
 //
-// The rule the surface encodes: a purpose-specific operation is fine, a generic
-// raw-secret accessor is not. There is deliberately no AccessToken(), no
-// GetJSON() and no String() or Format(), because each of those is a way for a
-// credential to reach a message, a log or a struct field without anyone
-// deciding that it should.
-//
-// Use it through a pointer: sharing the pointer IS the design, and a copy would
-// duplicate the lock and the state.
+// Use it through a pointer: a copy would duplicate the lock and the state.
 type Store struct {
 	token    map[string]any
 	path     string
@@ -250,14 +245,9 @@ func (s *Store) Save() error {
 
 // The on-disk envelope. It is a NON-PLAINTEXT, NON-ENCRYPTED format: the
 // payload is obfuscated with a fixed keystream that anyone holding this source
-// can recover. It provides no cryptographic confidentiality and is not meant to
-// resist malware, EDR or anyone analysing the machine. Its only effect is that
-// the file is no longer text, so a plain grep or a text index does not pick up
-// the credential fields.
-//
-// The framing itself lives in secretfile, which knows nothing about tokens; this
-// file supplies the magic, the version and the key, so the format is this
-// package's choice even though the layout is shared.
+// can recover. It provides no cryptographic confidentiality; its only effect is
+// that the file is no longer text, so a plain grep or a text index does not
+// pick up the credential fields.
 //
 //	crc32 covers truncation, random corruption and a partial write. It is an
 //	integrity check, not a security measure: rewriting the payload lets an

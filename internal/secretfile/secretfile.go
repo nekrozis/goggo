@@ -3,16 +3,13 @@
 //
 // The framing knows nothing about what a payload MEANS. What a payload must
 // contain is the caller's contract — a token tree for one caller, cookie records
-// for another — so a payload that parses at this layer and is wrong at the
-// caller's layer is reported by the caller. That boundary is why the package has
-// no notion of tokens or cookies: a shared layer that understood either would
-// grow a second meaning for every caller it gained.
+// for another — so a payload that parses here and is wrong at the caller's layer
+// is reported by the caller.
 //
 // The obfuscation is NOT encryption. The key is compiled into the program, so
-// anyone holding it can reverse the payload. Its only effect is that the file is
-// no longer text: a plain grep, a text index or an accidental upload does not
-// pick up the fields. It provides no cryptographic confidentiality and is not
-// meant to resist malware, EDR or anyone analysing the machine.
+// anyone holding it can reverse the payload. It provides no cryptographic
+// confidentiality; its only effect is that the file is no longer text, so a plain
+// grep, a text index or an accidental upload does not pick up the fields.
 package secretfile
 
 import (

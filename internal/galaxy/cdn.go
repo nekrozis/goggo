@@ -34,11 +34,9 @@ const GalaxyPathPlaceholder = "{path}"
 // Inside url_format every "{parameter}" is replaced by that member of
 // "parameters", visited in ascending key order — observable, because a value may
 // contain another parameter's placeholder. "{path}" is special: the marker is
-// APPENDED to its value for the caller to fill in later. No normalisation is done
-// here: no slash folding, no cleaning, no URL parsing.
+// APPENDED to its value for the caller to fill in later. Nothing is normalised.
 //
-// A document whose "urls" is missing or null produces no templates; a section
-// present in another shape is reported, as elsewhere in this package.
+// A document whose "urls" is missing or null produces no templates.
 func CdnURLTemplatesFromJSON(json map[string]any, cdnPriority []string) ([]string, error) {
 	raw, ok := json["urls"]
 	if !ok || raw == nil {
@@ -137,9 +135,8 @@ func urlTemplate(entry map[string]any) (string, error) {
 // before the query string, and always carries the "/<gamename>/" prefix.
 //
 // It returns a string rather than an error because nothing here can fail
-// usefully: the input is a URL, not a document, so there is no shape to validate,
-// and the caller decides whether the result is usable (the download path rejects
-// one that ends in "/secure").
+// usefully: there is no document shape to validate, and the caller decides
+// whether the result is usable.
 //
 // Two traps: percent-decoding uses url.PathUnescape, which decodes %XX but does
 // not turn "+" into a space (QueryUnescape would) and keeps the original text on

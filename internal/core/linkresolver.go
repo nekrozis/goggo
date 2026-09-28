@@ -24,30 +24,22 @@ type linkResult struct {
 // whether the account owns it and — when it does — caches the CDN url
 // templates the transfer builds chunk urls from.
 //
-// secure_link is the entitlement oracle the API offers: it is the request the
-// transfer would have made anyway, so resolving it once per product turns "one
-// licence failure per file" into one answer per product. The resolver lives on
-// the Downloader, so the plan's entitlement probe, the old-build diff and the
-// transfer's URL provider share one cache and one request per product.
+// secure_link is the entitlement oracle the API offers, and it is the request
+// the transfer would make anyway. The Downloader owns one resolver for the whole
+// run, so the plan's probe, the old-build diff and the transfer share one request
+// per product.
 //
-// A settled answer is cached: 403 means the account does not own the product —
-// a fact about the account, not a transient state — and a 200 carries the
-// templates the transfer needs. A transient failure — a rejected session, a
-// 5xx, a transport error, a malformed document — is NOT an entitlement answer,
-// so it is returned without being cached and the next caller retries.
+// A settled answer is cached: 403 means the account does not own the product, a
+// 200 carries its templates. A transient failure is not an entitlement answer, so
+// it is returned without being cached.
 type linkResolver struct {
 	galaxy   *galaxy.Client
 	refresh  func(context.Context) error
 	expired  func() bool
 	settled  map[string]linkResult
 	inflight map[string]*linkCall
-	// priority is a slice, so its pointer word is followed by the non-pointer
-	// length and capacity: it comes last among the pointer fields.
 	priority []string
 
-	// The mutexes carry no pointers, so they sit after every pointer field and
-	// the struct's GC-scanned prefix ends at priority instead of spanning the
-	// whole struct.
 	refreshMu sync.Mutex
 	mu        sync.Mutex
 }
@@ -57,10 +49,8 @@ type linkResolver struct {
 // The fields are written before done is closed and read only after receiving
 // from it.
 type linkCall struct {
-	done chan struct{}
-	err  error
-	// templates is a slice: its pointer word comes first, so it is the last of
-	// the pointer fields.
+	done      chan struct{}
+	err       error
 	templates []string
 	owned     bool
 }

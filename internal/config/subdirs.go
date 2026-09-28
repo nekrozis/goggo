@@ -10,11 +10,9 @@ import (
 // placeholder that it accepts. The CLI parser and the help text both read this
 // table, so the whitelist cannot drift from it.
 //
-// These values are expanded by gamedetails.makeFilepath's placeholder pass, not by
-// the install-dir resolver: the two template families share no table, and a
-// placeholder is accepted only when it renders meaningfully for the field's file
-// class, and only as a WHOLE value. The transformed-gamename placeholders are
-// absent because their backing transformations JSON is not implemented.
+// These values are expanded by gamedetails.makeFilepath's placeholder pass, not
+// by the install-dir resolver: a placeholder is accepted only when it renders
+// meaningfully for the field's file class, and only as a WHOLE value.
 
 // SubdirOption describes one --subdir-* option.
 type SubdirOption struct {

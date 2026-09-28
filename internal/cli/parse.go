@@ -1198,9 +1198,6 @@ func parseTarget(arg string) (target, error) {
 //	leaf with more leftovers → usage error, except the variadic download
 //	                           commands, which take one or more
 //	nothing resolvable → usage error: unknown command
-//
-// The alternative — printing the root help for anything unrecognised — would
-// answer a question the user did not ask while looking like success.
 func resolveHelpTopic(words []string) ([]string, error) {
 	if len(words) == 0 {
 		return nil, nil

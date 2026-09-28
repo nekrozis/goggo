@@ -583,9 +583,7 @@ func localXMLExists(xmlDir, gamename, dest string) bool {
 // parseFileXML reads the md5 and total size of a checksum document through the
 // manifest schema: a document that does not satisfy the GOG rules is an error,
 // and every caller treats that as "no version information" rather than as a
-// mismatch. Reading the two attributes directly used to accept a document whose
-// chunk list contradicted its own header; the shared validator replaced that,
-// because a half-read manifest must not decide what a download does.
+// mismatch: a half-read manifest must not decide what a download does.
 func parseFileXML(data string) (md5hex string, totalSize int64, err error) {
 	doc, err := gogxml.Parse(strings.NewReader(data))
 	if err != nil {

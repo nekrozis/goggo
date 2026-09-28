@@ -143,10 +143,8 @@ func TestResolveChallengeWording(t *testing.T) {
 // TestSelectProductWithoutTerminal locks the listing the user is shown when the
 // selection cannot be answered: the candidates are printed and only THEN is the
 // terminal checked, so a non-interactive run still sees them. The candidates go
-// to stdout and the prompt would go to stderr.
-//
-// Coverage boundary: the interactive loop needs a real terminal, so the index it
-// returns is covered in internal/core through the Console double.
+// to stdout and the prompt would go to stderr. The interactive loop needs a real
+// terminal, so the index it returns is covered in internal/core.
 func TestSelectProductWithoutTerminal(t *testing.T) {
 	var out, errOut bytes.Buffer
 	ui := newConsole(strings.NewReader("0\n"), &out, &errOut)

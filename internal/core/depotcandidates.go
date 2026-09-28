@@ -10,11 +10,9 @@ type depotCandidate struct {
 	size         int64
 }
 
-// depotCandidates collects a build's base-content depots.
-//
-// It is the single definition of that set. The resolution of a --language
-// request, the install-options table and the plan's content guard all work from
-// it, so a language one of them lists can never be one another rejects.
+// depotCandidates collects a build's base-content depots: the single definition
+// of that set, so a language the install-options table lists can never be one the
+// plan rejects.
 //
 // GOG support metadata depots are not content, DLC depots are not base content,
 // and a depot without a manifest has nothing to expand: all three drop out.

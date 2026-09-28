@@ -13,14 +13,11 @@ import (
 	"github.com/nekrozis/goggo/internal/secretfile"
 )
 
-// goldenCredentials is the exact encoding of goldenTree, captured from the
-// implementation as it stood before the framing moved into a shared package.
-//
-// It is deliberately a captured value rather than one produced by the code under
-// test: the point of the move was to share the framing without changing what is
-// already on disk, and only a fixed byte string can show that. The tree below is
-// fixed — no clock, no derived expiry, no map ordering — so the expected value
-// cannot drift with the environment.
+// goldenCredentials is the exact encoding of goldenTree, a captured byte string
+// rather than one produced by the code under test: only a fixed value can show
+// that the on-disk form did not change. The tree below is fixed — no clock, no
+// derived expiry, no map ordering — so the expectation cannot drift with the
+// environment.
 const goldenCredentials = "474f47474f4155544801000000811c4d06040c4810013a100a05110743560f120042140c" +
 	"551355454345040344061c113b0c0a5653430f441759091b1d4812134b4d040b06480d063a17000d060c" +
 	"154e1751171c5f03440e54034d4b450a55131b17011631151d43561c44445f42551d4601574345150a4b" +

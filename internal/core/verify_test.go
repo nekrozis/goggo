@@ -529,9 +529,7 @@ func TestVerifyHonoursTheMaskAndTheBlacklist(t *testing.T) {
 // must not hide the state of the rest.
 //
 // The injection is a member whose path carries a NUL byte, which every platform
-// rejects: the project's way of making a stat fail without asserting anything
-// about permissions or locks (see the reconcile test for the same rule at the
-// classification level).
+// rejects: a stat failure without asserting anything about permissions or locks.
 func TestVerifyReportsUnobservableFiles(t *testing.T) {
 	f := newVerifyFixture(t)
 	f.setBaseDepot(verifyBadMemberItem())

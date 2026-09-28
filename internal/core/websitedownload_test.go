@@ -103,12 +103,11 @@ func TestDownloadWebsiteBatchAssemblesAndRuns(t *testing.T) {
 	}
 }
 
-// TestDownloadWebsiteTypeIntentFiltersBothFaces is the DEFECT-TYPE1 behaviour
-// guard: a request-carried mask must reach the queue (G1a) and the acquisition
-// (G1b), not just the Parse face. G1b asserts through the owned-games endpoint
-// because that is where the acquisition's mask is observable independently of
-// the queue filter: a mask without DLC bits must not ask the account who owns
-// what.
+// TestDownloadWebsiteTypeIntentFiltersBothFaces locks both faces of a
+// request-carried mask: it must reach the queue and the acquisition, not just the
+// Parse face. The acquisition is asserted through the owned-games endpoint, where
+// its mask is observable independently of the queue filter: a mask without DLC
+// bits must not ask the account who owns what.
 func TestDownloadWebsiteTypeIntentFiltersBothFaces(t *testing.T) {
 	t.Run("G1a queue filtering", func(t *testing.T) {
 		f := oneProductFixture(t, "base.exe", "sound.mp3", "dlc.exe")

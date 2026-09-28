@@ -441,17 +441,12 @@ func TestRunWebsiteResume(t *testing.T) {
 // on disk, so sharing one would couple them.
 func TestRunWebsiteRetryAndCleanupMatrix(t *testing.T) {
 	t.Run("transport failure keeps the partial file", func(t *testing.T) {
-		// A raw TCP server answers with a body shorter than its own
-		// Content-Length and then half-closes for writing: the client reads those
-		// bytes and then fails, which is the PARTIAL_FILE class whose partial file
-		// is kept for a later resume. (httptest's hijacked connections proved
-		// unreliable at producing that read failure here.)
-		//
-		// The request is consumed before the response, and the socket is only
-		// half-closed. A close with the request still unread is answered with RST
-		// by some stacks, and a reset discards a body the client has not read yet,
-		// leaving an empty file for the empty-file rule to remove — the outcome
-		// would then turn on the kernel's timing instead of on the cleanup.
+		// A raw TCP server answers with a body shorter than its own Content-Length
+		// and half-closes for writing: the client reads those bytes and then fails,
+		// which is the class whose partial file is kept. The request is consumed
+		// first and the socket only half-closed, because a close with the request
+		// still unread is answered with RST by some stacks — which would discard the
+		// body and leave an empty file for the empty-file rule to remove.
 		const partialBody = "partial"
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {

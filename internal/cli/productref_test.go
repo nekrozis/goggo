@@ -222,10 +222,8 @@ func TestZeroMatchExitCodes(t *testing.T) {
 
 // TestSelectionFailureExitCodes locks the other half of the galaxy contract: a
 // reference that matches several products and cannot be chosen is a FAILED
-// command, so it exits 1. It is deliberately paired with TestZeroMatchExitCodes,
-// which asserts exit 0 for a reference that matches nothing — the two together
-// are what keep "nothing to show" and "could not choose" from collapsing back
-// into one answer.
+// command, so it exits 1 — paired with TestZeroMatchExitCodes, which asserts exit
+// 0 for a reference that matches nothing.
 func TestSelectionFailureExitCodes(t *testing.T) {
 	// The fixture holds two products whose slugs share the word "Game", so an
 	// expression matching both cannot be resolved without a terminal.

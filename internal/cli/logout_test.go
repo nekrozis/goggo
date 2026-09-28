@@ -17,9 +17,8 @@ import (
 // share the configuration directory, while the cache (with its xml
 // subdirectory) lives under a separate root.
 //
-// Both roots are distinct on purpose — with a single root the cache and the
-// configuration directory would be the same directory and the "cache survives
-// --logout" assertion below would be vacuous.
+// The roots are distinct: sharing one would make the cache and the
+// configuration directory the same directory and the assertion below vacuous.
 func newLogoutConfig(t *testing.T) config.Config {
 	t.Helper()
 	root := t.TempDir()

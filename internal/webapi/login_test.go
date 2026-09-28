@@ -834,9 +834,8 @@ func TestContinueLoginRejectsWrongCodeLengthLocally(t *testing.T) {
 // TestLoginCaptchaMarkerYieldsBrowserChallenge locks the branch order: the
 // reCAPTCHA marker is read from the fetched login page BEFORE the credentials
 // are posted, so a captcha-bearing page produces a browser challenge instead of
-// a password failure. Paired with TestLoginNoCodeAndNoCaptchaFails, the two
-// prove that the browser branch is marker-driven, not "wrong password ⇒ browser
-// login".
+// a password failure. Paired with TestLoginNoCodeAndNoCaptchaFails, the two show
+// the browser branch is marker-driven, not "wrong password ⇒ browser login".
 func TestLoginCaptchaMarkerYieldsBrowserChallenge(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

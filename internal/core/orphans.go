@@ -122,9 +122,8 @@ func (d *Downloader) CheckOrphanedFiles(ctx context.Context, res PlanResult) err
 //
 // The filter files are consulted with the same absolute-path matching the plan
 // builder uses, ignorelist first; an excluded path is neither reported nor
-// deleted. It takes no context on purpose: an install's orphan walk has never
-// been interruptible, and cancellation stops the deletion loop instead, which is
-// where an interruption has something to preserve.
+// deleted. It takes no context: the walk is not interruptible, and cancellation
+// stops the deletion loop instead, which is what has something to preserve.
 func (d *Downloader) walkOrphans(root string, expected []InstalledFile) ([]string, []Notice, error) {
 	installed := make(map[string]bool, len(expected))
 	for _, file := range expected {

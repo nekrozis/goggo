@@ -63,8 +63,9 @@ func TestParseFlagsOverrideDefaults(t *testing.T) {
 	}
 }
 
-// TestParsePlatformAndLanguage locks the install-side platform selection and its
-// validation (the listing side lives on list games, see parse_test.go).
+// TestParsePlatformAndLanguage locks the install-side platform and architecture
+// selection and their validation (the listing side lives on list games, see
+// parse_test.go).
 func TestParsePlatformAndLanguage(t *testing.T) {
 	inv := parseOpts(t, "install", "123", "--platform", "linux", "--language", "fr", "--arch", "x86")
 	if inv.cfg.DownloadConfig.GalaxyPlatform != config.PlatformLinux {
@@ -73,10 +74,18 @@ func TestParsePlatformAndLanguage(t *testing.T) {
 	if inv.cfg.DownloadConfig.GalaxyArch != config.ArchX86 {
 		t.Errorf("arch = %#x, want x86", inv.cfg.DownloadConfig.GalaxyArch)
 	}
-	// An arch with no match falls back to 64-bit rather than failing: the
-	// Galaxy layer has no "unknown arch" state to report.
-	if got := parseOpts(t, "install", "123", "--arch", "nonsense").cfg.DownloadConfig.GalaxyArch; got != config.ArchX64 {
-		t.Errorf("unmatched arch = %#x, want the x64 fallback", got)
+	// An arch the table does not carry is refused, like --platform. "all"
+	// resolves to both bits and an integer literal to itself, so neither may
+	// reach the downloader as a silent x64.
+	for _, bad := range []string{"nonsense", "all", "3", "x128"} {
+		_, err := parseArgs([]string{"install", "123", "--arch", bad}, testDefaults())
+		if err == nil {
+			t.Errorf("--arch %s must be refused", bad)
+			continue
+		}
+		if !isUsageError(err) {
+			t.Errorf("--arch %s: refusal must be a usage error, got %v", bad, err)
+		}
 	}
 	// A language with no match leaves 0, which the Galaxy layer reads as
 	// English.

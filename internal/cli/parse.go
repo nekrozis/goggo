@@ -274,9 +274,12 @@ var optionTable = append([]optionSpec{
 		id: optArch, long: "arch", value: valueRequired, arg: "<x64|x86>",
 		summary: "Architecture of the build that is installed (default: x64)",
 		parse: func(inv *invocation, v string) error {
+			// Exactly one bit. "all" resolves to both and an integer literal
+			// to itself, so the test is on the mask, not on zero: a zero test
+			// would let both through as a silent x64.
 			arch := util.OptionValue(v, config.GalaxyArchs, false)
-			if arch == 0 || arch == util.OptionValue("all", config.GalaxyArchs, false) {
-				arch = config.ArchX64
+			if arch != config.ArchX86 && arch != config.ArchX64 {
+				return usagef("invalid value for --arch: %q", v)
 			}
 			inv.cfg.DownloadConfig.GalaxyArch = arch
 			return nil

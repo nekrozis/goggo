@@ -25,6 +25,11 @@ import (
 // matches no valid primary content depots for the requested platform, language, or arch.
 var ErrNoMatchingContent = errors.New("no compatible content found")
 
+// ErrNotLicensed is returned when the account has no licence for a product the
+// plan needs, which today means the base product of an install: its depots
+// cannot be fetched, so the plan cannot be built.
+var ErrNotLicensed = errors.New("not licensed")
+
 // msgLevelVerbose is the message level that turns on the verbose gates of the
 // plan builder.
 const msgLevelVerbose = 1
@@ -200,10 +205,16 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 	installPath := filepath.Join(d.cfg.Directories.Directory, installDirectory)
 	res.InstallPath = installPath
 
-	// The depot items.
-	planItems, err := d.resolveDepotItems(ctx, manifest, req)
+	// The depot items. Unowned DLC products drop out inside, before anything
+	// is queued, so the transfer never meets a licence failure; one summary
+	// line reports what was dropped.
+	planItems, droppedProducts, err := d.resolveDepotItems(ctx, manifest, req)
 	if err != nil {
 		return res, err
+	}
+	if len(droppedProducts) > 0 {
+		res.addMessage(fmt.Sprintf("Skipping %d DLC products not owned by this account (product ids: %s)",
+			len(droppedProducts), strings.Join(droppedProducts, ", ")))
 	}
 
 	// The blacklist filter: a planned file whose install path matches drops out
@@ -296,7 +307,10 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 					if err != nil {
 						return nil, err
 					}
-					oldItems, err := d.resolveDepotItems(ctx, oldManifest, req)
+					// The old build resolves through the same entitlement
+					// boundary, so an unowned DLC depot never counts as a file
+					// the installation had and never becomes a deletion.
+					oldItems, _, err := d.resolveDepotItems(ctx, oldManifest, req)
 					if err != nil {
 						return nil, err
 					}
@@ -542,16 +556,74 @@ func manifestArray(manifest map[string]any, key string) ([]any, error) {
 	return v, nil
 }
 
-// resolveDepotItems expands every depot, drops DLC entries when the include
-// mask does not ask for them, adds the selected dependencies, stamps product
-// ids, renames small-files containers and deduplicates by path.
-func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]any, req InstallRequest) ([]model.GalaxyDepotItem, error) {
-	baseProductID, err := documentString(manifest, "baseProductId")
+// resolveDepotItems expands every depot, applies the entitlement boundary,
+// stamps product ids, renames small-files containers and deduplicates by path.
+// It returns the items and the DLC product ids dropped for lack of
+// entitlement, for the caller to report in one line.
+func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]any, req InstallRequest) ([]model.GalaxyDepotItem, []string, error) {
+	items, err := d.expandDepotItems(ctx, manifest, req)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	baseProductID, err := baseProductIDOf(manifest, req)
+	if err != nil {
+		return nil, nil, err
+	}
+	// The entitlement filter runs before the dedup below: an unowned DLC that
+	// re-declares a base file must not be the entry the dedup keeps, or the
+	// base file would vanish along with the product that lost it.
+	items, dropped, err := d.filterEntitled(ctx, items, baseProductID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Stamp product ids and rename small-files containers.
+	for i := range items {
+		if items[i].ProductID == "" {
+			items[i].ProductID = baseProductID
+		}
+		if items[i].IsSmallFilesContainer {
+			items[i].Path += "_" + items[i].ProductID
+		}
+	}
+
+	// Deduplicate by path: a same-path duplicate with the same md5 is dropped,
+	// and one with a different md5 replaces the base game's entry when it comes
+	// from a DLC. The output is ordered by path.
+	byPath := map[string]model.GalaxyDepotItem{}
+	for _, it := range items {
+		prev, ok := byPath[it.Path]
+		if !ok {
+			byPath[it.Path] = it
+			continue
+		}
+		if prev.MD5 == it.MD5 {
+			continue
+		}
+		if it.ProductID != baseProductID {
+			byPath[it.Path] = it
+		}
+	}
+	paths := make([]string, 0, len(byPath))
+	for path := range byPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	deduped := make([]model.GalaxyDepotItem, 0, len(paths))
+	for _, path := range paths {
+		deduped = append(deduped, byPath[path])
+	}
+	return deduped, dropped, nil
+}
+
+// expandDepotItems expands every depot, drops DLC entries when the include mask
+// does not ask for them and adds the selected dependencies: the half of
+// resolveDepotItems that runs before the entitlement boundary.
+func (d *Downloader) expandDepotItems(ctx context.Context, manifest map[string]any, req InstallRequest) ([]model.GalaxyDepotItem, error) {
+	baseProductID, err := baseProductIDOf(manifest, req)
 	if err != nil {
 		return nil, err
-	}
-	if baseProductID == "" {
-		baseProductID = req.ProductID
 	}
 
 	depots, err := manifestArray(manifest, "depots")
@@ -707,43 +779,79 @@ func (d *Downloader) resolveDepotItems(ctx context.Context, manifest map[string]
 			ErrNoMatchingContent, req.Platform, req.Language, archName(req.Arch), req.ProductID)
 	}
 
-	// Stamp product ids and rename small-files containers.
-	for i := range items {
-		if items[i].ProductID == "" {
-			items[i].ProductID = baseProductID
+	return items, nil
+}
+
+// baseProductIDOf resolves the manifest's base product id, falling back to the
+// requested product when the manifest names none.
+func baseProductIDOf(manifest map[string]any, req InstallRequest) (string, error) {
+	id, err := documentString(manifest, "baseProductId")
+	if err != nil {
+		return "", err
+	}
+	if id == "" {
+		id = req.ProductID
+	}
+	return id, nil
+}
+
+// filterEntitled drops the items of products this account does not own, so the
+// plan never carries content that can never be fetched.
+//
+// The manifest lists the depots of the whole product, including DLC products
+// the account has no licence for; their secure link answers 403. That answer is
+// the boundary this enforces. The base product is probed together with the DLC
+// products: a base 403 is fatal — the account cannot install what it does not
+// own — while a DLC 403 drops that product's items and is reported by the
+// caller in one line.
+//
+// Dependency items are exempt: they carry the dependency product's id but are
+// fetched through the dependency endpoint, which is not an entitlement call.
+//
+// It returns the kept items and the product ids it dropped, in first-seen
+// order, which is stable because the items arrive path-ordered.
+func (d *Downloader) filterEntitled(ctx context.Context, items []model.GalaxyDepotItem, baseProductID string) ([]model.GalaxyDepotItem, []string, error) {
+	seen := make(map[string]bool)
+	var products []string
+	for _, it := range items {
+		if it.IsDependency || it.ProductID == "" || seen[it.ProductID] {
+			continue
 		}
-		if items[i].IsSmallFilesContainer {
-			items[i].Path += "_" + items[i].ProductID
-		}
+		seen[it.ProductID] = true
+		products = append(products, it.ProductID)
+	}
+	if len(products) == 0 {
+		return items, nil, nil
 	}
 
-	// Deduplicate by path: a same-path duplicate with the same md5 is dropped,
-	// and one with a different md5 replaces the base game's entry when it comes
-	// from a DLC. The output is ordered by path.
-	byPath := map[string]model.GalaxyDepotItem{}
+	unowned := make(map[string]bool)
+	var dropped []string
+	for _, productID := range products {
+		res, err := d.links.product(ctx, productID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if res.owned {
+			continue
+		}
+		if productID == baseProductID {
+			return nil, nil, fmt.Errorf("%w for product %s", ErrNotLicensed, productID)
+		}
+		unowned[productID] = true
+		dropped = append(dropped, productID)
+	}
+	if len(unowned) == 0 {
+		return items, nil, nil
+	}
+
+	kept := make([]model.GalaxyDepotItem, 0, len(items))
 	for _, it := range items {
-		prev, ok := byPath[it.Path]
-		if !ok {
-			byPath[it.Path] = it
+		if !it.IsDependency && unowned[it.ProductID] {
 			continue
 		}
-		if prev.MD5 == it.MD5 {
-			continue
-		}
-		if it.ProductID != baseProductID {
-			byPath[it.Path] = it
-		}
+		kept = append(kept, it)
 	}
-	paths := make([]string, 0, len(byPath))
-	for path := range byPath {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	deduped := make([]model.GalaxyDepotItem, 0, len(paths))
-	for _, path := range paths {
-		deduped = append(deduped, byPath[path])
-	}
-	return deduped, nil
+	return kept, dropped, nil
 }
 
 // archCode maps a Galaxy architecture flag onto the code the depot filter

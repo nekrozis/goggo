@@ -185,7 +185,9 @@ func newOfflineDownloaderWith(t *testing.T, srv *httptest.Server, cfg config.Con
 	if err != nil {
 		t.Fatalf("galaxy.New: %v", err)
 	}
-	return &Downloader{cfg: cfg, ui: ui, http: hx, web: web, galaxy: gx, progress: deps.Progress, token: store}
+	d := &Downloader{cfg: cfg, ui: ui, http: hx, web: web, galaxy: gx, progress: deps.Progress, token: store}
+	d.links = d.newLinkResolver()
+	return d
 }
 
 // TestTransportOwnedByCallerPersistsCookies locks the ownership rule: the

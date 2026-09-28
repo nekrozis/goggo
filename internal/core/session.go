@@ -88,6 +88,7 @@ func OpenWith(ctx context.Context, cfg config.Config, ui Console, req SessionReq
 	}
 
 	d := &Downloader{cfg: cfg, ui: ui, http: hx, web: web, galaxy: gx, progress: deps.Progress, token: store}
+	d.links = d.newLinkResolver()
 	if err := hx.LoadCookies(); err != nil {
 		return nil, err
 	}

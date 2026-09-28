@@ -38,6 +38,12 @@ type Downloader struct {
 
 	token *auth.Store
 
+	// links is the run's Galaxy link resolution: one cache of secure_link
+	// answers per product, shared by the plan's entitlement probe, the
+	// old-build diff and the transfer's URL provider. It is built from the
+	// clients above, so it lives with them.
+	links *linkResolver
+
 	// apiSessionDiag records why the Galaxy API session could not be renewed:
 	// the one refresh OpenWith attempts, when it fails. It is an observation
 	// only — the store, the token and the run's outcome are untouched by it.

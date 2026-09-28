@@ -16,7 +16,6 @@ import (
 // fakeSink records everything a renderer hands over, so the view-model tests
 // can assert on the derived state instead of scraping formatted strings.
 type fakeSink struct {
-	frames   [][]string
 	infos    []string
 	diags    []string
 	starts   []string

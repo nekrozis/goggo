@@ -166,16 +166,11 @@ func (d *Downloader) transferOptions() transfer.Options {
 	}
 }
 
-// chunkURLProvider builds the transfer's URL seam: the Galaxy resolution with
-// this run's CDN priority, refreshing the token through this downloader's
-// credentials.
+// chunkURLProvider builds the transfer's URL seam: this run's link resolver,
+// which the plan's entitlement probe has already warmed for the products the
+// planned content belongs to.
 func (d *Downloader) chunkURLProvider() *chunkURLProvider {
-	return &chunkURLProvider{
-		galaxy:   d.galaxy,
-		priority: d.cfg.DownloadConfig.GalaxyCDNPriority,
-		refresh:  d.refreshAndSave,
-		expired:  func() bool { return d.token.Expired() },
-	}
+	return &chunkURLProvider{links: d.links}
 }
 
 // observerFunc adapts a function into transfer.Observer.

@@ -165,6 +165,16 @@ func TestInstallEndToEnd(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
+	// The plan's entitlement probe and the transfer's URL resolution share one
+	// run-scoped resolver, so each product's secure link is requested once for
+	// the whole install rather than once per file.
+	for _, productID := range []string{planProductID, planDLCProductID} {
+		path := "/products/" + productID + "/secure_link"
+		if got := f.seen(path); got != 1 {
+			t.Errorf("%s requested %d times, want 1 across the plan and the transfer", path, got)
+		}
+	}
+
 	// The assembled files carry the decompressed content of the chunks the
 	// plan selected — the DLC's bytes over the base game's for data.bin — and
 	// the small-files container unpacks its member and is gone.

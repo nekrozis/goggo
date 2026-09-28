@@ -91,6 +91,12 @@ func newInstallOptionsFixture(t *testing.T) core.Dependencies {
 			fmt.Fprint(w, `{"owned":["1207658991"]}`)
 		case r.URL.Path == "/www/account/getFilteredProducts":
 			fmt.Fprint(w, `{"page":1,"totalPages":1,"products":[{"id":"1207658991","slug":"worms_united"}]}`)
+		case strings.Contains(r.URL.Path, "/secure_link"):
+			// The plan's entitlement probe reads this: the account owns the
+			// product, and the document carries the CDN template the transfer
+			// would build chunk urls from.
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"urls":[{"endpoint_name":"cdn1","url_format":"https://cdn1.example.com{path}","parameters":{"path":""}}]}`)
 		default:
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{}`)

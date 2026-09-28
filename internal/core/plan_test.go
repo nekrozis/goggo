@@ -46,7 +46,14 @@ type planFixture struct {
 	requests []string
 	bodies   map[string]string
 	holds    map[string]heldBody
+	status   map[string]int
 }
+
+// defaultSecureLink is what the fixture answers for a secure_link path with no
+// explicit body: the account owns every product. That is the state a plan test
+// that does not care about entitlement expects, and a test for the unowned case
+// overrides it with [planFixture.setStatus].
+const defaultSecureLink = `{"urls":[{"endpoint_name":"cdnMain","url_format":"https://cdn.gog.com/chunks{path}","parameters":{"path":""}}]}`
 
 // heldBody is a response the fixture serves in two halves, waiting for the
 // test between them. It gives a test a deterministic window in which a
@@ -58,15 +65,20 @@ type heldBody struct {
 
 func newPlanFixture(t *testing.T) *planFixture {
 	t.Helper()
-	f := &planFixture{bodies: map[string]string{}, holds: map[string]heldBody{}}
+	f := &planFixture{bodies: map[string]string{}, holds: map[string]heldBody{}, status: map[string]int{}}
 
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.requests = append(f.requests, r.URL.Path)
+		code, hasStatus := f.status[r.URL.Path]
 		held, isHeld := f.holds[r.URL.Path]
 		body, ok := f.bodies[r.URL.Path]
 		f.mu.Unlock()
 
+		if hasStatus {
+			w.WriteHeader(code)
+			return
+		}
 		if isHeld {
 			half := len(held.body) / 2
 			fmt.Fprint(w, held.body[:half])
@@ -78,6 +90,13 @@ func newPlanFixture(t *testing.T) *planFixture {
 			return
 		}
 		if !ok {
+			// A product's secure link with no explicit body is "owned": the
+			// fixtures that do not exercise entitlement get a successful
+			// answer instead of a 404 the resolver would treat as transient.
+			if strings.HasSuffix(r.URL.Path, "/secure_link") {
+				fmt.Fprint(w, defaultSecureLink)
+				return
+			}
 			http.NotFound(w, r)
 			return
 		}
@@ -85,6 +104,14 @@ func newPlanFixture(t *testing.T) *planFixture {
 	}))
 	t.Cleanup(f.Close)
 	return f
+}
+
+// setStatus makes the fixture answer path with an HTTP status instead of a
+// body; it is how a test makes a secure link fail with 403.
+func (f *planFixture) setStatus(path string, code int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status[path] = code
 }
 
 // hold makes the fixture serve path in two halves, releasing the second one

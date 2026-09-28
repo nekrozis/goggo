@@ -124,7 +124,6 @@ type renderer struct {
 	interval       time.Duration
 
 	mu       sync.Mutex
-	unit     uint32
 	finalize bool // Stop ran; further Stops are no-ops
 	started  bool // Start ran; Stop waits for the loop only when it did
 }

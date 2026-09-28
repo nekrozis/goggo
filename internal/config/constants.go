@@ -50,7 +50,7 @@ const ProgramName = "goggo"
 // commit a release binary was built from and is empty in development builds.
 // The User-Agent carries Version only, never BuildCommit.
 var (
-	Version     = "0.1.0"
+	Version     = "0.2.0"
 	BuildCommit = ""
 
 	// VersionString is what the CLI prints as this program's own version.

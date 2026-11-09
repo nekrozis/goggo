@@ -2,6 +2,7 @@ package core
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -315,8 +316,16 @@ func TestResolveInstallSubdirErrorsAreNotSilent(t *testing.T) {
 // TestResolveInsideRoot locks the containment boundary: a name that stays under
 // the root is joined as usual, and one that walks out of it is refused instead
 // of being cleaned into a path outside the installation.
+//
+// The absolute case is built per platform on purpose: "/etc/passwd" is not an
+// absolute path on Windows, where Join would place it under the root — safely,
+// but for the opposite reason than the test names.
 func TestResolveInsideRoot(t *testing.T) {
 	root := t.TempDir()
+	absolute := "/etc/passwd"
+	if runtime.GOOS == "windows" {
+		absolute = `C:\Windows\win.ini`
+	}
 
 	cases := []struct {
 		name    string
@@ -330,7 +339,7 @@ func TestResolveInsideRoot(t *testing.T) {
 		{name: "parent traversal", path: "../outside", wantErr: true},
 		{name: "traversal in the middle", path: "game/../../outside", wantErr: true},
 		{name: "traversal at the end", path: "game/../../../etc/passwd", wantErr: true},
-		{name: "absolute path", path: "/etc/passwd", wantErr: true},
+		{name: "absolute path", path: absolute, wantErr: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

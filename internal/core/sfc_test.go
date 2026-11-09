@@ -486,3 +486,44 @@ func consoleText(t *testing.T, d *Downloader) string {
 	}
 	return c.out.String()
 }
+
+// TestExtractRefusesAnEscapingMember locks the extraction's own containment
+// boundary: a member naming "../" is refused before the container is opened, so
+// the write never happens and the container survives untouched.
+func TestExtractRefusesAnEscapingMember(t *testing.T) {
+	f := newSFCFixture(t)
+	f.res.Plan.SFC[0].Items = []model.GalaxyDepotItem{
+		{Path: "game/one.txt", ProductID: "42", SFCOffset: 0, SFCSize: 8},
+		{Path: "../outside.txt", ProductID: "42", SFCOffset: 16, SFCSize: 8},
+	}
+	d := newOfflineDownloader(t, noopServer(t), planTestConfig(t), newFakeConsole())
+
+	_, err := d.ExtractSmallFilesContainers(context.Background(), f.res)
+	if err == nil {
+		t.Fatal("want an error for a member outside the install root")
+	}
+	if !strings.Contains(err.Error(), "outside.txt") {
+		t.Errorf("error = %v, want it to name the offending member", err)
+	}
+	assertFileAbsent(t, filepath.Join(filepath.Dir(f.root), "outside.txt"))
+	assertFileContent(t, f.container, string(f.body))
+}
+
+// TestExtractRefusesAnEscapingContainer locks the same boundary for the
+// container itself, whose path becomes an os.Remove target.
+func TestExtractRefusesAnEscapingContainer(t *testing.T) {
+	f := newSFCFixture(t)
+	outside := filepath.Join(filepath.Dir(f.root), "outside_container")
+	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(outside) })
+	f.res.Plan.SFC[0].Container.Path = "../outside_container"
+
+	d := newOfflineDownloader(t, noopServer(t), planTestConfig(t), newFakeConsole())
+	_, err := d.ExtractSmallFilesContainers(context.Background(), f.res)
+	if err == nil {
+		t.Fatal("want an error for a container outside the install root")
+	}
+	assertFileContent(t, outside, "x")
+}

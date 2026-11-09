@@ -201,7 +201,14 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 			return res, err
 		}
 	}
-	installPath := filepath.Join(d.cfg.Directories.Directory, installDirectory)
+	// The install directory is expanded from manifest and product text, so it
+	// is checked here rather than trusted: a name carrying ".." would otherwise
+	// move the whole installation, and every destination derived from it, out
+	// of the configured download directory.
+	installPath, err := resolveInsideRoot(d.cfg.Directories.Directory, installDirectory)
+	if err != nil {
+		return res, err
+	}
 	res.InstallPath = installPath
 
 	// The language the plan selects by, resolved against this build's own depot
@@ -235,6 +242,15 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 	if len(droppedProducts) > 0 {
 		res.addMessage(fmt.Sprintf("Skipping %d DLC products not owned by this account (product ids: %s)",
 			len(droppedProducts), strings.Join(droppedProducts, ", ")))
+	}
+
+	// Depot entries name their own destination, and the destination is derived
+	// by joining that name under the install root — here, in the blacklist
+	// filter, in the SFC decision and in the transfer tasks. A path that escapes
+	// the root is refused before any of those run, so a crafted manifest can
+	// neither write outside the installation nor make the plan probe for one.
+	if err := checkInsideRoot(installPath, planItems); err != nil {
+		return res, err
 	}
 
 	// The blacklist filter: a planned file whose install path matches drops out
@@ -337,6 +353,10 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 					if err != nil {
 						return nil, err
 					}
+					// The old build's manifest is a second remote document and
+					// its paths become deletions: each one is derived through
+					// the containment boundary below rather than inheriting the
+					// current plan's check.
 					current := map[string]bool{}
 					for _, it := range planItems {
 						current[it.Path] = true
@@ -347,7 +367,10 @@ func (d *Downloader) buildPlan(ctx context.Context, req InstallRequest, mode pla
 						}
 						// The message is emitted before existence is tested,
 						// so a path that is not on disk still gets its line.
-						delPath := filepath.Join(installPath, filepath.FromSlash(old.Path))
+						delPath, err := resolveInsideRoot(installPath, old.Path)
+						if err != nil {
+							return nil, err
+						}
 						deletes = append(deletes, delPath)
 						res.addMessage("Deleting " + delPath)
 					}

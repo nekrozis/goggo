@@ -1,8 +1,11 @@
 package core
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nekrozis/goggo/internal/model"
 )
 
 // installManifest is a manifest shaped like the one a build returns, with a
@@ -306,5 +309,65 @@ func TestResolveInstallSubdirWithoutProduct(t *testing.T) {
 func TestResolveInstallSubdirErrorsAreNotSilent(t *testing.T) {
 	if _, err := ResolveInstallSubdir("%install_dir%", map[string]any{"installDirectory": []any{}}, "", ""); err == nil {
 		t.Fatal("want an error for a structured installDirectory")
+	}
+}
+
+// TestResolveInsideRoot locks the containment boundary: a name that stays under
+// the root is joined as usual, and one that walks out of it is refused instead
+// of being cleaned into a path outside the installation.
+func TestResolveInsideRoot(t *testing.T) {
+	root := t.TempDir()
+
+	cases := []struct {
+		name    string
+		path    string
+		want    string
+		wantErr bool
+	}{
+		{name: "plain name", path: "W3 GOTY", want: filepath.Join(root, "W3 GOTY")},
+		{name: "nested name", path: "game/sub/file.bin", want: filepath.Join(root, "game", "sub", "file.bin")},
+		{name: "empty name is the root", path: "", want: root},
+		{name: "parent traversal", path: "../outside", wantErr: true},
+		{name: "traversal in the middle", path: "game/../../outside", wantErr: true},
+		{name: "traversal at the end", path: "game/../../../etc/passwd", wantErr: true},
+		{name: "absolute path", path: "/etc/passwd", wantErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := resolveInsideRoot(root, c.path)
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("resolveInsideRoot(%q) = %q, want a refusal", c.path, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveInsideRoot(%q): %v", c.path, err)
+			}
+			if got != c.want {
+				t.Errorf("resolveInsideRoot(%q) = %q, want %q", c.path, got, c.want)
+			}
+		})
+	}
+}
+
+// TestCheckInsideRootNamesTheOffendingEntry locks that the expansion-wide check
+// refuses as soon as one entry escapes: the error carries the path, so a user
+// sees which depot entry the manifest could not place.
+func TestCheckInsideRootNamesTheOffendingEntry(t *testing.T) {
+	root := t.TempDir()
+	items := []model.GalaxyDepotItem{
+		{Path: "game/ok.bin"},
+		{Path: "../../escape.bin"},
+	}
+	err := checkInsideRoot(root, items)
+	if err == nil {
+		t.Fatal("want an error for an escaping depot path")
+	}
+	if !strings.Contains(err.Error(), "../../escape.bin") {
+		t.Errorf("error = %v, want it to name the offending path", err)
+	}
+	if err := checkInsideRoot(root, items[:1]); err != nil {
+		t.Errorf("checkInsideRoot with only contained entries: %v", err)
 	}
 }

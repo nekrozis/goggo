@@ -327,13 +327,11 @@ func dispatch(inv invocation, stdin io.Reader, stdout, stderr io.Writer, deps co
 		}
 		res, err := d.ShowBuilds(ctx, inv.target.Product, build, productRefMode(inv))
 		if inv.json {
-			// Under JSON mode, human notices go to stderr to guarantee pure stdout JSON.
+			// Under JSON mode, human notices go to stderr to guarantee pure
+			// stdout JSON: both streams the notice could have used collapse
+			// into this one, so its Err flag changes nothing here.
 			if res.Notice.Text != "" {
-				if res.Notice.Err {
-					fmt.Fprintln(stderr, res.Notice.Text)
-				} else {
-					fmt.Fprintln(stderr, res.Notice.Text)
-				}
+				fmt.Fprintln(stderr, res.Notice.Text)
 			}
 		} else {
 			// The Linux support messages are rendered even when the run then fails:

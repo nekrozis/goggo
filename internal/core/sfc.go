@@ -33,7 +33,15 @@ func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanRe
 		if ctx.Err() != nil {
 			return pending, ctx.Err()
 		}
-		container := filepath.Join(res.InstallPath, filepath.FromSlash(group.Container.Path))
+		// The extraction deletes each container and writes every member, and
+		// both names come from a remote manifest. The plan refuses an escaping
+		// path when it builds the groups; deriving them through the same
+		// boundary here keeps that guarantee on the code that actually touches
+		// the filesystem, whatever plan produced it.
+		container, err := resolveInsideRoot(res.InstallPath, group.Container.Path)
+		if err != nil {
+			return pending, err
+		}
 		f, err := os.Open(container)
 		if errors.Is(err, fs.ErrNotExist) {
 			// The container is unavailable; its members are not: they carry
@@ -41,8 +49,12 @@ func (d *Downloader) ExtractSmallFilesContainers(ctx context.Context, res PlanRe
 			// member already takes. Membership and destinations come from
 			// the extraction's own grouping, so the product filter cannot
 			// drift. Nothing is deleted — there is nothing to delete.
+			regions, err := sfcRegions(group, res.InstallPath)
+			if err != nil {
+				return pending, err
+			}
 			n := 0
-			for _, region := range sfcRegions(group, res.InstallPath) {
+			for _, region := range regions {
 				for _, member := range region.members {
 					pending = append(pending, model.FileTask{
 						Item: member.item, Destination: member.destination})
@@ -103,7 +115,11 @@ func (d *Downloader) extractContainer(ctx context.Context, src io.Reader, group 
 		extracted int
 		pending   []model.FileTask
 	)
-	for _, region := range sfcRegions(group, installPath) {
+	regions, err := sfcRegions(group, installPath)
+	if err != nil {
+		return extracted, pending, err
+	}
+	for _, region := range regions {
 		if ctx.Err() != nil {
 			return extracted, pending, ctx.Err()
 		}
@@ -169,17 +185,23 @@ func (r sfcRegion) declaresHash() bool {
 
 // sfcRegions groups a group's members by the range they claim, in ascending
 // offset order. Members of another product do not live in this container and are
-// left out.
-func sfcRegions(group model.SFCGroup, installPath string) []sfcRegion {
+// left out. Every member's destination is derived through resolveInsideRoot, so
+// a member naming a path outside installPath is refused here rather than
+// written by the extraction.
+func sfcRegions(group model.SFCGroup, installPath string) ([]sfcRegion, error) {
 	byRange := map[[2]uint64][]sfcMember{}
 	for _, item := range group.Items {
 		if item.ProductID != group.Container.ProductID {
 			continue
 		}
+		destination, err := resolveInsideRoot(installPath, item.Path)
+		if err != nil {
+			return nil, err
+		}
 		key := [2]uint64{item.SFCOffset, item.SFCSize}
 		byRange[key] = append(byRange[key], sfcMember{
 			item:        item,
-			destination: filepath.Join(installPath, filepath.FromSlash(item.Path)),
+			destination: destination,
 		})
 	}
 
@@ -193,7 +215,7 @@ func sfcRegions(group model.SFCGroup, installPath string) []sfcRegion {
 		}
 		return regions[i].size < regions[j].size
 	})
-	return regions
+	return regions, nil
 }
 
 // containerStream serves regions of one container in ascending offset order from

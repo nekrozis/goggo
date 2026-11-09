@@ -1220,3 +1220,108 @@ func TestZeroMatchGuard(t *testing.T) {
 		}
 	})
 }
+
+// planBodiesWithManifest serves one build whose depot manifest is the given
+// document: the smallest fixture a containment test needs.
+func planBodiesWithManifest(f *planFixture, depot string) {
+	v2New := galaxy.HashToGalaxyPath(planBuildHashNew)
+	f.set("/products/"+planProductID+"/os/windows/builds",
+		`{"items":[{"build_id":"b-new","version_name":"1.0.2","date_published":"2024-03-02",`+
+			`"generation":2,"link":"https://cdn.gog.com/content-system/v2/meta/`+v2New+`"}]}`)
+	f.set("/content-system/v2/meta/"+v2New,
+		`{"baseProductId":"`+planProductID+`","installDirectory":"W3 GOTY","version":2,`+
+			`"products":[{"name":"The Witcher 3: Wild Hunt"}],`+
+			`"depots":[{"productId":"`+planProductID+`","languages":["en-US"],"osBitness":["64"],`+
+			`"manifest":"`+planDepotHashLang+`"}]}`)
+	f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(planDepotHashLang), depot)
+}
+
+// TestBuildPlanRefusesADepotPathOutsideTheInstallRoot is the traversal boundary
+// for depot entries: a manifest naming "../" is refused while the plan is built,
+// so no task, no skip record and no deletion is ever derived from it. filepath.Join
+// would have cleaned the name into a path under the download root instead.
+func TestBuildPlanRefusesADepotPathOutsideTheInstallRoot(t *testing.T) {
+	f := newPlanFixture(t)
+	planBodiesWithManifest(f, `{"depot":{"items":[`+
+		`{"path":"game/ok.bin","md5":"ok-md5","chunks":[`+planChunk("c1c", "c1u")+`]},`+
+		`{"path":"../escaped.bin","md5":"bad-md5","chunks":[`+planChunk("c2c", "c2u")+`]}]}}`)
+	cfg := planTestConfig(t)
+	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+
+	_, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
+	if err == nil {
+		t.Fatal("want an error for a depot path that escapes the install root")
+	}
+	if !strings.Contains(err.Error(), "escaped.bin") {
+		t.Errorf("error = %v, want it to name the offending path", err)
+	}
+	// Refused before anything was created: the install root does not exist yet.
+	assertFileAbsent(t, filepath.Join(cfg.Directories.Directory, "W3 GOTY"))
+}
+
+// TestBuildPlanRefusesAnInstallDirOutsideTheDownloadRoot is the same boundary
+// for the install directory itself, which comes from the build manifest. A
+// template that yields ".." must not relocate the installation.
+func TestBuildPlanRefusesAnInstallDirOutsideTheDownloadRoot(t *testing.T) {
+	f := newPlanFixture(t)
+	planBodiesWithManifest(f, `{"depot":{"items":[`+
+		`{"path":"game/ok.bin","md5":"ok-md5","chunks":[`+planChunk("c1c", "c1u")+`]}]}}`)
+	cfg := planTestConfig(t)
+	// A build whose installDirectory walks out of the download directory.
+	f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(planBuildHashNew),
+		`{"baseProductId":"`+planProductID+`","installDirectory":"../../outside","version":2,`+
+			`"products":[{"name":"The Witcher 3: Wild Hunt"}],`+
+			`"depots":[{"productId":"`+planProductID+`","languages":["en-US"],"osBitness":["64"],`+
+			`"manifest":"`+planDepotHashLang+`"}]}`)
+	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+
+	_, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
+	if err == nil {
+		t.Fatal("want an error for an install directory that escapes the download root")
+	}
+	if !strings.Contains(err.Error(), "../../outside") {
+		t.Errorf("error = %v, want it to name the offending directory", err)
+	}
+}
+
+// TestBuildPlanRefusesAnOldBuildPathOutsideTheInstallRoot covers the second
+// manifest an install reads: the previous build's, whose entries become
+// deletions. A crafted old build must not aim a delete outside the installation.
+func TestBuildPlanRefusesAnOldBuildPathOutsideTheInstallRoot(t *testing.T) {
+	f := newPlanFixture(t)
+	planBodiesWithManifest(f, `{"depot":{"items":[`+
+		`{"path":"game/ok.bin","md5":"ok-md5","chunks":[`+planChunk("c1c", "c1u")+`]}]}}`)
+	v2Old := galaxy.HashToGalaxyPath(planBuildHashOld)
+	f.set("/products/"+planProductID+"/os/windows/builds",
+		`{"items":[`+
+			`{"build_id":"b-new","version_name":"1.0.2","date_published":"2024-03-02","generation":2,`+
+			`"link":"https://cdn.gog.com/content-system/v2/meta/`+galaxy.HashToGalaxyPath(planBuildHashNew)+`"},`+
+			`{"build_id":"b-old","version_name":"1.0.1","date_published":"2024-01-05","generation":2,`+
+			`"link":"https://cdn.gog.com/content-system/v2/meta/`+v2Old+`"}]}`)
+	f.set("/content-system/v2/meta/"+v2Old,
+		`{"baseProductId":"`+planProductID+`","installDirectory":"W3 GOTY","version":2,`+
+			`"depots":[{"productId":"`+planProductID+`","languages":["en-US"],"osBitness":["64"],`+
+			`"manifest":"`+planOldDepotHash+`"}]}`)
+	f.set("/content-system/v2/meta/"+galaxy.HashToGalaxyPath(planOldDepotHash),
+		`{"depot":{"items":[`+
+			`{"path":"../../../etc/passwd","md5":"evil-md5","chunks":[`+planChunk("c9c", "c9u")+`]}]}}`)
+
+	cfg := planTestConfig(t)
+	d := newOfflineDownloader(t, f.Server, cfg, newFakeConsole())
+	installPath := filepath.Join(cfg.Directories.Directory, "W3 GOTY")
+	if err := os.MkdirAll(installPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installPath, "goggame-"+planProductID+".info"),
+		[]byte(`{"buildId":"b-old"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := d.BuildPlan(context.Background(), NewInstallRequest(cfg, planProductID, "", ProductRefExact))
+	if err == nil {
+		t.Fatal("want an error for an old-build path that escapes the install root")
+	}
+	if !strings.Contains(err.Error(), "passwd") {
+		t.Errorf("error = %v, want it to name the offending path", err)
+	}
+}

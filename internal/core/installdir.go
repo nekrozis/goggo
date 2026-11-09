@@ -2,8 +2,11 @@ package core
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
+	"strings"
 
+	"github.com/nekrozis/goggo/internal/model"
 	"github.com/nekrozis/goggo/internal/util"
 )
 
@@ -82,6 +85,44 @@ func ResolveInstallSubdir(template string, manifest map[string]any, slug, title 
 	// Not a name the map knows: the lookup finds nothing and the value stays
 	// what the caller passed.
 	return template, nil
+}
+
+// resolveInsideRoot joins a manifest-supplied name under root and refuses a
+// result that lands outside it.
+//
+// Both halves of the join can come from a remote document — the install
+// directory from the build manifest and the depot entries from the manifest it
+// points at — and filepath.Join CLEANS ".." components instead of refusing
+// them. An unchecked name would therefore let a build aim a download, a
+// deletion or the small-files-container cleanup at any path the user can reach,
+// so every destination is derived through this function.
+func resolveInsideRoot(root, name string) (string, error) {
+	// A manifest path is always relative to the installation. An absolute one
+	// or one naming a volume is not what Join does with it on every platform
+	// (Windows keeps the volume inside the result), so it is refused up front
+	// instead of being normalised into something surprising.
+	local := filepath.FromSlash(name)
+	if filepath.IsAbs(local) || filepath.VolumeName(local) != "" {
+		return "", fmt.Errorf("%q is absolute, want a path relative to the installation root %q", name, root)
+	}
+	path := filepath.Join(root, local)
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%q escapes the installation root %q", name, root)
+	}
+	return path, nil
+}
+
+// checkInsideRoot holds the invariant for a whole depot expansion: every entry
+// must name a destination under root. It runs before anything is written,
+// deleted or even probed, so a refused manifest leaves the filesystem untouched.
+func checkInsideRoot(root string, items []model.GalaxyDepotItem) error {
+	for _, it := range items {
+		if _, err := resolveInsideRoot(root, it.Path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // documentString reads one document member as a string: a missing member or a
